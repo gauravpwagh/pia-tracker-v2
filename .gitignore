@@ -26,6 +26,7 @@ backend/bin/
 backend/.kotlin/
 backend/*.log
 backend/hs_err_pid*
+backend/META-INF/
 
 # Frontend (Node / Vite)
 frontend/node_modules/
