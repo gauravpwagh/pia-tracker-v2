@@ -38,8 +38,8 @@ frontend/test-results/
 frontend/src/generated/
 
 # Docker volumes (mounted under data/ in dev)
-data/
-volumes/
+/data/
+/volumes/
 
 # Logs
 *.log
