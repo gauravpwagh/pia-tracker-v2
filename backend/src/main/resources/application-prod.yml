@@ -1,0 +1,32 @@
+# PIA Tracker — production profile overrides.
+# Real auth required, no demo seed, audit integrity check hourly, conservative logging.
+
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    clean-disabled: true   # never wipe production
+    validate-on-migrate: true
+
+server:
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+    whitelabel:
+      enabled: false
+
+logging:
+  level:
+    root: WARN
+    in.gov.ir.pia: INFO
+
+pia:
+  auth:
+    mode: real             # dummy auth disabled in prod; PiaAuthConfig fails to start if 'dummy' is set
+  seed:
+    demo-data: false
+  audit:
+    integrity-check-cron: "0 0 * * * *"   # hourly

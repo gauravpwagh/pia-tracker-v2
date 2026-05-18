@@ -1,0 +1,67 @@
+{
+  "app": {
+    "title": "PIA Tracker",
+    "subtitle": "Pre-Investment Activity tracking"
+  },
+  "actions": {
+    "save": "Save",
+    "saveDraft": "Save Draft",
+    "submit": "Submit",
+    "verify": "Verify",
+    "authenticate": "Authenticate",
+    "sendBack": "Send Back",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "add": "Add",
+    "remove": "Remove",
+    "close": "Close",
+    "confirm": "Confirm",
+    "reload": "Reload",
+    "export": "Export",
+    "search": "Search",
+    "filter": "Filter",
+    "reset": "Reset",
+    "clearFilters": "Clear Filters"
+  },
+  "states": {
+    "draft": "Draft",
+    "inProgress": "In Progress",
+    "submitted": "Submitted",
+    "verified": "Verified",
+    "authenticated": "Authenticated",
+    "sentBack": "Sent Back",
+    "approved": "Approved",
+    "complete": "Complete",
+    "onHold": "On Hold",
+    "completed": "Completed",
+    "dropped": "Dropped",
+    "active": "Active"
+  },
+  "labels": {
+    "createdBy": "Created by",
+    "createdAt": "Created",
+    "updatedAt": "Updated",
+    "pendingWith": "Pending with",
+    "pendingSince": "Pending since",
+    "lastUpdated": "Last updated",
+    "version": "Version"
+  },
+  "feedback": {
+    "saving": "Saving…",
+    "saved": "Saved at {{time}}",
+    "saveFailed": "Save failed",
+    "loading": "Loading…",
+    "empty": "Nothing to show",
+    "noResults": "No results match your filters"
+  },
+  "time": {
+    "daysAgo_one": "{{count}} day ago",
+    "daysAgo_other": "{{count}} days ago",
+    "hoursAgo_one": "{{count}} hour ago",
+    "hoursAgo_other": "{{count}} hours ago",
+    "minutesAgo_one": "{{count}} minute ago",
+    "minutesAgo_other": "{{count}} minutes ago",
+    "justNow": "Just now"
+  }
+}

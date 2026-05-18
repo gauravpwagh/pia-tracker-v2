@@ -1,0 +1,118 @@
+build:
+  maxIssues: 0
+
+config:
+  validation: true
+  warningsAsErrors: false
+
+processors:
+  active: true
+
+console-reports:
+  active: true
+
+output-reports:
+  active: true
+
+comments:
+  active: true
+  AbsentOrWrongFileLicense:
+    active: false
+  CommentOverPrivateFunction:
+    active: false
+  CommentOverPrivateProperty:
+    active: false
+  UndocumentedPublicClass:
+    active: false
+  UndocumentedPublicFunction:
+    active: false
+  UndocumentedPublicProperty:
+    active: false
+
+complexity:
+  active: true
+  CyclomaticComplexMethod:
+    active: true
+    threshold: 20
+  LongMethod:
+    active: true
+    threshold: 80
+  LongParameterList:
+    active: true
+    functionThreshold: 8
+    constructorThreshold: 8
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 20
+    thresholdInClasses: 20
+    thresholdInInterfaces: 20
+    thresholdInObjects: 20
+    thresholdInEnums: 20
+
+coroutines:
+  active: true
+
+empty-blocks:
+  active: true
+  EmptyCatchBlock:
+    active: true
+    allowedExceptionNameRegex: '_|(ignore|expected).*'
+
+exceptions:
+  active: true
+  TooGenericExceptionCaught:
+    active: true
+    exceptionNames:
+      - ArrayIndexOutOfBoundsException
+      - Error
+      - Exception
+      - IllegalMonitorStateException
+      - NullPointerException
+      - RuntimeException
+      - Throwable
+
+naming:
+  active: true
+  FunctionNaming:
+    active: true
+    functionPattern: '[a-z][a-zA-Z0-9]*'
+    excludes: ['**/test/**', '**/*Test.kt', '**/*Spec.kt']
+  TopLevelPropertyNaming:
+    active: true
+    constantPattern: '[A-Z][_A-Z0-9]*'
+    propertyPattern: '[a-z][A-Za-z0-9]*'
+    privatePropertyPattern: '_?[a-z][A-Za-z0-9]*'
+
+performance:
+  active: true
+  SpreadOperator:
+    active: false
+
+potential-bugs:
+  active: true
+  UnsafeCallOnNullableType:
+    active: true
+
+style:
+  active: true
+  MagicNumber:
+    active: true
+    ignoreNumbers: ['-1', '0', '1', '2', '100', '1000']
+    ignorePropertyDeclaration: true
+    ignoreLocalVariableDeclaration: true
+    ignoreAnnotation: true
+    ignoreNamedArgument: true
+    ignoreEnums: true
+    ignoreRanges: true
+    ignoreExtensionFunctions: true
+  MaxLineLength:
+    active: true
+    maxLineLength: 140
+  ReturnCount:
+    active: true
+    max: 4
+  WildcardImport:
+    active: true
+    excludeImports:
+      - 'java.util.*'
+      - 'kotlinx.coroutines.*'

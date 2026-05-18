@@ -1,0 +1,22 @@
+{
+  "sidebar": {
+    "dashboard": "Dashboard",
+    "inbox": "My Inbox",
+    "projects": "Projects",
+    "reports": "Reports",
+    "admin": "Admin",
+    "adminUsers": "Users",
+    "adminForms": "Form Definitions",
+    "adminDashboards": "Dashboard Definitions",
+    "adminFeatureFlags": "Feature Flags",
+    "adminAuditLog": "Audit Log"
+  },
+  "topbar": {
+    "notifications": "Notifications",
+    "profile": "Profile",
+    "settings": "Settings",
+    "logout": "Logout",
+    "switchTheme": "Theme",
+    "switchUser": "Switch user (dummy auth)"
+  }
+}

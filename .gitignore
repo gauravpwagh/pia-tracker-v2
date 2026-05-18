@@ -1,0 +1,59 @@
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.fleet/
+
+# Secrets and env
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+infra/nginx/certs/
+
+# Backend (Gradle / JVM)
+backend/.gradle/
+backend/build/
+backend/out/
+backend/bin/
+backend/.kotlin/
+backend/*.log
+backend/hs_err_pid*
+
+# Frontend (Node / Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/src/generated/
+
+# Docker volumes (mounted under data/ in dev)
+data/
+volumes/
+
+# Logs
+*.log
+logs/
+
+# Backups (kept outside repo in real deploys; sometimes appear locally)
+backups/
+
+# Test artifacts
+.nyc_output/
+*.lcov
+coverage/
+.jqwik-database
+
+# Python (skill scripts, ops tools)
+__pycache__/
+*.pyc
+.venv/

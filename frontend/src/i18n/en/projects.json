@@ -1,0 +1,27 @@
+{
+  "title": "Projects",
+  "newProject": "+ Add Project",
+  "noProjects": "No projects yet.",
+  "noProjectsMatch": "No projects match your filters. Try adjusting them or {{clearLink}}.",
+  "filters": {
+    "zone": "Zone",
+    "division": "Division",
+    "status": "Status",
+    "targetYear": "Target Year"
+  },
+  "columns": {
+    "code": "Code",
+    "name": "Name",
+    "zone": "Zone",
+    "division": "Division",
+    "lifecycleState": "State",
+    "targetYear": "Target Year",
+    "daysSinceRb": "Days since RB",
+    "progress": "Progress",
+    "slaBreaches": "SLA Breaches"
+  },
+  "activity": {
+    "addActivity": "Add Activity",
+    "noActivities": "This project has no activities yet. Add the first activity to get started."
+  }
+}

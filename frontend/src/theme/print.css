@@ -1,0 +1,64 @@
+/* Print stylesheet — see docs/ui.md § 2 + § 3 archetype 8.
+ * Always light theme regardless of UI mode.
+ */
+
+@media print {
+  :root {
+    color-scheme: light !important;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #1a2733 !important;
+    font-size: 11pt;
+  }
+
+  /* Hide shell chrome */
+  .ant-layout-sider,
+  .ant-layout-header,
+  .no-print {
+    display: none !important;
+  }
+
+  .ant-layout-content {
+    padding: 0 !important;
+  }
+
+  /* Tables: tight rows, full width, repeat headers per page */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    page-break-inside: auto;
+  }
+
+  table thead {
+    display: table-header-group;
+  }
+
+  table tr {
+    page-break-inside: avoid;
+  }
+
+  /* Page break utilities */
+  .page-break-before {
+    page-break-before: always;
+  }
+
+  .page-break-after {
+    page-break-after: always;
+  }
+
+  .avoid-break-inside {
+    page-break-inside: avoid;
+  }
+
+  /* @page setup */
+  @page {
+    size: A4;
+    margin: 18mm 14mm;
+  }
+
+  @page :first {
+    margin-top: 24mm;
+  }
+}

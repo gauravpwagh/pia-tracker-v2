@@ -1,0 +1,14 @@
+{
+  "generic": "Something went wrong.",
+  "network": "Network error. Check your connection and try again.",
+  "stale": "This record was modified by {{user}} at {{time}}. Reload to continue.",
+  "permissionDenied": "You don't have permission to do that.",
+  "notFound": "Not found.",
+  "validation": "Some fields are invalid. Review the highlighted entries.",
+  "rateLimited": "Too many requests. Try again in a moment.",
+  "fileInfected": "This file failed the antivirus scan and was rejected.",
+  "fileTooLarge": "File is too large. Maximum size is {{max}}.",
+  "workflowNotAllowed": "This action is not allowed from the current state.",
+  "reportIssue": "Report issue",
+  "traceId": "Trace: {{id}}"
+}

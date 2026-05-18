@@ -1,0 +1,23 @@
+# PIA Tracker — beta profile overrides.
+# Real users, sandboxed data, auth mode toggleable.
+
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    clean-disabled: true
+
+logging:
+  level:
+    root: INFO
+    in.gov.ir.pia: INFO
+
+pia:
+  auth:
+    mode: ${PIA_AUTH_MODE:dummy}   # default dummy, can flip to real for SSO testing
+  seed:
+    demo-data: false               # beta starts empty
+  banner:
+    text: "BETA — sandboxed data; do not enter real PII"

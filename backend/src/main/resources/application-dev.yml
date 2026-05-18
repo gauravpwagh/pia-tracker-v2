@@ -1,0 +1,23 @@
+# PIA Tracker — dev profile overrides.
+# Verbose logging, dummy auth, demo seed loaded.
+
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+        show_sql: false  # use log4j SQL category instead
+  flyway:
+    clean-disabled: false  # allow clean on dev for `make reset`
+
+logging:
+  level:
+    in.gov.ir.pia: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+
+pia:
+  auth:
+    mode: dummy
+  seed:
+    demo-data: true

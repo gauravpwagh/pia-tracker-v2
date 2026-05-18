@@ -1,0 +1,79 @@
+# Lefthook config — Git hooks runner
+# https://lefthook.dev
+#
+# Install: `lefthook install`
+# Skip a hook: `LEFTHOOK=0 git commit ...`
+
+pre-commit:
+  parallel: true
+  commands:
+    backend-format:
+      glob: "backend/**/*.kt"
+      run: cd backend && ./gradlew ktlintCheck --daemon -q
+      stage_fixed: true
+
+    backend-detekt:
+      glob: "backend/**/*.kt"
+      run: cd backend && ./gradlew detekt --daemon -q
+
+    frontend-lint:
+      glob: "frontend/**/*.{ts,tsx,js,jsx}"
+      run: cd frontend && npx eslint --fix {staged_files}
+      stage_fixed: true
+
+    frontend-format:
+      glob: "frontend/**/*.{ts,tsx,js,jsx,json,css,md}"
+      run: cd frontend && npx prettier --write {staged_files}
+      stage_fixed: true
+
+    frontend-typecheck:
+      glob: "frontend/**/*.{ts,tsx}"
+      run: cd frontend && npx tsc --noEmit -p tsconfig.json
+
+    json-validate:
+      glob: "**/*.json"
+      run: |
+        for f in {staged_files}; do
+          python3 -c "import json,sys; json.load(open('$f'))" || exit 1
+        done
+
+    forbidden-secrets:
+      run: |
+        if grep -rnE "(api_key|password|secret|token).*=.*['\"]([^'\"]{20,})" {staged_files} 2>/dev/null; then
+          echo "Possible secret committed. Review and remove."
+          exit 1
+        fi
+
+    forbid-immutable-migration-edits:
+      glob: "backend/src/main/resources/db/migration/V*.sql"
+      run: |
+        # Migrations once merged are immutable. Block edits to existing ones.
+        for f in {staged_files}; do
+          if git log --diff-filter=A --pretty=format: -- "$f" | grep -q .; then
+            # File existed before; check whether it was modified vs added in this commit
+            if git diff --cached --name-status -- "$f" | grep -q "^M"; then
+              echo "Migration $f is immutable; create a new V*.sql instead."
+              exit 1
+            fi
+          fi
+        done
+
+pre-push:
+  parallel: false
+  commands:
+    backend-tests:
+      run: cd backend && ./gradlew test --daemon -q
+
+    frontend-tests:
+      run: cd frontend && npm test -- --run
+
+    api-client-fresh:
+      run: |
+        cd frontend
+        npm run generate-api-client
+        if git diff --exit-code src/generated/ >/dev/null 2>&1; then
+          echo "Generated API client is up to date."
+        else
+          echo "Generated API client is stale. Run 'npm run generate-api-client' and commit."
+          exit 1
+        fi

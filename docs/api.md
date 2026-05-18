@@ -1,0 +1,463 @@
+# PIA Tracker — API
+
+**Status:** Draft v1.
+**See also:** `architecture.md` § 7 (API architecture); `permissions.md` § 2 (permission codes).
+
+This document specifies the REST API conventions, the error envelope, pagination/filtering, the action-endpoint pattern, optimistic locking, and the v1 endpoint catalog.
+
+---
+
+## 1. Conventions
+
+**Base path:** `/api/v1`. Path-versioned. `/api/v2` reserved for incompatible future changes.
+
+**Resource paths:** plural nouns. Resource IDs are UUIDs.
+
+```
+GET    /api/v1/projects
+POST   /api/v1/projects
+GET    /api/v1/projects/{id}
+PATCH  /api/v1/projects/{id}
+DELETE /api/v1/projects/{id}
+```
+
+**Action endpoints:** state changes that don't map cleanly to CRUD are POSTs to action paths:
+
+```
+POST   /api/v1/projects/{id}/allocate
+POST   /api/v1/projects/{id}/assign-dyce
+POST   /api/v1/projects/{id}/designate-nodal
+POST   /api/v1/projects/{id}/hold
+POST   /api/v1/projects/{id}/resume
+POST   /api/v1/projects/{id}/complete
+POST   /api/v1/projects/{id}/drop
+
+POST   /api/v1/activity-records/{id}/submit
+POST   /api/v1/activity-records/{id}/verify
+POST   /api/v1/activity-records/{id}/authenticate
+POST   /api/v1/activity-records/{id}/send-back
+
+POST   /api/v1/drawings/{id}/approve
+POST   /api/v1/drawings/{id}/send-back
+POST   /api/v1/drawings/{id}/approvers          (add)
+DELETE /api/v1/drawings/{id}/approvers/{aid}    (remove)
+```
+
+Action endpoints take a JSON body with `comment` (optional or required per workflow) and any action-specific fields. They return the updated resource.
+
+**Content types:** `application/json` for everything except attachment upload (`multipart/form-data`) and Excel download (`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`).
+
+**Character encoding:** UTF-8.
+
+---
+
+## 2. Request and response shapes
+
+### Single-resource GET
+
+```http
+GET /api/v1/projects/3e1b...
+
+200 OK
+ETag: "12"
+Content-Type: application/json
+
+{
+  "id": "3e1b...",
+  "projectCode": "NR-NL-2024-017",
+  "name": "Nimach–Ratlam Doubling",
+  "zoneId": "...",
+  "lifecycleState": "ACTIVE",
+  ...
+}
+```
+
+The `ETag` header carries the entity version. Required for subsequent updates.
+
+### List GET (paginated)
+
+```http
+GET /api/v1/projects?page=0&size=20&sort=createdAt,desc&zoneId={uuid}&lifecycleState=ACTIVE
+
+200 OK
+
+{
+  "data": [
+    { "id": "...", "projectCode": "...", ... },
+    ...
+  ],
+  "page": {
+    "number": 0,
+    "size": 20,
+    "totalElements": 47,
+    "totalPages": 3
+  }
+}
+```
+
+Spring Data conventions: `page`, `size`, `sort=field,direction`.
+
+### Mutating endpoints
+
+```http
+PATCH /api/v1/projects/3e1b...
+If-Match: "12"
+Content-Type: application/json
+
+{ "name": "Nimach–Ratlam Doubling (revised)" }
+
+200 OK
+ETag: "13"
+
+{ "id": "3e1b...", "name": "Nimach–Ratlam Doubling (revised)", ... }
+```
+
+`If-Match` is required on PATCH/PUT. Missing or mismatched → 409 Conflict.
+
+### Action endpoint
+
+```http
+POST /api/v1/activity-records/{id}/send-back
+If-Match: "5"
+Content-Type: application/json
+Idempotency-Key: 9b5e-...
+
+{
+  "comment": "Section 20A gazette date is wrong, please verify and resubmit."
+}
+
+200 OK
+ETag: "6"
+
+{
+  "id": "...",
+  "recordState": "SENT_BACK_TO_DYCE",
+  "workflowInstance": { ... },
+  ...
+}
+```
+
+`Idempotency-Key` (UUID v4) lets the client safely retry. The server stores recent keys in Redis (Phase 2) or an in-memory cache (v1) and returns the prior result on duplicate.
+
+---
+
+## 3. Error envelope
+
+All error responses use:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "One or more fields failed validation.",
+    "details": [
+      { "field": "section_20e.published_on", "message": "must be on or after 20A notification date" }
+    ],
+    "traceId": "1a2b3c4d5e6f"
+  }
+}
+```
+
+### Status codes
+
+| Code | Use |
+|---|---|
+| 200 OK | Successful GET, PATCH, action |
+| 201 Created | Successful POST creating a resource |
+| 204 No Content | Successful DELETE, or action with no body |
+| 400 Bad Request | Malformed JSON, missing required headers |
+| 401 Unauthorized | No or invalid auth (real auth only — dummy mode never returns 401 if a role is selected) |
+| 403 Forbidden | Authenticated but missing permission |
+| 404 Not Found | Resource doesn't exist or is soft-deleted |
+| 409 Conflict | Optimistic-lock failure (`If-Match` mismatch) or duplicate-resource creation |
+| 422 Unprocessable Entity | JSON Schema validation failure, business-rule validator failure, workflow transition not allowed |
+| 429 Too Many Requests | Rate limit exceeded |
+| 500 Internal Server Error | Unexpected exception. Always logs with traceId. |
+| 503 Service Unavailable | ClamAV down, MinIO unreachable, etc. (with `Retry-After` header) |
+
+### Error codes (string constants)
+
+`VALIDATION_FAILED`, `WORKFLOW_TRANSITION_NOT_ALLOWED`, `STALE`, `PERMISSION_DENIED`, `NOT_FOUND`, `DUPLICATE`, `FILE_INFECTED`, `FILE_TOO_LARGE`, `RATE_LIMITED`, `UNKNOWN_ERROR`. Frontend dispatches on `error.code`; localization keys reference the same set.
+
+---
+
+## 4. OpenAPI
+
+Spec auto-generated by springdoc-openapi at `/api/v1/openapi.json` and human-browsable at `/api/v1/swagger-ui`. The spec is the **single source of truth** — the frontend generates its TanStack Query client from this file via openapi-typescript-codegen during build. Backend types and frontend types never drift.
+
+Every endpoint must have `@Operation` annotations describing summary, description, response codes. CI enforces this with a custom check.
+
+---
+
+## 5. Pagination and filtering
+
+**Pagination params:** `page` (0-indexed), `size` (1–200, default 20). Servers enforce max page size 200 to prevent runaway queries.
+
+**Sorting:** `sort=field,direction`. Multi-sort: `sort=field1,asc&sort=field2,desc`. Field must be allowlisted per endpoint.
+
+**Filtering:** query parameters per field. Multiple values for one parameter are OR'd; multiple parameters are AND'd:
+
+```
+GET /api/v1/projects?zoneId=A&zoneId=B&lifecycleState=ACTIVE
+   → (zoneId in [A,B]) AND lifecycleState = ACTIVE
+```
+
+Specialty operators expressed as suffixes:
+
+- `createdAfter=2025-01-01` (gte)
+- `createdBefore=2025-12-31` (lte)
+- `nameContains=Nimach`
+
+Each endpoint documents which filter parameters it accepts in OpenAPI.
+
+---
+
+## 6. Endpoint catalog (v1)
+
+Below is the v1 catalog with permission gates. Detailed request/response shapes are in OpenAPI.
+
+### Auth (dummy mode at v1)
+
+```
+GET    /api/v1/auth/users              # for the role-picker UI; returns seeded users
+POST   /api/v1/auth/select-user        # body: { userId }; session-scopes the chosen user
+POST   /api/v1/auth/logout             # clears session
+GET    /api/v1/auth/me                 # returns current Principal
+```
+
+### Zones, divisions, designations (read-only catalog)
+
+```
+GET    /api/v1/zones
+GET    /api/v1/zones/{id}/divisions
+GET    /api/v1/designations
+GET    /api/v1/activity-types
+```
+
+### Users (admin)
+
+```
+GET    /api/v1/users                   PERM: USER.READ
+POST   /api/v1/users                   PERM: USER.CREATE
+GET    /api/v1/users/{id}              PERM: USER.READ
+PATCH  /api/v1/users/{id}              PERM: USER.UPDATE
+POST   /api/v1/users/{id}/deactivate   PERM: USER.DEACTIVATE
+POST   /api/v1/users/{id}/permissions  PERM: PERMISSION.GRANT
+DELETE /api/v1/users/{id}/permissions/{code}   PERM: PERMISSION.GRANT
+```
+
+User picker:
+
+```
+GET    /api/v1/user-picker?context={ALLOCATE_CEC|ASSIGN_DYCE|...}&projectId={uuid}&search={q}
+```
+
+### Projects
+
+```
+GET    /api/v1/projects                                PERM: PROJECT.READ.*
+POST   /api/v1/projects                                PERM: PROJECT.CREATE
+GET    /api/v1/projects/{id}                           PERM: PROJECT.READ.*
+PATCH  /api/v1/projects/{id}                           PERM: PROJECT.UPDATE.OWN
+DELETE /api/v1/projects/{id}                           PERM: PROJECT.DELETE
+
+POST   /api/v1/projects/{id}/allocate                  PERM: PROJECT.ALLOCATE
+       body: { ceUserId }
+POST   /api/v1/projects/{id}/assign-dyce               PERM: PROJECT.ASSIGN_DYCE
+       body: { dyceUserIds: [...] }
+POST   /api/v1/projects/{id}/designate-nodal           PERM: PROJECT.DESIGNATE_NODAL
+       body: { nodalUserId }
+POST   /api/v1/projects/{id}/hold                      PERM: PROJECT.HOLD_RESUME
+POST   /api/v1/projects/{id}/resume                    PERM: PROJECT.HOLD_RESUME
+POST   /api/v1/projects/{id}/complete                  PERM: PROJECT.COMPLETE
+POST   /api/v1/projects/{id}/drop                      PERM: PROJECT.DROP
+```
+
+### Project activities
+
+```
+GET    /api/v1/projects/{pid}/activities               PERM: ACTIVITY.READ.*
+POST   /api/v1/projects/{pid}/activities               PERM: ACTIVITY.CREATE.ASSIGNED
+       body: { activityTypeCode, name, scopeNotes?, targetCompletionDate?, primaryDyceUserId }
+GET    /api/v1/activities/{id}
+PATCH  /api/v1/activities/{id}                         PERM: ACTIVITY.UPDATE.OWN
+DELETE /api/v1/activities/{id}                         PERM: ACTIVITY.DELETE
+```
+
+### Activity records
+
+```
+GET    /api/v1/activities/{aid}/records                PERM: ACTIVITY_RECORD.READ.*
+POST   /api/v1/activities/{aid}/records                PERM: ACTIVITY_RECORD.CREATE.ASSIGNED
+GET    /api/v1/activity-records/{id}
+PATCH  /api/v1/activity-records/{id}                   PERM: ACTIVITY_RECORD.UPDATE.OWN
+DELETE /api/v1/activity-records/{id}                   PERM: ACTIVITY_RECORD.DELETE
+
+POST   /api/v1/activity-records/{id}/submit            PERM: ACTIVITY_RECORD.SUBMIT
+       body: { sectionCode?, comment? }                # sectionCode for section-level workflow
+POST   /api/v1/activity-records/{id}/verify            PERM: ACTIVITY_RECORD.VERIFY
+       body: { sectionCode?, comment? }
+POST   /api/v1/activity-records/{id}/authenticate      PERM: ACTIVITY_RECORD.AUTHENTICATE
+       body: { sectionCode?, comment? }
+POST   /api/v1/activity-records/{id}/send-back         PERM: ACTIVITY_RECORD.SEND_BACK
+       body: { sectionCode?, comment }                 # comment required
+
+POST   /api/v1/workflow/bulk-transition                PERM: ACTIVITY_RECORD.BULK_TRANSITION
+       body: { recordIds: [...], action: "AUTHENTICATE", comment? }
+```
+
+### Drawings
+
+```
+POST   /api/v1/drawings/{id}/submit                    PERM: ACTIVITY_RECORD.SUBMIT
+POST   /api/v1/drawings/{id}/approve                   PERM: DRAWING.APPROVE
+       body: { approverId, comment? }
+POST   /api/v1/drawings/{id}/send-back                 PERM: DRAWING.SEND_BACK
+       body: { approverId, comment }
+POST   /api/v1/drawings/{id}/reapprove                 PERM: ACTIVITY_RECORD.SUBMIT
+       body: { requireReapproval: boolean }
+POST   /api/v1/drawings/{id}/approvers                 PERM: DRAWING.EDIT_APPROVERS
+       body: { designationCode, userId?, position? }
+DELETE /api/v1/drawings/{id}/approvers/{aid}           PERM: DRAWING.EDIT_APPROVERS
+PATCH  /api/v1/drawings/{id}/approvers/{aid}           PERM: DRAWING.REASSIGN_APPROVER
+       body: { userId }
+```
+
+### Forms
+
+```
+GET    /api/v1/form-definitions                        PERM: FORM_DEFINITION.READ
+GET    /api/v1/form-definitions/{id}
+POST   /api/v1/form-definitions                        PERM: FORM_DEFINITION.CREATE
+PATCH  /api/v1/form-definitions/{id}                   PERM: FORM_DEFINITION.UPDATE
+POST   /api/v1/form-definitions/{id}/publish           PERM: FORM_DEFINITION.PUBLISH
+POST   /api/v1/form-definitions/{id}/diff/{otherId}    PERM: FORM_DEFINITION.READ
+       # returns { verdict: 'BACKWARDS_COMPATIBLE'|'BREAKING', reasons: [...] }
+POST   /api/v1/form-definitions/{id}/validate          PERM: FORM_DEFINITION.READ
+       body: { dataJson: { ... } }
+       # dry-run validation
+```
+
+### Dashboards
+
+```
+GET    /api/v1/dashboards/project/{projectId}          PERM: DASHBOARD.VIEW.PROJECT
+GET    /api/v1/dashboards/activity/{activityId}        PERM: DASHBOARD.VIEW.PROJECT
+GET    /api/v1/dashboards/zone/{zoneId}                PERM: DASHBOARD.VIEW.ZONE
+GET    /api/v1/dashboards/pan-india                    PERM: DASHBOARD.VIEW.PAN_INDIA
+```
+
+Each returns the rendered widget payloads for the configured dashboard.
+
+### Exports
+
+```
+POST   /api/v1/exports/project/{projectId}             PERM: EXPORT.PROJECT
+POST   /api/v1/exports/zone/{zoneId}                   PERM: EXPORT.ZONE
+POST   /api/v1/exports/pan-india                       PERM: EXPORT.PAN_INDIA
+
+       # sync: returns Excel directly; async (zone+): returns { jobId }
+GET    /api/v1/export-jobs/{jobId}
+GET    /api/v1/export-jobs/{jobId}/download
+```
+
+### Comments
+
+```
+GET    /api/v1/comments?entityType={X}&entityId={uuid}
+POST   /api/v1/comments                                PERM: COMMENT.CREATE
+PATCH  /api/v1/comments/{id}                           PERM: COMMENT.UPDATE.OWN
+DELETE /api/v1/comments/{id}                           PERM: COMMENT.DELETE.OWN | COMMENT.DELETE.ANY
+```
+
+### Attachments
+
+```
+POST   /api/v1/attachments?entityType={X}&entityId={uuid}&fieldPath={path}
+       multipart/form-data: file
+       PERM: ATTACHMENT.UPLOAD.OWN_RECORDS
+GET    /api/v1/attachments/{id}                        PERM: ATTACHMENT.DOWNLOAD
+GET    /api/v1/attachments/{id}/download               PERM: ATTACHMENT.DOWNLOAD
+DELETE /api/v1/attachments/{id}                        PERM: ATTACHMENT.DELETE.OWN | .ANY
+```
+
+### Notifications
+
+```
+GET    /api/v1/notifications?unreadOnly=true&page=0&size=20
+POST   /api/v1/notifications/{id}/read
+POST   /api/v1/notifications/read-all
+```
+
+### Workflow
+
+```
+GET    /api/v1/workflow/instances?entityType={X}&entityId={uuid}
+GET    /api/v1/workflow/instances/{id}/history
+GET    /api/v1/workflow/inbox?role={X}            # items pending the current user's action
+```
+
+### Audit log
+
+```
+GET    /api/v1/audit?entityType={X}&entityId={uuid}    PERM: AUDIT_LOG.READ.OWN
+GET    /api/v1/audit/security-events                    PERM: AUDIT_LOG.READ.ALL
+```
+
+### System
+
+```
+GET    /api/v1/openapi.json
+GET    /actuator/health/liveness
+GET    /actuator/health/readiness
+GET    /actuator/metrics                                # Prometheus scrape target via /actuator/prometheus
+```
+
+---
+
+## 7. Rate limits
+
+Per `architecture.md` § 9. Implemented via Bucket4j with limits stored in Redis (Phase 2) or in-memory (v1):
+
+- Authentication endpoints: 5/min/IP
+- Action endpoints (state transitions): 30/min/user
+- Export endpoints: 3/hour/user
+- All other endpoints: 600/min/user
+
+Limit hits return `429 Too Many Requests` with `Retry-After` and `X-RateLimit-*` headers:
+
+```
+X-RateLimit-Limit: 30
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1716000000      (epoch seconds)
+Retry-After: 60                     (seconds)
+```
+
+---
+
+## 8. Idempotency
+
+Action endpoints accept an optional `Idempotency-Key` header (UUID v4). The server stores `(key, response)` for 24 hours. Repeated request with the same key returns the original response. Different request body with the same key returns 409 Conflict with code `IDEMPOTENCY_KEY_CONFLICT`.
+
+The frontend always sends one for action endpoints; lets retry-on-network-error be safe.
+
+---
+
+## 9. Tracing
+
+Every request gets a `traceId` from the `X-Trace-Id` header if provided, or generated otherwise. The traceId is:
+
+- Included in every log line written during the request
+- Returned in the `X-Trace-Id` response header
+- Returned in the `error.traceId` field on errors
+
+The frontend logs the traceId on error and surfaces it in the "Report issue" dialog. Logs across services correlate by traceId in Loki/Grafana.
+
+---
+
+## 10. Compatibility policy
+
+- The major version (`/api/v1`) is supported until a deliberate decision to deprecate.
+- Within v1, additions are non-breaking: new optional fields, new endpoints, new enum values are added freely.
+- Renames, deletions, type changes, or new required fields require a new major version (`/api/v2`) running side-by-side for at least 6 months.
+- Deprecation is announced via response header (`Deprecation: true`) and changelog entry; removal requires the 6-month grace period.

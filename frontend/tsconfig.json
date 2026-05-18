@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": false,
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@components/*": ["./src/components/*"],
+      "@pages/*": ["./src/pages/*"],
+      "@hooks/*": ["./src/hooks/*"],
+      "@api/*": ["./src/api/*"],
+      "@lib/*": ["./src/lib/*"],
+      "@theme/*": ["./src/theme/*"],
+      "@stores/*": ["./src/stores/*"]
+    },
+
+    "types": ["vite/client", "vitest/globals"]
+  },
+  "include": ["src", "tests"],
+  "exclude": ["node_modules", "dist", "src/generated"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}

@@ -1,0 +1,254 @@
+# PIA Tracker — base Docker Compose topology.
+# See docs/deployment.md § 2 for the service map.
+# Environment overlays: docker-compose.dev.yml, docker-compose.beta.yml, docker-compose.prod.yml.
+
+name: pia-tracker
+
+services:
+  # ─── TLS terminator + reverse proxy + SPA host ────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: pia-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - frontend_dist:/usr/share/nginx/html:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_completed_successfully
+    networks: [pia]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  # ─── Frontend build sidecar ───────────────────────────────────────────────
+  # Builds the SPA and writes /dist into the shared volume that Nginx serves.
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      target: build
+    container_name: pia-frontend-build
+    volumes:
+      - frontend_dist:/workspace/dist
+    networks: [pia]
+    command: ["sh", "-c", "cp -r /workspace/dist/* /workspace/dist/ 2>/dev/null; echo Frontend dist ready"]
+
+  # ─── Backend ─────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: pia-backend
+    restart: unless-stopped
+    environment:
+      PIA_PROFILE: ${PIA_PROFILE:-dev}
+      PIA_AUTH_MODE: ${PIA_AUTH_MODE:-dummy}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-pia}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-pia_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-pia_app}
+      POSTGRES_MIGRATOR_USER: ${POSTGRES_MIGRATOR_USER:-pia_migrator}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:-pia_migrator}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-miniopia}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopia}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      TZ: Asia/Kolkata
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    networks: [pia]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+
+  # ─── PostgreSQL ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: pia-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pia}
+      POSTGRES_USER: ${POSTGRES_USER:-pia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pia}
+      TZ: Asia/Kolkata
+      PGTZ: Asia/Kolkata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [pia]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-pia}", "-d", "${POSTGRES_DB:-pia}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── MinIO (object storage for attachments) ──────────────────────────────
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: pia-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-miniopia}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopia}
+    volumes:
+      - minio_data:/data
+    networks: [pia]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─── MinIO bucket bootstrap (runs once, then exits) ──────────────────────
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: pia-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [pia]
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-miniopia} ${MINIO_ROOT_PASSWORD:-miniopia} &&
+        mc mb --ignore-existing local/${MINIO_BUCKET_ATTACHMENTS:-pia-attachments} &&
+        mc mb --ignore-existing local/${MINIO_BUCKET_QUARANTINE:-pia-quarantine} &&
+        echo "Buckets ready."
+
+  # ─── ClamAV (blocking scan sidecar) ──────────────────────────────────────
+  clamav:
+    image: clamav/clamav:1.4
+    container_name: pia-clamav
+    restart: unless-stopped
+    volumes:
+      - clamav_data:/var/lib/clamav
+    networks: [pia]
+    healthcheck:
+      test: ["CMD-SHELL", "echo PING | nc -w 5 localhost 3310 | grep -q PONG"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # ─── Prometheus ──────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: pia-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION_DAYS:-30}d
+    networks: [pia]
+
+  # ─── Grafana ─────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: pia-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+    networks: [pia]
+
+  # ─── Loki + promtail (logs) ──────────────────────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    container_name: pia-loki
+    restart: unless-stopped
+    volumes:
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks: [pia]
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: pia-promtail
+    restart: unless-stopped
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+    command: -config.file=/etc/promtail/promtail.yml
+    depends_on: [loki]
+    networks: [pia]
+
+  # ─── Backup sidecars ──────────────────────────────────────────────────────
+  pgbackup:
+    image: postgres:16-alpine
+    container_name: pia-pgbackup
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-pia}
+      POSTGRES_USER: ${POSTGRES_USER:-pia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pia}
+      GPG_BACKUP_RECIPIENT: ${GPG_BACKUP_RECIPIENT:-pia-backup}
+    volumes:
+      - ../infra/scripts:/scripts:ro
+      - backup_data:/backups
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [pia]
+    entrypoint: ["sh", "-c", "/scripts/pgbackup-loop.sh"]
+
+  miniobackup:
+    image: minio/mc:latest
+    container_name: pia-miniobackup
+    restart: unless-stopped
+    volumes:
+      - ../infra/scripts:/scripts:ro
+      - backup_data:/backups
+    depends_on:
+      minio: { condition: service_healthy }
+    networks: [pia]
+    entrypoint: ["sh", "-c", "/scripts/miniobackup-loop.sh"]
+
+# ─── Volumes ──────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  minio_data:
+  clamav_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  backup_data:
+  frontend_dist:
+
+# ─── Network ──────────────────────────────────────────────────────────────
+networks:
+  pia:
+    driver: bridge
