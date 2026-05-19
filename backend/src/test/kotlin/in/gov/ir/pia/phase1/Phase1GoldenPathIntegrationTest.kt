@@ -8,6 +8,7 @@ import `in`.gov.ir.pia.service.activity.ActivityDetailResponse
 import `in`.gov.ir.pia.service.activity.ActivityRecordDetailResponse
 import `in`.gov.ir.pia.service.activity.CreateActivityRecordRequest
 import `in`.gov.ir.pia.service.activity.CreateActivityRequest
+import `in`.gov.ir.pia.service.activity.PatchActivityRecordRequest
 import `in`.gov.ir.pia.service.activity.SectionWorkflowStateResponse
 import `in`.gov.ir.pia.service.activity.WorkflowActionRequest
 import `in`.gov.ir.pia.service.project.AllocateProjectRequest
@@ -15,6 +16,7 @@ import `in`.gov.ir.pia.service.project.AssignDyceRequest
 import `in`.gov.ir.pia.service.project.CreateProjectRequest
 import `in`.gov.ir.pia.service.project.DesignateNodalRequest
 import `in`.gov.ir.pia.service.project.ProjectDetailResponse
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.ninjasquad.springmockk.MockkBean
 import io.minio.MinioClient
 import org.assertj.core.api.Assertions.assertThat
@@ -45,8 +47,8 @@ import java.util.UUID
  * Phase 1 Final Gate — Golden-path end-to-end test (phasing.md § gate 1.14).
  *
  * Full golden path:
- *   project creation → activity creation → record creation → SRP submit →
- *   Nodal verify → CE authenticate.
+ *   project creation → activity creation → record creation → fill SRP data →
+ *   SRP submit → Nodal verify → CE authenticate.
  *
  * After authentication, verifies:
  *   A. DYCE_1 received an "authenticated" notification.
@@ -54,6 +56,10 @@ import java.util.UUID
  *   C. Audit log contains WORKFLOW.SUBMITTED_FOR_VERIFICATION, WORKFLOW.VERIFIED,
  *      WORKFLOW.AUTHENTICATED.
  *   D. Attachment upload is blocked when ClamAV is unreachable (scan-mandatory gate).
+ *
+ * A second test record exercises the send-back branch:
+ *   submit → DYCE_2 sends back → assert DYCE_1 notified → DYCE_1 resubmits →
+ *   DYCE_2 verifies → CE authenticates.
  *
  * ## Sidecar mocking
  *
@@ -85,7 +91,7 @@ import java.util.UUID
  * by another process, gate D would pass the scan and the assertion would fail with
  * an unexpected 201 or 415.  The fix is to use an ephemeral port guaranteed to be
  * unbound, or to bring in a real ClamAV Testcontainer for this assertion.
- * Tracking: see `docs/testing.md` § known gaps.
+ * Tracking: see `docs/testing.md` § known gaps (GAP-001).
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("dev")
@@ -122,10 +128,24 @@ class Phase1GoldenPathIntegrationTest {
         val CE_C_USER_ID: UUID    = UUID.fromString("11111111-1111-1111-1111-111111111103")
         val DYCE_1_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111104")
         val DYCE_2_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111105")
+
+        /** Valid SRP data satisfying the top-level required fields and the SRP section. */
+        private val SRP_DATA_JSON = """
+            {
+              "village_name": "Golden Path Village",
+              "village_chainage_from": "100+000",
+              "village_chainage_to": "100+500",
+              "district": "Test District",
+              "srp": {
+                "srp_declared_in_gaz_on": "2024-01-15"
+              }
+            }
+        """.trimIndent()
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
     @Autowired lateinit var jdbc: JdbcTemplate
+    @Autowired lateinit var objectMapper: ObjectMapper
 
     /** MinIO not available in CI — mock the client bean so the context starts. */
     @MockkBean
@@ -153,6 +173,17 @@ class Phase1GoldenPathIntegrationTest {
     private fun <T> post(url: String, body: Any, cookies: List<String>, type: Class<T>) =
         restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
 
+    private fun <T> patch(url: String, body: Any, cookies: List<String>, eTag: String, type: Class<T>) =
+        restTemplate.exchange(
+            url,
+            HttpMethod.PATCH,
+            HttpEntity(body, headersFor(cookies).apply {
+                contentType = MediaType.APPLICATION_JSON
+                set("If-Match", eTag)
+            }),
+            type,
+        )
+
     private fun <T> get(url: String, cookies: List<String>, type: Class<T>) =
         restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), type)
 
@@ -162,7 +193,7 @@ class Phase1GoldenPathIntegrationTest {
     // ── Golden path ────────────────────────────────────────────────────────────
 
     @Test
-    fun `Phase 1 golden path — create project, activity, record, submit, verify, authenticate; notifications, dashboard and audit all correct`() {
+    fun `Phase 1 golden path — create project, activity, record, fill SRP, submit, verify, authenticate; notifications, dashboard and audit all correct; send-back branch exercised`() {
 
         val nrZoneId = jdbc.queryForObject("SELECT id FROM zones WHERE code = 'NR'", UUID::class.java)!!
 
@@ -207,12 +238,28 @@ class Phase1GoldenPathIntegrationTest {
             ActivityDetailResponse::class.java,
         ).body!!
 
-        val record = post(
+        val createRecordResp = restTemplate.postForEntity(
             "/api/v1/activities/${activity.id}/records",
-            CreateActivityRecordRequest(),
-            dyce1,
+            HttpEntity(CreateActivityRecordRequest(), headersFor(dyce1)),
             ActivityRecordDetailResponse::class.java,
-        ).body!!
+        )
+        val record = createRecordResp.body!!
+        // Capture the ETag for the PATCH If-Match header
+        val recordETag = createRecordResp.headers["ETag"]?.firstOrNull() ?: "\"${record.version}\""
+
+        // ── 5. DYCE_1 fills in the SRP section data ───────────────────────────
+        // Required before submit: top-level required fields (village_name, chainage_from/to)
+        // and SRP section (srp_declared_in_gaz_on).
+        val srpDataNode = objectMapper.readTree(SRP_DATA_JSON)
+        val patchResp = patch(
+            "/api/v1/activity-records/${record.id}",
+            PatchActivityRecordRequest(dataJson = srpDataNode),
+            dyce1,
+            recordETag,
+            ActivityRecordDetailResponse::class.java,
+        )
+        assertThat(patchResp.statusCode).isEqualTo(HttpStatus.OK)
+        assertThat(patchResp.body!!.dataJson.get("village_name")?.asText()).isEqualTo("Golden Path Village")
 
         // ── D. Upload blocked when ClamAV unreachable (scan mandatory gate) ───
         // Build a multipart request with correct application/pdf content-type on
@@ -333,5 +380,100 @@ class Phase1GoldenPathIntegrationTest {
             .contains("WORKFLOW.SUBMITTED_FOR_VERIFICATION")
             .contains("WORKFLOW.VERIFIED")
             .contains("WORKFLOW.AUTHENTICATED")
+
+        // ─────────────────────────────────────────────────────────────────────
+        // ── SEND-BACK BRANCH ─────────────────────────────────────────────────
+        // ─────────────────────────────────────────────────────────────────────
+        // A second record: DYCE_1 submits → Nodal sends back → DYCE_1 notified →
+        // DYCE_1 resubmits → Nodal verifies → CE authenticates.
+
+        val createRecord2Resp = restTemplate.postForEntity(
+            "/api/v1/activities/${activity.id}/records",
+            HttpEntity(CreateActivityRecordRequest(), headersFor(dyce1)),
+            ActivityRecordDetailResponse::class.java,
+        )
+        val record2 = createRecord2Resp.body!!
+        val record2ETag = createRecord2Resp.headers["ETag"]?.firstOrNull() ?: "\"${record2.version}\""
+
+        // Fill SRP data on the second record before submitting
+        val patchRecord2Resp = patch(
+            "/api/v1/activity-records/${record2.id}",
+            PatchActivityRecordRequest(dataJson = srpDataNode),
+            dyce1,
+            record2ETag,
+            ActivityRecordDetailResponse::class.java,
+        )
+        assertThat(patchRecord2Resp.statusCode).isEqualTo(HttpStatus.OK)
+
+        // DYCE_1 submits record 2
+        val submit2Resp = post(
+            "/api/v1/activity-records/${record2.id}/submit",
+            WorkflowActionRequest(sectionCode = "srp"),
+            dyce1,
+            SectionWorkflowStateResponse::class.java,
+        )
+        assertThat(submit2Resp.statusCode).isIn(HttpStatus.OK, HttpStatus.CREATED)
+        assertThat(submit2Resp.body!!.currentStateCode).isEqualTo("SUBMITTED_FOR_VERIFICATION")
+
+        // DYCE_2 sends back record 2 with a comment
+        val sendBackResp = post(
+            "/api/v1/activity-records/${record2.id}/send-back",
+            WorkflowActionRequest(sectionCode = "srp", comment = "Gazette number is missing — please correct and resubmit"),
+            dyce2,
+            SectionWorkflowStateResponse::class.java,
+        )
+        assertThat(sendBackResp.statusCode).isIn(HttpStatus.OK, HttpStatus.CREATED)
+        assertThat(sendBackResp.body!!.currentStateCode).isEqualTo("SENT_BACK_TO_DYCE")
+
+        // DYCE_1 must be notified of the send-back
+        val dyce1NotifAfterSendBack = get(
+            "/api/v1/notifications",
+            dyce1,
+            NotificationSummaryDto::class.java,
+        ).body!!
+        assertThat(dyce1NotifAfterSendBack.notifications)
+            .`as`("DYCE_1 must be notified when the record is sent back")
+            .anyMatch { it.notificationType == "WORKFLOW_ACTION" && it.entityId == record2.id.toString() }
+
+        // DYCE_1 resubmits after correction
+        val resubmitResp = post(
+            "/api/v1/activity-records/${record2.id}/resubmit",
+            WorkflowActionRequest(sectionCode = "srp"),
+            dyce1,
+            SectionWorkflowStateResponse::class.java,
+        )
+        assertThat(resubmitResp.statusCode).isIn(HttpStatus.OK, HttpStatus.CREATED)
+        assertThat(resubmitResp.body!!.currentStateCode).isEqualTo("SUBMITTED_FOR_VERIFICATION")
+
+        // DYCE_2 verifies record 2
+        val verify2Resp = post(
+            "/api/v1/activity-records/${record2.id}/verify",
+            WorkflowActionRequest(sectionCode = "srp"),
+            dyce2,
+            SectionWorkflowStateResponse::class.java,
+        )
+        assertThat(verify2Resp.statusCode).isIn(HttpStatus.OK, HttpStatus.CREATED)
+        assertThat(verify2Resp.body!!.currentStateCode).isEqualTo("VERIFIED")
+
+        // CE authenticates record 2
+        val auth2Resp = post(
+            "/api/v1/activity-records/${record2.id}/authenticate",
+            WorkflowActionRequest(sectionCode = "srp"),
+            ce,
+            SectionWorkflowStateResponse::class.java,
+        )
+        assertThat(auth2Resp.statusCode).isIn(HttpStatus.OK, HttpStatus.CREATED)
+        assertThat(auth2Resp.body!!.currentStateCode).isEqualTo("AUTHENTICATED")
+
+        // Dashboard must now show ≥ 2 authenticated records
+        val dashboard2 = get(
+            "/api/v1/dashboard/projects/${project.id}",
+            ce,
+            ProjectDashboardDto::class.java,
+        ).body!!
+        val laSummary2 = dashboard2.summaries.find { it.activityTypeCode == "LAND_ACQUISITION" }
+        assertThat(laSummary2!!.authenticatedCount)
+            .`as`("authenticated_count must be ≥ 2 after both records are authenticated")
+            .isGreaterThanOrEqualTo(2)
     }
 }
