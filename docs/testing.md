@@ -251,6 +251,7 @@ Each entry records what the gap is, why it was accepted, and what the real fix l
 
 **File**: `backend/src/test/kotlin/in/gov/ir/pia/phase1/Phase1GoldenPathIntegrationTest.kt`
 **Added**: Phase 1.14
+**Status**: Partially resolved — see below.
 
 **What the test does**
 
@@ -276,27 +277,32 @@ command, receives a malformed response (not a ClamAV OK/FOUND line), and the ser
 would either 503 (parse failure) or, worst case, misread a stray byte sequence as
 `OK` and proceed with the upload — causing gate D to fail with an unexpected 201.
 
-Additionally, the test does not verify the full ClamAV protocol: it only checks that
-an unreachable scanner blocks uploads.  It does **not** test that an infected file
-(EICAR test signature) is actually quarantined.
+The port-assumption half of this gap is still open (see Real fix item 1 below).
+
+**What has been fixed (Phase 1.14 closing commit)**
+
+`AttachmentIntegrationTest` (`backend/src/test/kotlin/in/gov/ir/pia/attachment/`)
+now provides the full INSTREAM protocol coverage using a real ClamAV Testcontainer
+(`clamav/clamav:1`, `CLAMAV_NO_FRESHCLAM=true`, port 3310):
+
+- Clean PDF → ClamAV returns OK → 201, `scanStatus = "CLEAN"`, row committed, presigned URL returned.
+- EICAR test signature → ClamAV returns FOUND → 422 UNPROCESSABLE_ENTITY, no row written.
+
+This resolves the second half of the original gap (full protocol + EICAR quarantine).
 
 **Accepted because**
 
 The primary gate requirement is "scan is mandatory — no scanner, no upload".  That
 property is correctly verified.  The port collision risk is extremely low in CI
-(ephemeral Linux container, nothing on 19999).  The EICAR quarantine test belongs in
-a dedicated `AttachmentIntegrationTest` that spins up a real ClamAV Testcontainer;
-that test is deferred to Phase 2 when the full Testcontainers sidecar suite is built.
+(ephemeral Linux container, nothing on 19999).
 
-**Real fix**
+**Remaining real fix**
 
-1. Bind a `ServerSocket(0)` in `@BeforeEach` to claim an ephemeral port, then
-   immediately close it; use that port number as `pia.clamav.port`.  This guarantees
-   the port is unbound for the duration of the test without relying on 19999.
-2. Add `AttachmentIntegrationTest` (Phase 2) using `GenericContainer("clamav/clamav:1")`
-   and the EICAR test signature (`X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*`)
-   to verify the full INSTREAM protocol, infected-file rejection, and clean-file
-   acceptance end to end.
+Bind a `ServerSocket(0)` in `@BeforeEach` of `Phase1GoldenPathIntegrationTest` to
+claim an ephemeral OS port, then immediately close it; use that port number as
+`pia.clamav.port`.  This guarantees the port is unbound for the duration of gate D
+without relying on 19999.  Low priority: do at the start of Phase 2 alongside the
+ClamAV container reuse work (see GAP-004).
 
 ---
 
@@ -327,6 +333,8 @@ Phase 2 would require either publishing an event from `start()` (changing the
 workflow engine contract) or adding a "record created" domain event — both are
 reasonable but out of scope for the Phase 1 gate.
 
+**Status**: Open — fix at the start of Phase 2 before `draft_count` is displayed prominently.
+
 **Real fix**
 
 Publish a `WorkflowStateChangedEvent` (with `fromStateCode = null`) from
@@ -335,3 +343,107 @@ dedicated `RecordCreatedEvent` and add a `SummaryUpdater` listener for it that
 increments `draft_count`.  Either approach ensures the summary is accurate from the
 moment of creation.  Do this at the start of Phase 2 before the dashboard widgets
 display `draft_count` prominently.
+
+---
+
+### GAP-003 — Playwright E2E and Lighthouse tests are not wired into Phase 1 CI
+
+**Files**: `frontend/playwright.config.ts`,
+`frontend/tests/e2e/a11y-lighthouse.spec.ts`
+**Added**: Phase 1.14
+
+**What the gap is**
+
+`npm run e2e` requires a fully running backend and frontend (docker-compose or local
+dev servers).  Phase 1's CI is Level 0: Lefthook pre-push hooks + `make test`, which
+runs only `./gradlew test` (backend unit + integration) and `npm test` (Vitest).
+Playwright tests are therefore not executed in CI during Phase 1 and can only be run
+manually with `docker-compose up` in place.
+
+The Lighthouse audit additionally requires Chromium launched with
+`--remote-debugging-port=9222`.  Playwright handles this via `launchOptions` in
+`playwright.config.ts`, but it must be the only process on that port; parallel CI
+workers sharing the port would collide.
+
+**Accepted because**
+
+The gate test was committed and passes when run manually against the local dev
+environment.  Phase 2's full Gitea Actions pipeline (phasing.md § 1.14, CI §6)
+introduces docker-compose-based E2E stages where Playwright will run as a proper
+pipeline step with an ephemeral CDP port per worker.
+
+**Real fix**
+
+Phase 2 CI work (phasing.md § 2.1 CI promotion):
+
+1. Add a `make e2e` target that starts docker-compose, waits for health checks, runs
+   `playwright test`, then tears down.
+2. Parameterise `CDP_PORT` in `playwright.config.ts` (default 9222; overridable via
+   env var so parallel workers each get a distinct port).
+3. Gate the Phase 2 CI pipeline on `make e2e` after the docker image build step
+   (pipeline stage 9 per `docs/testing.md` § 6).
+
+---
+
+### GAP-004 — ClamAV Testcontainer startup cost is not amortised across test classes
+
+**File**: `backend/src/test/kotlin/in/gov/ir/pia/attachment/AttachmentIntegrationTest.kt`
+**Added**: Phase 1.14
+
+**What the gap is**
+
+`AttachmentIntegrationTest` starts a `GenericContainer("clamav/clamav:1")` as a
+static `@Container` field.  Testcontainers reuses the container across all tests
+within the class, but not across different test classes.  If Phase 2 adds further
+integration tests that need a live ClamAV scanner (e.g. a dedicated upload-flow
+integration test for drawing attachments), each new class pays the full 2–3 minute
+ClamAV startup cost independently.
+
+With the current single class this is acceptable.  At two or more classes it becomes
+a material CI slowdown (Phase 1 target: under 25 minutes total).
+
+**Accepted because**
+
+There is only one ClamAV-dependent test class in Phase 1.  The cost is paid once per
+test run.
+
+**Real fix**
+
+Create a `ClamAvTestcontainerBase` abstract class (or a JUnit 5 extension) that holds
+the ClamAV `GenericContainer` as a static field with `withReuse(true)`.  Testcontainers'
+container reuse keeps the same container process alive across multiple test classes in
+the same JVM run (the `testcontainers.reuse.enable=true` property must be set in
+`~/.testcontainers.properties`).  All ClamAV-dependent integration tests extend this
+base class.  Do this when a second ClamAV test class is needed in Phase 2.
+
+---
+
+### GAP-005 — AttachmentIntegrationTest does not verify the presigned URL is fetchable
+
+**File**: `backend/src/test/kotlin/in/gov/ir/pia/attachment/AttachmentIntegrationTest.kt`
+**Added**: Phase 1.14
+
+**What the gap is**
+
+The clean-file upload test asserts that `presignedUrl` is not blank, but it does not
+HTTP GET the URL to confirm that the object was actually committed to MinIO and is
+retrievable.  A bug in `AttachmentService.upload` that calls `putObject` on the wrong
+bucket (or with a wrong key) would pass the current assertion while silently losing
+the file.
+
+**Accepted because**
+
+The MinIO `putObject` call would throw an exception on failure, which rolls back the
+transaction and returns a 5xx — the upload test would fail before reaching the URL
+assertion.  The risk of a silent wrong-key commit is low given the `buildObjectKey`
+helper is deterministic and tested implicitly by the row assertion (`entityId` on the
+DTO matches the input).  A full round-trip download test adds meaningful coverage but
+is not required for the Phase 1 gate.
+
+**Real fix**
+
+After asserting `presignedUrl` is not blank, perform an HTTP GET using
+`java.net.URI(dto.presignedUrl).toURL().readBytes()` (the Testcontainers MinIO port
+is accessible from the test process) and assert that the returned bytes equal the
+uploaded `cleanPdf` bytes.  This closes the round-trip loop.  Add in Phase 2
+alongside the `ClamAvTestcontainerBase` work (GAP-004).
