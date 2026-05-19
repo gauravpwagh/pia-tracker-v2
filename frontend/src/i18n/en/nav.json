@@ -11,6 +11,24 @@
     "adminFeatureFlags": "Feature Flags",
     "adminAuditLog": "Audit Log"
   },
+  "inbox": {
+    "tabs": {
+      "awaiting": "Awaiting Action",
+      "inProgress": "In Progress",
+      "slaBreached": "SLA Breached"
+    },
+    "table": {
+      "project": "Project",
+      "activity": "Activity",
+      "section": "Section",
+      "state": "State",
+      "daysPending": "Days Pending",
+      "slaBreach": "SLA breached",
+      "today": "Today"
+    },
+    "loadFailed": "Failed to load inbox",
+    "empty": "Nothing here — you're all caught up!"
+  },
   "topbar": {
     "notifications": "Notifications",
     "profile": "Profile",

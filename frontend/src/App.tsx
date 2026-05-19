@@ -11,6 +11,9 @@ import { HomePage } from '@pages/Home';
 // Phase 1.9: Record Edit Page (code-split; RJSF is heavy)
 const RecordEditPage = lazy(() => import('@pages/records/RecordEditPage'));
 
+// Phase 1.12: Inbox page
+const InboxPage = lazy(() => import('@pages/inbox/InboxPage'));
+
 const { Sider, Content, Header } = Layout;
 
 export default function App() {
@@ -29,7 +32,7 @@ export default function App() {
               <Route path="/" element={<Navigate to="/projects" replace />} />
               <Route path="/projects/*" element={<HomePage />} />
               <Route path="/records/:recordId/edit" element={<RecordEditPage />} />
-              <Route path="/inbox" element={<HomePage />} />
+              <Route path="/inbox" element={<InboxPage />} />
               <Route path="/dashboard" element={<HomePage />} />
               <Route path="/admin/*" element={<HomePage />} />
               <Route path="*" element={<HomePage />} />
