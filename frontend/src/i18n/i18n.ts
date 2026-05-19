@@ -6,6 +6,7 @@ import enCommon from './en/common.json';
 import enNav from './en/nav.json';
 import enProjects from './en/projects.json';
 import enErrors from './en/errors.json';
+import enForms from './en/forms.json';
 
 // i18next setup. English-only at v1 — adding Hindi is creating hi/*.json
 // files and registering them here. No code changes elsewhere.
@@ -25,9 +26,10 @@ void i18n
         nav: enNav,
         projects: enProjects,
         errors: enErrors,
+        forms: enForms,
       },
     },
-    ns: ['common', 'nav', 'projects', 'errors'],
+    ns: ['common', 'nav', 'projects', 'errors', 'forms'],
     defaultNS: 'common',
   });
 

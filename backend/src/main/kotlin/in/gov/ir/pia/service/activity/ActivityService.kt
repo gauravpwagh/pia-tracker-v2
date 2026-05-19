@@ -9,8 +9,12 @@ import `in`.gov.ir.pia.repository.ProjectActivityRepository
 import `in`.gov.ir.pia.repository.ProjectAssignmentRepository
 import `in`.gov.ir.pia.repository.ProjectRepository
 import `in`.gov.ir.pia.security.PiaPrincipal
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
+import jakarta.persistence.EntityManager
 import org.springframework.http.HttpStatus
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
@@ -29,6 +33,11 @@ data class CreateActivityRequest(
 
 data class CreateActivityRecordRequest(
     val recordSubtype: String? = null,
+)
+
+data class PatchActivityRecordRequest(
+    /** Full replacement of the record's data_json. No partial-merge; send the complete current form state. */
+    val dataJson: JsonNode,
 )
 
 data class ActivityDetailResponse(
@@ -52,6 +61,8 @@ data class ActivityRecordDetailResponse(
     val projectActivityId: UUID,
     val formDefinitionId: UUID,
     val schemaVersionAtSave: Int,
+    /** Full form data. Empty object `{}` at creation; updated on each autosave PATCH. */
+    val dataJson: JsonNode,
     val recordState: String,
     val recordSubtype: String?,
     val createdByUserId: UUID,
@@ -94,6 +105,9 @@ class ActivityService(
     private val recordRepository: ActivityRecordRepository,
     private val formDefinitionRepository: FormDefinitionRepository,
     private val auditLogWriter: AuditLogWriter,
+    private val jdbc: JdbcTemplate,
+    private val objectMapper: ObjectMapper,
+    private val entityManager: EntityManager,
 ) {
     // ── Read ──────────────────────────────────────────────────────────────────
 
@@ -253,6 +267,82 @@ class ActivityService(
         return record.toDetailResponse()
     }
 
+    /**
+     * Autosave PATCH: replaces the record's [dataJson] with [request.dataJson].
+     *
+     * ## Optimistic locking
+     *
+     * [expectedVersion] must match `activity_records.version`; if it doesn't
+     * (concurrent edit or stale client), 409 Conflict is returned.  The client
+     * must reload the record and retry.
+     *
+     * ## No schema validation on autosave
+     *
+     * Partial form data is valid during editing.  Schema validation is enforced
+     * only when the user submits the record (workflow "submit" action, Phase 1.11).
+     * Autosave stores whatever the client sends without rejecting incomplete data.
+     *
+     * ## JdbcTemplate instead of JPA
+     *
+     * [ActivityRecord] has all-`val` fields; Hibernate cannot update it in place.
+     * A direct SQL UPDATE is the cleanest solution, with the `version` increment
+     * handled by the DB expression `version = version + 1`.
+     */
+    @Transactional
+    fun patchRecord(
+        recordId: UUID,
+        request: PatchActivityRecordRequest,
+        expectedVersion: Int,
+        principal: PiaPrincipal,
+    ): ActivityRecordDetailResponse {
+        // Load to verify existence and access (zone + dyce assignment)
+        val existing =
+            recordRepository.findByIdAndIsDeletedFalse(recordId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val activity = getForPrincipal(existing.projectActivityId, principal)
+        requireDyceAssignment(activity.projectId, principal)
+
+        val dataJsonString = objectMapper.writeValueAsString(request.dataJson)
+
+        // UPDATE with version guard — 0 rows updated means optimistic lock conflict
+        val rowsUpdated =
+            jdbc.update(
+                """
+                UPDATE activity_records
+                   SET data_json           = ?::jsonb,
+                       schema_version_at_save = ?,
+                       updated_by_user_id  = ?,
+                       updated_at          = now(),
+                       version             = version + 1
+                 WHERE id = ? AND version = ? AND is_deleted = false
+                """.trimIndent(),
+                dataJsonString,
+                existing.schemaVersionAtSave,  // keep the version-at-save from creation; Phase 1.10 may bump it
+                principal.userId,
+                recordId,
+                expectedVersion,
+            )
+
+        if (rowsUpdated == 0) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Record was modified concurrently; reload to continue",
+            )
+        }
+
+        // Evict the L1 cache so the next findBy goes to the DB and reads the
+        // version that the JdbcTemplate UPDATE just wrote (version + 1).
+        // Without this, Hibernate returns the stale cached entity (version = 0).
+        entityManager.clear()
+
+        // Reload to get the new version number and all updated fields
+        val updated =
+            recordRepository.findByIdAndIsDeletedFalse(recordId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+        return updated.toDetailResponse()
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
@@ -325,6 +415,7 @@ class ActivityService(
             projectActivityId = projectActivityId,
             formDefinitionId = formDefinitionId,
             schemaVersionAtSave = schemaVersionAtSave,
+            dataJson = dataJson,
             recordState = recordState,
             recordSubtype = recordSubtype,
             createdByUserId = createdByUserId,

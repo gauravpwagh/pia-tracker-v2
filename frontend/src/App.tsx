@@ -1,11 +1,15 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { Layout } from 'antd';
+import { Layout, Spin } from 'antd';
 
 import { TopBar } from '@components/shell/TopBar';
 import { Sidebar } from '@components/shell/Sidebar';
 
 // Placeholder pages for v1 scaffolding; real implementations land per docs/phasing.md
 import { HomePage } from '@pages/Home';
+
+// Phase 1.9: Record Edit Page (code-split; RJSF is heavy)
+const RecordEditPage = lazy(() => import('@pages/records/RecordEditPage'));
 
 const { Sider, Content, Header } = Layout;
 
@@ -20,14 +24,17 @@ export default function App() {
           <Sidebar />
         </Sider>
         <Content style={{ padding: 24 }}>
-          <Routes>
-            <Route path="/" element={<Navigate to="/projects" replace />} />
-            <Route path="/projects/*" element={<HomePage />} />
-            <Route path="/inbox" element={<HomePage />} />
-            <Route path="/dashboard" element={<HomePage />} />
-            <Route path="/admin/*" element={<HomePage />} />
-            <Route path="*" element={<HomePage />} />
-          </Routes>
+          <Suspense fallback={<Spin style={{ margin: 40 }} />}>
+            <Routes>
+              <Route path="/" element={<Navigate to="/projects" replace />} />
+              <Route path="/projects/*" element={<HomePage />} />
+              <Route path="/records/:recordId/edit" element={<RecordEditPage />} />
+              <Route path="/inbox" element={<HomePage />} />
+              <Route path="/dashboard" element={<HomePage />} />
+              <Route path="/admin/*" element={<HomePage />} />
+              <Route path="*" element={<HomePage />} />
+            </Routes>
+          </Suspense>
         </Content>
       </Layout>
     </Layout>

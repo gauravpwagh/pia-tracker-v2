@@ -1,0 +1,45 @@
+{
+  "record": {
+    "breadcrumb": {
+      "project": "Project",
+      "activity": "Activity",
+      "record": "Record"
+    },
+    "status": {
+      "draft": "Draft",
+      "submittedForVerification": "Submitted for Verification",
+      "verified": "Verified",
+      "authenticated": "Authenticated",
+      "sentBackToDyce": "Sent Back to Dy CE/C",
+      "sentBackToNodal": "Sent Back to Nodal Dy CE/C"
+    },
+    "panel": {
+      "comments": "Comments",
+      "history": "History",
+      "workflow": "Workflow"
+    },
+    "sections": {
+      "noSections": "Form"
+    },
+    "autosave": {
+      "saving": "Saving…",
+      "saved": "Saved at {{time}}",
+      "saveFailed": "Autosave failed",
+      "conflict": "This record was modified elsewhere. Reload to continue."
+    },
+    "actions": {
+      "saveDraft": "Save Draft",
+      "submitSection": "Submit Section",
+      "submitRecord": "Submit Record",
+      "verify": "Verify",
+      "sendBack": "Send Back",
+      "authenticate": "Authenticate"
+    },
+    "error": {
+      "loadFailed": "Failed to load record",
+      "schemaLoadFailed": "Failed to load form schema",
+      "conflict": "Record modified elsewhere",
+      "conflictDetail": "This record was modified by another user. Reload the page to see the latest version."
+    }
+  }
+}

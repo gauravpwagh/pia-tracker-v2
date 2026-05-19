@@ -82,8 +82,8 @@ class FormDefinitionController(
         }
 
     /**
-     * Returns the latest active version of a form definition, including the
-     * full JSON Schema and RJSF ui-schema.
+     * Returns the latest active version of a form definition by its code,
+     * including the full JSON Schema and RJSF ui-schema.
      */
     @GetMapping("/{code}")
     @PreAuthorize("@pe.hasPermission(authentication, null, 'FORM_DEFINITION.READ')")
@@ -91,6 +91,34 @@ class FormDefinitionController(
         @PathVariable code: String,
     ): FormDefinitionDetailResponse {
         val fd = formDefinitionService.getLatestActive(code)
+        return FormDefinitionDetailResponse(
+            id = fd.id,
+            code = fd.code,
+            version = fd.version,
+            label = fd.label,
+            activityTypeCode = fd.activityTypeCode,
+            schemaJson = fd.schemaJson,
+            uiSchemaJson = fd.uiSchemaJson,
+            sectionCodes = fd.sectionCodes.toList(),
+            isActive = fd.isActive,
+        )
+    }
+
+    /**
+     * Returns a form definition by its UUID, including the full JSON Schema
+     * and RJSF ui-schema.
+     *
+     * This endpoint is used by the Record Edit Page to fetch the form schema
+     * needed to render RJSF.  It is gated on [ACTIVITY_RECORD.READ.OWN] so
+     * that Dy CE/C and other data-entry roles can load their form schemas
+     * without needing the admin-only [FORM_DEFINITION.READ] permission.
+     */
+    @GetMapping("/by-id/{id}")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.READ.OWN')")
+    fun getById(
+        @PathVariable id: java.util.UUID,
+    ): FormDefinitionDetailResponse {
+        val fd = formDefinitionService.getById(id)
         return FormDefinitionDetailResponse(
             id = fd.id,
             code = fd.code,

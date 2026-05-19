@@ -33,6 +33,18 @@ class FormDefinitionService(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Form definition '$code' not found")
 
     /**
+     * Returns the form definition with [id], or throws 404.
+     *
+     * Used by the Record Edit Page to load the full schema and ui-schema for
+     * rendering RJSF.  The permission check on the calling endpoint is
+     * `ACTIVITY_RECORD.READ.OWN` — anyone who can read records needs the schema.
+     */
+    fun getById(id: java.util.UUID): FormDefinition =
+        formDefinitionRepository.findById(id).orElseThrow {
+            ResponseStatusException(HttpStatus.NOT_FOUND, "Form definition $id not found")
+        }
+
+    /**
      * Validates [data] against the JSON Schema of the form definition
      * identified by [code] (latest active version).
      *

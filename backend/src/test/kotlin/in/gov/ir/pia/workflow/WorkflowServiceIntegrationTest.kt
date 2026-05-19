@@ -122,11 +122,72 @@ class WorkflowServiceIntegrationTest {
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
-    /** Creates an activity_records row and returns its id. */
+    /**
+     * Creates an activity_records row and returns its id.
+     *
+     * V006 added NOT NULL FK columns (project_activity_id, form_definition_id,
+     * created_by_user_id, and the project_activities parent itself).  This
+     * helper creates the minimum required parent rows in the correct FK order,
+     * then inserts the activity_records row.  All rows are rolled back by the
+     * surrounding @Transactional test boundary.
+     *
+     * Seeded reference data used:
+     *   - zones.code='NR'                 (V001_001)
+     *   - users.id=EMP001 (EDGS_CI)       (V001_004)
+     *   - users.id=EMP004 (DY_CE_C)       (V001_004)
+     *   - activity_types.code='LAND_ACQUISITION' (V003_001)
+     *   - form_definitions.id=LAND_ACQ_V1 (V003_002)
+     */
     private fun createActivityRecord(): UUID {
-        val id = UUID.randomUUID()
-        jdbc.update("INSERT INTO activity_records (id, record_state) VALUES (?, 'DRAFT')", id)
-        return id
+        val nrZoneId = jdbc.queryForObject("SELECT id FROM zones WHERE code = 'NR'", UUID::class.java)!!
+        val edgsUserId = UUID.fromString("11111111-1111-1111-1111-111111111101")   // EMP001 EDGS_CI
+        val dyceUserId = UUID.fromString("11111111-1111-1111-1111-111111111104")   // EMP004 DY_CE_C
+        val formDefId  = UUID.fromString("ffffffff-0001-0001-0001-000000000001")   // LAND_ACQUISITION_V1
+
+        // 1. Create a minimal project
+        val projectId = UUID.randomUUID()
+        jdbc.update(
+            """
+            INSERT INTO projects (id, name, project_code, zone_id, lifecycle_state, created_by_user_id)
+            VALUES (?, 'WF Test Project', ?, ?, 'ACTIVE', ?)
+            """.trimIndent(),
+            projectId,
+            "WFT-${projectId.toString().take(8)}",
+            nrZoneId,
+            edgsUserId,
+        )
+
+        // 2. Create a project_activity under that project
+        val activityId = UUID.randomUUID()
+        jdbc.update(
+            """
+            INSERT INTO project_activities
+                (id, project_id, activity_type_code, name, primary_dyce_user_id,
+                 default_form_definition_id, created_by_user_id)
+            VALUES (?, ?, 'LAND_ACQUISITION', 'WF Test LA', ?, ?, ?)
+            """.trimIndent(),
+            activityId,
+            projectId,
+            dyceUserId,
+            formDefId,
+            dyceUserId,
+        )
+
+        // 3. Create the activity_record
+        val recordId = UUID.randomUUID()
+        jdbc.update(
+            """
+            INSERT INTO activity_records
+                (id, project_activity_id, form_definition_id, data_json,
+                 schema_version_at_save, record_state, created_by_user_id)
+            VALUES (?, ?, ?, '{}'::jsonb, 1, 'DRAFT', ?)
+            """.trimIndent(),
+            recordId,
+            activityId,
+            formDefId,
+            dyceUserId,
+        )
+        return recordId
     }
 
     /** Reads record_state from the activity_records cache table. */
