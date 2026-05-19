@@ -31,4 +31,21 @@ interface FormDefinitionRepository : JpaRepository<FormDefinition, UUID> {
     fun findLatestActiveByCode(
         @Param("code") code: String,
     ): FormDefinition?
+
+    /**
+     * The latest active form definition for a given [activityTypeCode].
+     *
+     * Used by [ActivityService] to resolve the default form definition when
+     * creating a new [ProjectActivity].  Returns null when no form definition
+     * has been seeded for the given activity type yet (later phases add them).
+     */
+    @Query(
+        "SELECT f FROM FormDefinition f " +
+            "WHERE f.activityTypeCode = :activityTypeCode AND f.isActive = true " +
+            "ORDER BY f.version DESC " +
+            "LIMIT 1",
+    )
+    fun findLatestActiveByActivityTypeCode(
+        @Param("activityTypeCode") activityTypeCode: String,
+    ): FormDefinition?
 }
