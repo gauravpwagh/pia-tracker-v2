@@ -35,7 +35,14 @@ class SecurityConfig {
         //  so the React frontend can read the XSRF-TOKEN cookie and send it as X-XSRF-TOKEN header.
         http.csrf { it.disable() }
 
-        http.sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.ALWAYS) }
+        http.sessionManagement {
+            it.sessionCreationPolicy(SessionCreationPolicy.ALWAYS)
+            // Disable session fixation protection: DummyAuthFilter re-authenticates on every request
+            // from the session attribute (not from a one-time login form), so Spring Security's
+            // session rotation would invalidate the session after the first authenticated call.
+            // This is safe — there is no session-fixation attack surface with this auth model.
+            it.sessionFixation { sf -> sf.none() }
+        }
 
         http.formLogin { it.disable() }
         http.httpBasic { it.disable() }

@@ -6,23 +6,31 @@ import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.Version
+import java.math.BigDecimal
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 /**
- * Phase 1.4 stub entity for the `projects` table.
+ * The `projects` table entity.
  *
- * Contains only the columns created by `V002__projects_stub.sql`.
- * Phase 1.7 will add more columns (DPR reference, estimated cost, lifecycle
- * state, etc.) via additional Flyway migrations and fields here.
+ * Phase 1.4 stub columns (`id`, `zone_id`, `name`, `is_deleted`, `version`,
+ * `created_at`, `updated_at`) were created by `V002__projects_stub.sql`.
  *
- * Implements [ZoneOwned] so [PiaPermissionEvaluator] can enforce zone-level
- * access checks when this entity is the target of a `@PreAuthorize` call.
+ * Phase 1.7 columns added by `V005__projects_full.sql`:
+ * `project_code`, `project_type`, `division_id`, `chainage_*`, `length_km`,
+ * `recommended_by_board_on`, `target_completion_year`, `lifecycle_state`,
+ * `metadata_json`, `created_by_user_id`, `updated_by_user_id`,
+ * `deleted_at`, `deleted_by_user_id`.
+ *
+ * **`lifecycle_state`** is a denormalized cache of the current workflow state.
+ * The workflow engine is the source of truth; [ProjectLifecycleSyncListener]
+ * keeps this column in sync via JdbcTemplate after every transition.
  *
  * Rules (domain/CLAUDE.md):
  * - Identity by [id]; no `data class`.
  * - `@Version` for optimistic locking.
- * - Soft-delete via [isDeleted]; hard-delete not permitted.
+ * - Soft-delete via [isDeleted]; hard-delete never permitted.
  * - No bidirectional associations, no cascade attributes.
  */
 @Entity
@@ -34,8 +42,42 @@ class Project(
     override val zoneId: UUID,
     @Column(name = "name", nullable = false, length = 256)
     val name: String,
+    // ── Phase 1.7 business columns ────────────────────────────────────────────
+    @Column(name = "project_code", length = 64)
+    val projectCode: String? = null,
+    @Column(name = "project_type", length = 64)
+    val projectType: String? = null,
+    @Column(name = "division_id")
+    val divisionId: UUID? = null,
+    @Column(name = "chainage_from_km", precision = 10, scale = 3)
+    val chainageFromKm: BigDecimal? = null,
+    @Column(name = "chainage_to_km", precision = 10, scale = 3)
+    val chainageToKm: BigDecimal? = null,
+    @Column(name = "length_km", precision = 10, scale = 3)
+    val lengthKm: BigDecimal? = null,
+    @Column(name = "recommended_by_board_on")
+    val recommendedByBoardOn: LocalDate? = null,
+    @Column(name = "target_completion_year")
+    val targetCompletionYear: Int? = null,
+    /**
+     * Denormalized cache of [workflow_instances.current_state.code] for fast
+     * list queries. Updated by [ProjectLifecycleSyncListener] after every
+     * workflow transition; do NOT update this directly.
+     */
+    @Column(name = "lifecycle_state", nullable = false, length = 32)
+    val lifecycleState: String = "DRAFT",
+    @Column(name = "created_by_user_id")
+    val createdByUserId: UUID? = null,
+    @Column(name = "updated_by_user_id")
+    val updatedByUserId: UUID? = null,
+    // ── Soft delete ───────────────────────────────────────────────────────────
     @Column(name = "is_deleted", nullable = false)
     val isDeleted: Boolean = false,
+    @Column(name = "deleted_at")
+    val deletedAt: Instant? = null,
+    @Column(name = "deleted_by_user_id")
+    val deletedByUserId: UUID? = null,
+    // ── Audit timestamps ──────────────────────────────────────────────────────
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: Instant = Instant.now(),
     @Column(name = "updated_at", nullable = false)
@@ -51,5 +93,5 @@ class Project(
 
     override fun hashCode(): Int = id.hashCode()
 
-    override fun toString(): String = "Project(id=$id, name=$name, zoneId=$zoneId)"
+    override fun toString(): String = "Project(id=$id, code=$projectCode, name=$name, state=$lifecycleState)"
 }

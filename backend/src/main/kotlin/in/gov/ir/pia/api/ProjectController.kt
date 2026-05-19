@@ -1,12 +1,21 @@
 package `in`.gov.ir.pia.api
 
 import `in`.gov.ir.pia.security.PiaPrincipal
+import `in`.gov.ir.pia.service.project.AllocateProjectRequest
+import `in`.gov.ir.pia.service.project.AssignDyceRequest
+import `in`.gov.ir.pia.service.project.CreateProjectRequest
+import `in`.gov.ir.pia.service.project.DesignateNodalRequest
+import `in`.gov.ir.pia.service.project.ProjectDetailResponse
 import `in`.gov.ir.pia.service.project.ProjectService
+import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
@@ -24,18 +33,24 @@ data class ProjectSummaryResponse(
  * REST endpoints for the Project resource.
  *
  * Phase 1.4: list and detail only (zone-filtered read).
- * Phase 1.7 will add create, update, and lifecycle action endpoints.
+ * Phase 1.7: create, allocate, assign-dyce, designate-nodal lifecycle actions.
  *
  * Every method carries `@PreAuthorize` — no exceptions.  Zone-level
  * filtering is enforced by [ProjectService], not by the security expression
- * alone: the permission gate answers "can this user read projects?", while
- * the service answers "which specific projects can this user see?".
+ * alone: the permission gate answers "can this user perform this action?",
+ * while the service answers "on which specific projects?".
+ *
+ * Action endpoints follow the pattern:
+ *   `POST /api/v1/projects/{id}/action-name` (no If-Match in Phase 1.7;
+ *   optimistic locking is enforced at the workflow instance level).
  */
 @RestController
 @RequestMapping("/api/v1/projects")
 class ProjectController(
     private val projectService: ProjectService,
 ) {
+    // ── Read ──────────────────────────────────────────────────────────────────
+
     /**
      * Returns all projects visible to the caller.
      *
@@ -67,4 +82,63 @@ class ProjectController(
         val project = projectService.getForPrincipal(id, principal)
         return ProjectSummaryResponse(project.id, project.name, project.zoneId)
     }
+
+    // ── Write ─────────────────────────────────────────────────────────────────
+
+    /**
+     * EDGS/C-I creates a new project and immediately submits it for allocation.
+     *
+     * After this call the project is in `AWAITING_CAO_ALLOCATION` state.
+     * Returns 201 Created with the full project detail.
+     */
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.CREATE')")
+    fun create(
+        @RequestBody request: CreateProjectRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): ProjectDetailResponse = projectService.create(request, principal)
+
+    /**
+     * CAO/C allocates the project to a CE/C user.
+     *
+     * Advances state: AWAITING_CAO_ALLOCATION → AWAITING_CEC_ASSIGNMENT.
+     * Records a CE_C entry in `project_assignments`.
+     */
+    @PostMapping("/{id}/allocate")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.ALLOCATE')")
+    fun allocate(
+        @PathVariable id: UUID,
+        @RequestBody request: AllocateProjectRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): ProjectDetailResponse = projectService.allocate(id, request, principal)
+
+    /**
+     * CE/C assigns one or more Dy CE/Cs to the project.
+     *
+     * Advances state: AWAITING_CEC_ASSIGNMENT → ACTIVE.
+     * Records DY_CE_C entries in `project_assignments`.
+     */
+    @PostMapping("/{id}/assign-dyce")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.ASSIGN_DYCE')")
+    fun assignDyce(
+        @PathVariable id: UUID,
+        @RequestBody request: AssignDyceRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): ProjectDetailResponse = projectService.assignDyce(id, request, principal)
+
+    /**
+     * CE/C designates one of the assigned Dy CE/Cs as the Nodal Dy CE/C.
+     *
+     * Does not advance the workflow (project remains ACTIVE).
+     * Deactivates the previous Nodal assignment and grants ROLE_NODAL_DY_CE_C
+     * to the new Nodal user.
+     */
+    @PostMapping("/{id}/designate-nodal")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.DESIGNATE_NODAL')")
+    fun designateNodal(
+        @PathVariable id: UUID,
+        @RequestBody request: DesignateNodalRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): ProjectDetailResponse = projectService.designateNodal(id, request, principal)
 }
