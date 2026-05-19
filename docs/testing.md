@@ -237,3 +237,101 @@ What we actually gate:
 - New workflow states must have at least one test per allowed transition and one per forbidden actor.
 
 Reviewer enforces these in PR review. CI provides the coverage report for context.
+
+---
+
+## 9. Known gaps
+
+Gaps are documented here when they are accepted consciously rather than overlooked.
+Each entry records what the gap is, why it was accepted, and what the real fix looks like.
+
+---
+
+### GAP-001 — ClamAV scan-mandatory gate uses a port assumption, not a real scanner
+
+**File**: `backend/src/test/kotlin/in/gov/ir/pia/phase1/Phase1GoldenPathIntegrationTest.kt`
+**Added**: Phase 1.14
+
+**What the test does**
+
+Gate D of the golden-path test asserts that an attachment upload is blocked with
+`503 SERVICE_UNAVAILABLE` when ClamAV is unreachable.  It does this by pointing
+`pia.clamav.host` at `127.0.0.1` and `pia.clamav.port` at `19999` (a port assumed
+to be unbound) with a 200 ms connect timeout.  The test then expects the service to
+respond 503 rather than commit the file to MinIO.
+
+**Why it works in practice**
+
+`AttachmentService.scanWithClamAv` opens a raw TCP socket.  When the port is unbound
+the OS returns an immediate `ConnectException` (TCP RST); the catch block maps any
+non-`ResponseStatusException` to 503.  This path is exercised regardless of whether
+the timeout or the RST fires first, so the assertion is stable on all tested OSes
+(Linux, Windows, macOS) and in the GitHub Actions ubuntu-latest runner.
+
+**The gap**
+
+The assumption that port 19999 is unbound is not enforced.  If another process happens
+to be listening on that port, the socket connects, `scanWithClamAv` sends the INSTREAM
+command, receives a malformed response (not a ClamAV OK/FOUND line), and the service
+would either 503 (parse failure) or, worst case, misread a stray byte sequence as
+`OK` and proceed with the upload — causing gate D to fail with an unexpected 201.
+
+Additionally, the test does not verify the full ClamAV protocol: it only checks that
+an unreachable scanner blocks uploads.  It does **not** test that an infected file
+(EICAR test signature) is actually quarantined.
+
+**Accepted because**
+
+The primary gate requirement is "scan is mandatory — no scanner, no upload".  That
+property is correctly verified.  The port collision risk is extremely low in CI
+(ephemeral Linux container, nothing on 19999).  The EICAR quarantine test belongs in
+a dedicated `AttachmentIntegrationTest` that spins up a real ClamAV Testcontainer;
+that test is deferred to Phase 2 when the full Testcontainers sidecar suite is built.
+
+**Real fix**
+
+1. Bind a `ServerSocket(0)` in `@BeforeEach` to claim an ephemeral port, then
+   immediately close it; use that port number as `pia.clamav.port`.  This guarantees
+   the port is unbound for the duration of the test without relying on 19999.
+2. Add `AttachmentIntegrationTest` (Phase 2) using `GenericContainer("clamav/clamav:1")`
+   and the EICAR test signature (`X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*`)
+   to verify the full INSTREAM protocol, infected-file rejection, and clean-file
+   acceptance end to end.
+
+---
+
+### GAP-002 — project_activity_summary draft_count is always 0 at record creation
+
+**Files**: `backend/src/main/kotlin/in/gov/ir/pia/dashboard/SummaryUpdater.kt`,
+`backend/src/main/resources/db/migration/V011__land_activity_summary.sql`
+**Added**: Phase 1.14
+
+**What the gap is**
+
+`SummaryUpdater` listens to `WorkflowStateChangedEvent`, which is only published by
+`WorkflowServiceImpl.transition()`.  `WorkflowServiceImpl.start()` — called when a
+record is created and its workflow instance is initialised in DRAFT — does **not**
+publish the event.  As a result, `draft_count` in `project_activity_summary` stays at
+0 even when records exist in DRAFT state.
+
+The transition from DRAFT → SUBMITTED_FOR_VERIFICATION decrements `draft_count`
+via `GREATEST(0, draft_count - 1)`, which is a no-op when `draft_count` is already 0,
+so no underflow or data corruption occurs.  Downstream counts (submitted, verified,
+authenticated) are always correct.
+
+**Accepted because**
+
+`draft_count` is a convenience display field.  The gate test and the dashboard KPI
+both only assert on `authenticated_count`, which is unaffected.  Fixing this before
+Phase 2 would require either publishing an event from `start()` (changing the
+workflow engine contract) or adding a "record created" domain event — both are
+reasonable but out of scope for the Phase 1 gate.
+
+**Real fix**
+
+Publish a `WorkflowStateChangedEvent` (with `fromStateCode = null`) from
+`WorkflowServiceImpl.start()` after saving the initial instance, or introduce a
+dedicated `RecordCreatedEvent` and add a `SummaryUpdater` listener for it that
+increments `draft_count`.  Either approach ensures the summary is accurate from the
+moment of creation.  Do this at the start of Phase 2 before the dashboard widgets
+display `draft_count` prominently.

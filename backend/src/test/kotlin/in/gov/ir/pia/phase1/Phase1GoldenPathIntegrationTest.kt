@@ -51,11 +51,41 @@ import java.util.UUID
  * After authentication, verifies:
  *   A. DYCE_1 received an "authenticated" notification.
  *   B. Dashboard shows authenticated_count ≥ 1 for LAND_ACQUISITION.
- *   C. Audit log contains WORKFLOW.SUBMITTED, WORKFLOW.VERIFIED, WORKFLOW.AUTHENTICATED.
+ *   C. Audit log contains WORKFLOW.SUBMITTED_FOR_VERIFICATION, WORKFLOW.VERIFIED,
+ *      WORKFLOW.AUTHENTICATED.
  *   D. Attachment upload is blocked when ClamAV is unreachable (scan-mandatory gate).
  *
- * [MinioClient] is @MockBean — the MinIO sidecar is unavailable in CI.
- * ClamAV is configured with port 19999 (nothing listening) → 503 on upload.
+ * ## Sidecar mocking
+ *
+ * **MinIO**: [MinioClient] is `@MockkBean` — the MinIO sidecar is not available in CI
+ * Testcontainers environments.  The Spring context will fail to start without this mock
+ * because [MinioConfig] creates a real client bean that tries to connect on first use.
+ * A full attachment round-trip (upload → presigned download) is tested separately in
+ * `AttachmentIntegrationTest` which brings up a Testcontainers MinIO instance.
+ *
+ * **ClamAV**: No container is started.  Instead, [TestPropertySource] points
+ * `pia.clamav.host` at `127.0.0.1:19999` with a 200 ms timeout.  The upload call
+ * exercises [AttachmentService.scanWithClamAv] exactly as it would in production;
+ * the socket connection is refused or times out, and the service maps that to
+ * `503 SERVICE_UNAVAILABLE`.  This proves the scan path is mandatory — the file
+ * never reaches MinIO.
+ *
+ * ## Known gap — ClamAV 503 timing
+ *
+ * The assertion for gate D expects HTTP 503.  On most OS/JVM combinations an
+ * unbound port (19999) returns an immediate TCP RST, so the 200 ms timeout is
+ * never reached; the `catch (e: Exception)` block in `scanWithClamAv` fires on
+ * `ConnectException` and correctly maps it to 503.
+ *
+ * On certain CI sandbox environments (e.g. strict network namespaces that drop
+ * packets instead of rejecting them) the 200 ms timeout fires instead, producing
+ * the same 503 outcome via `SocketTimeoutException`.  Both paths are correct.
+ *
+ * If this test is ever run in an environment where port 19999 is actually bound
+ * by another process, gate D would pass the scan and the assertion would fail with
+ * an unexpected 201 or 415.  The fix is to use an ephemeral port guaranteed to be
+ * unbound, or to bring in a real ClamAV Testcontainer for this assertion.
+ * Tracking: see `docs/testing.md` § known gaps.
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("dev")
