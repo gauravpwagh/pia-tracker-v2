@@ -9,6 +9,7 @@ import `in`.gov.ir.pia.repository.ProjectActivityRepository
 import `in`.gov.ir.pia.repository.ProjectAssignmentRepository
 import `in`.gov.ir.pia.repository.ProjectRepository
 import `in`.gov.ir.pia.security.PiaPrincipal
+import `in`.gov.ir.pia.workflow.WorkflowService
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
@@ -108,6 +109,7 @@ class ActivityService(
     private val jdbc: JdbcTemplate,
     private val objectMapper: ObjectMapper,
     private val entityManager: EntityManager,
+    private val workflowService: WorkflowService,
 ) {
     // ── Read ──────────────────────────────────────────────────────────────────
 
@@ -256,6 +258,36 @@ class ActivityService(
                 updatedByUserId = principal.userId,
             )
         recordRepository.save(record)
+
+        // ── Start per-section (or per-record) workflow instances ──────────────
+        //
+        // For section-level-workflow forms (e.g. Land Acquisition with 9
+        // section_codes): start one SECTION_STANDARD_V1 instance per section.
+        //
+        // For record-level forms (empty section_codes): start one
+        // RECORD_STANDARD_V1 instance for the whole record.
+        //
+        // The section code is stored on the workflow_instance row so that
+        // WorkflowService.currentState(entityType, entityId, sectionCode) can
+        // look up per-section state.
+        val sectionCodes = formDef.sectionCodes
+        if (sectionCodes.isNotEmpty()) {
+            sectionCodes.forEach { sectionCode ->
+                workflowService.start(
+                    definitionCode = "SECTION_STANDARD_V1",
+                    entityType = "ACTIVITY_RECORD",
+                    entityId = record.id,
+                    sectionCode = sectionCode,
+                )
+            }
+        } else {
+            workflowService.start(
+                definitionCode = "RECORD_STANDARD_V1",
+                entityType = "ACTIVITY_RECORD",
+                entityId = record.id,
+                sectionCode = null,
+            )
+        }
 
         auditLogWriter.write(
             actorUserId = principal.userId,

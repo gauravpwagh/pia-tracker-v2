@@ -167,7 +167,7 @@ class FormDefinitionIntegrationTest {
                 "village_chainage_from": "102+500",
                 "village_chainage_to": "103+200",
                 "district": "Agra",
-                "area_hectares_total": "12.5000"
+                "area_hectares_total": 12.5
             }
             """.trimIndent()
 

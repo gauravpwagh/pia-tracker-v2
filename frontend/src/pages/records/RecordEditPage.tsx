@@ -237,14 +237,23 @@ export default function RecordEditPage() {
   });
 
   // ── RJSF onChange ─────────────────────────────────────────────────────────
+  //
+  // The RJSF form is scoped to the current section (a nested object property).
+  // When it reports a change we merge the section data back into the full
+  // record data before persisting.  For non-section forms the section-scoped
+  // data IS the full data.
 
   const handleFormChange = useCallback(
-    (data: Record<string, unknown>) => {
-      setFormData(data);
-      formDataRef.current = data;
+    (sectionData: Record<string, unknown>) => {
+      const next = hasSections && activeSectionResolved
+        ? { ...formDataRef.current, [activeSectionResolved]: sectionData }
+        : sectionData;
+      setFormData(next);
+      formDataRef.current = next;
       markDirty();
     },
-    [markDirty],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [markDirty, activeSectionResolved, hasSections],
   );
 
   // ── Conflict reload ────────────────────────────────────────────────────────
@@ -369,7 +378,11 @@ export default function RecordEditPage() {
               ref={formRef}
               schema={sectionSchema}
               uiSchema={sectionUiSchema}
-              formData={formData}
+              formData={
+                hasSections && activeSectionResolved
+                  ? ((formData[activeSectionResolved] ?? {}) as Record<string, unknown>)
+                  : formData
+              }
               onChange={handleFormChange}
               disabled={autosaveStatus === 'conflict'}
             />
@@ -426,13 +439,49 @@ export default function RecordEditPage() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Extract properties belonging to a single section from the full schema.
+ * Extract the sub-schema for a single section from the full record schema.
  *
- * Phase 1.9: the LAND_ACQUISITION_V1 stub has no section_codes, so this
- * function is never called in Phase 1.9. Returns the full schema unchanged
- * as a placeholder; Phase 1.10 implements proper section-based filtering.
+ * ## Convention
+ *
+ * The full schema has top-level properties for the "header" fields (village_name,
+ * chainages, etc.) plus one nested object property per section (e.g. "srp",
+ * "cala", "section_20a", …).  Each section property uses a $ref to a $defs
+ * sub-schema.
+ *
+ * This function returns a synthetic schema that contains only the section's
+ * nested object as a flat form — i.e. the properties of the section object
+ * become top-level properties.  This is what RJSF renders for the active tab.
+ *
+ * Top-level header fields (village_name, chainages, etc.) are shown in the
+ * first section tab and hidden in subsequent ones by convention — the first
+ * section tab includes them via a "header" property group.
+ *
+ * ## $ref resolution
+ *
+ * The section property likely uses `{ "$ref": "#/$defs/SrpSection" }`.  We
+ * inline the $defs from the parent schema so the sub-schema is self-contained.
  */
-function buildSectionSchema(schema: RJSFSchema, _sectionCode: string): RJSFSchema {
-  // TODO Phase 1.10: filter schema.properties to those belonging to _sectionCode.
-  return schema;
+function buildSectionSchema(schema: RJSFSchema, sectionCode: string): RJSFSchema {
+  const props = (schema.properties ?? {}) as Record<string, RJSFSchema>;
+  const defs = (schema.$defs ?? {}) as Record<string, RJSFSchema>;
+
+  const sectionProp = props[sectionCode];
+  if (!sectionProp) {
+    // Section code not found in schema — return full schema as fallback
+    return schema;
+  }
+
+  // Resolve $ref if present
+  let sectionSchema: RJSFSchema = sectionProp;
+  const ref = sectionProp.$ref as string | undefined;
+  if (ref) {
+    const defName = ref.replace('#/$defs/', '');
+    sectionSchema = defs[defName] ?? sectionProp;
+  }
+
+  // Return the section's object schema, carrying the parent $defs for nested $refs
+  return {
+    ...sectionSchema,
+    $defs: defs,
+  };
 }
