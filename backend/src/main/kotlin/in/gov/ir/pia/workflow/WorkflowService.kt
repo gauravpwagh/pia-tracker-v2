@@ -77,4 +77,36 @@ interface WorkflowService {
      * Returns false if the state has no SLA configured.
      */
     fun isSlaBreached(instanceId: UUID): Boolean
+
+    /**
+     * Returns all [WorkflowInstance]s for an entity (a record or a project).
+     *
+     * For section-level workflows this returns one instance per section code.
+     * For record-level or project-level this returns one instance.
+     */
+    fun getInstances(
+        entityType: String,
+        entityId: UUID,
+    ): List<WorkflowInstance>
+
+    /**
+     * Returns the [WorkflowInstance] for a specific entity + section, or null.
+     *
+     * Pass [sectionCode] = null to look up a record-level or project-level instance.
+     */
+    fun getInstance(
+        entityType: String,
+        entityId: UUID,
+        sectionCode: String?,
+    ): WorkflowInstance?
+
+    /**
+     * Returns the action codes that [actor] may perform on [instance] given
+     * its current state.  Role-restricted transitions where the actor lacks the
+     * required role are excluded.
+     */
+    fun availableActions(
+        instance: WorkflowInstance,
+        actor: Principal,
+    ): List<String>
 }

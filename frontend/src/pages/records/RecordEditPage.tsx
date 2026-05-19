@@ -7,9 +7,10 @@
  *
  * Three columns:
  *   1. Left  — Section nav (Ant Design Tabs tabPosition="left").
- *              Hidden when the form definition has no section_codes.
+ *              Each tab label shows a state-coloured dot for the section's
+ *              current workflow state.
  *   2. Centre — RJSF form for the selected section (or full form).
- *   3. Right  — Collapsible panel: Comments | History | Workflow (stubs in 1.9).
+ *   3. Right  — Collapsible panel: Comments | History | Workflow.
  *
  * ## Autosave
  *
@@ -22,23 +23,32 @@
  * patchRecord sends If-Match from the ETag store.  A 409 response puts the
  * autosave hook into 'conflict' state and the page renders a reload prompt.
  *
- * ## Section tabs
+ * ## Section workflow
  *
- * section_codes from the form definition drive the left tabs.  Empty
- * section_codes → no tab column, full schema rendered directly.
+ * Each section has an independent workflow instance (SECTION_STANDARD_V1).
+ * Workflow state is fetched from GET /api/v1/activity-records/{id}/workflow.
+ * The bottom bar shows the primary action(s) for the active section:
+ *   Dy CE/C in DRAFT → "Submit Section"
+ *   Nodal in SUBMITTED_FOR_VERIFICATION → "Verify" + "Send Back"
+ *   CE/C in VERIFIED → "Authenticate" + "Send Back"
+ *   SENT_BACK_TO_DYCE → "Resubmit"
+ *   SENT_BACK_TO_NODAL → "Re-verify"
+ * Send Back always opens a modal requiring a comment.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
+  Badge,
   Breadcrumb,
   Button,
   Col,
   Flex,
   Layout,
   Row,
+  Space,
   Spin,
   Tabs,
   Tag,
@@ -51,10 +61,17 @@ import dayjs from 'dayjs';
 
 import { fetchRecord, fetchActivity, patchRecord } from '@api/activityRecords';
 import { fetchFormDefinitionById } from '@api/formDefinitions';
+import {
+  fetchWorkflowState,
+  performWorkflowAction,
+  type SectionWorkflowState,
+  type WorkflowActionCode,
+} from '@api/workflow';
 import { useAutosave } from '@hooks/useAutosave';
 import { RjsfForm } from '@/forms/RjsfForm';
 import type { RjsfFormHandle } from '@/forms/RjsfForm';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
+import { SendBackModal } from './SendBackModal';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -68,6 +85,16 @@ const STATE_COLORS: Record<string, string> = {
   AUTHENTICATED: 'purple',
   SENT_BACK_TO_DYCE: 'warning',
   SENT_BACK_TO_NODAL: 'warning',
+};
+
+/** Dot colour for section tab labels. */
+const SECTION_DOT_COLORS: Record<string, string> = {
+  DRAFT: '#d9d9d9',
+  SUBMITTED_FOR_VERIFICATION: '#1677ff',
+  VERIFIED: '#52c41a',
+  AUTHENTICATED: '#722ed1',
+  SENT_BACK_TO_DYCE: '#fa8c16',
+  SENT_BACK_TO_NODAL: '#fa8c16',
 };
 
 function RecordStateBadge({ state }: { state: string }) {
@@ -85,9 +112,15 @@ interface SectionTabsProps {
   sectionCodes: string[];
   activeSection: string;
   onSelect: (code: string) => void;
+  sectionStates: Record<string, SectionWorkflowState>;
 }
 
-function SectionTabs({ sectionCodes, activeSection, onSelect }: SectionTabsProps) {
+function SectionTabs({
+  sectionCodes,
+  activeSection,
+  onSelect,
+  sectionStates,
+}: SectionTabsProps) {
   if (sectionCodes.length === 0) return null;
   return (
     <Tabs
@@ -95,22 +128,76 @@ function SectionTabs({ sectionCodes, activeSection, onSelect }: SectionTabsProps
       activeKey={activeSection}
       onChange={onSelect}
       style={{ height: '100%' }}
-      items={sectionCodes.map((code) => ({
-        key: code,
-        label: code.replace(/_/g, ' '),
-      }))}
+      items={sectionCodes.map((code) => {
+        const inst = sectionStates[code];
+        const dotColor = inst
+          ? (SECTION_DOT_COLORS[inst.currentStateCode] ?? '#d9d9d9')
+          : '#d9d9d9';
+        return {
+          key: code,
+          label: (
+            <Flex align="center" gap={6}>
+              <Badge color={dotColor} />
+              <span style={{ textTransform: 'capitalize' }}>
+                {code.replace(/_/g, ' ')}
+              </span>
+            </Flex>
+          ),
+        };
+      })}
     />
   );
 }
 
-// ── Right panel (stubs for Phase 1.9) ────────────────────────────────────────
+// ── Right panel ───────────────────────────────────────────────────────────────
 
-function RightPanel() {
+interface WorkflowPanelProps {
+  activeSectionState: SectionWorkflowState | undefined;
+}
+
+function WorkflowPanel({ activeSectionState }: WorkflowPanelProps) {
+  const { t } = useTranslation('forms');
+
+  return (
+    <div style={{ padding: '0 4px' }}>
+      {activeSectionState ? (
+        <>
+          <Text strong>{t('record.workflow.sectionHeader')}</Text>
+          <div style={{ marginTop: 8 }}>
+            <Text type="secondary">{t('record.workflow.stateLabel')}: </Text>
+            <RecordStateBadge state={activeSectionState.currentStateCode} />
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <Text type="secondary">
+              {t('record.workflow.enteredAt', {
+                date: dayjs(activeSectionState.enteredStateAt).format('DD MMM YYYY HH:mm'),
+              })}
+            </Text>
+          </div>
+          {activeSectionState.isSlaBreached && (
+            <Tag color="error" style={{ marginTop: 8 }}>
+              SLA Breached
+            </Tag>
+          )}
+        </>
+      ) : (
+        <Text type="secondary">{t('record.workflow.sectionHeader')}</Text>
+      )}
+    </div>
+  );
+}
+
+function RightPanel({ activeSectionState }: { activeSectionState: SectionWorkflowState | undefined }) {
   const { t } = useTranslation('forms');
   return (
     <Tabs
-      defaultActiveKey="comments"
+      defaultActiveKey="workflow"
       items={[
+        {
+          key: 'workflow',
+          label: t('record.panel.workflow'),
+          children: <WorkflowPanel activeSectionState={activeSectionState} />,
+        },
         {
           key: 'comments',
           label: t('record.panel.comments'),
@@ -129,15 +216,6 @@ function RightPanel() {
             </Text>
           ),
         },
-        {
-          key: 'workflow',
-          label: t('record.panel.workflow'),
-          children: (
-            <Text type="secondary" style={{ padding: 16, display: 'block' }}>
-              Workflow actions — Phase 1.11
-            </Text>
-          ),
-        },
       ]}
     />
   );
@@ -145,28 +223,110 @@ function RightPanel() {
 
 // ── Autosave status indicator ─────────────────────────────────────────────────
 
-interface AutosaveIndicatorProps {
-  status: string;
-  savedAt: Date | null;
-}
-
-function AutosaveIndicator({ status, savedAt }: AutosaveIndicatorProps) {
+function AutosaveIndicator({ status, savedAt }: { status: string; savedAt: Date | null }) {
   const { t } = useTranslation('forms');
-
-  if (status === 'saving') {
-    return <Text type="secondary">{t('record.autosave.saving')}</Text>;
-  }
-  if (status === 'saved' && savedAt) {
+  if (status === 'saving') return <Text type="secondary">{t('record.autosave.saving')}</Text>;
+  if (status === 'saved' && savedAt)
     return (
       <Text type="secondary">
         {t('record.autosave.saved', { time: dayjs(savedAt).format('HH:mm') })}
       </Text>
     );
-  }
-  if (status === 'error') {
-    return <Text type="danger">{t('record.autosave.saveFailed')}</Text>;
-  }
+  if (status === 'error') return <Text type="danger">{t('record.autosave.saveFailed')}</Text>;
   return null;
+}
+
+// ── Workflow action buttons ───────────────────────────────────────────────────
+
+interface WorkflowActionsProps {
+  sectionState: SectionWorkflowState | undefined;
+  sectionLabel: string;
+  onAction: (action: WorkflowActionCode, comment?: string) => void;
+  loading: boolean;
+}
+
+function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: WorkflowActionsProps) {
+  const { t } = useTranslation('forms');
+  const [sendBackOpen, setSendBackOpen] = useState(false);
+
+  if (!sectionState || sectionState.isTerminal) return null;
+
+  const actions = sectionState.availableActions;
+
+  const canSubmit     = actions.includes('submit');
+  const canResubmit   = actions.includes('resubmit');
+  const canVerify     = actions.includes('verify');
+  const canReVerify   = actions.includes('re_verify');
+  const canAuth       = actions.includes('authenticate');
+  const canSendBack   = actions.includes('send_back');
+
+  return (
+    <>
+      <Space>
+        {canSubmit && (
+          <Tooltip title={t('record.actions.submitTooltip')}>
+            <Button
+              type="primary"
+              loading={loading}
+              onClick={() => onAction('submit')}
+            >
+              {t('record.actions.submitSection')}
+            </Button>
+          </Tooltip>
+        )}
+        {canResubmit && (
+          <Button loading={loading} onClick={() => onAction('resubmit')}>
+            {t('record.actions.resubmit')}
+          </Button>
+        )}
+        {canVerify && (
+          <Tooltip title={t('record.actions.verifyTooltip')}>
+            <Button
+              type="primary"
+              loading={loading}
+              onClick={() => onAction('verify')}
+            >
+              {t('record.actions.verify')}
+            </Button>
+          </Tooltip>
+        )}
+        {canReVerify && (
+          <Button loading={loading} onClick={() => onAction('re-verify')}>
+            {t('record.actions.reVerify')}
+          </Button>
+        )}
+        {canAuth && (
+          <Tooltip title={t('record.actions.authenticateTooltip')}>
+            <Button
+              type="primary"
+              loading={loading}
+              onClick={() => onAction('authenticate')}
+            >
+              {t('record.actions.authenticate')}
+            </Button>
+          </Tooltip>
+        )}
+        {canSendBack && (
+          <Tooltip title={t('record.actions.sendBackTooltip')}>
+            <Button danger loading={loading} onClick={() => setSendBackOpen(true)}>
+              {t('record.actions.sendBack')}
+            </Button>
+          </Tooltip>
+        )}
+      </Space>
+
+      <SendBackModal
+        open={sendBackOpen}
+        sectionLabel={sectionLabel}
+        loading={loading}
+        onConfirm={(comment) => {
+          setSendBackOpen(false);
+          onAction('send-back', comment);
+        }}
+        onCancel={() => setSendBackOpen(false)}
+      />
+    </>
+  );
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -175,6 +335,7 @@ export default function RecordEditPage() {
   const { recordId } = useParams<{ recordId: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation(['forms', 'common']);
+  const queryClient = useQueryClient();
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -205,6 +366,13 @@ export default function RecordEditPage() {
     enabled: !!record?.formDefinitionId,
   });
 
+  const { data: workflowState } = useQuery({
+    queryKey: ['workflow', recordId],
+    queryFn: () => fetchWorkflowState(recordId!),
+    enabled: !!recordId,
+    refetchOnWindowFocus: false,
+  });
+
   // ── Section state ──────────────────────────────────────────────────────────
 
   const sectionCodes = formDef?.sectionCodes ?? [];
@@ -212,14 +380,26 @@ export default function RecordEditPage() {
   const activeSectionResolved =
     sectionCodes.length > 0 ? activeSection || sectionCodes[0] : '';
 
+  const hasSections = sectionCodes.length > 0;
+
+  // Index section states by code for O(1) lookup
+  const sectionStates: Record<string, SectionWorkflowState> = {};
+  if (workflowState) {
+    for (const inst of workflowState.instances) {
+      if (inst.sectionCode) sectionStates[inst.sectionCode] = inst;
+    }
+  }
+
+  const activeSectionState = activeSectionResolved
+    ? sectionStates[activeSectionResolved]
+    : (workflowState?.instances[0] ?? undefined);
+
   // ── Form data ──────────────────────────────────────────────────────────────
 
   const [formData, setFormData] = useState<Record<string, unknown>>({});
-  // Keep a ref for the autosave closure; updated in sync with state.
   const formDataRef = useRef<Record<string, unknown>>({});
   const formRef = useRef<RjsfFormHandle>(null);
 
-  // Seed formData once when the record first loads.
   useEffect(() => {
     if (record) {
       const data = record.dataJson as Record<string, unknown>;
@@ -237,17 +417,13 @@ export default function RecordEditPage() {
   });
 
   // ── RJSF onChange ─────────────────────────────────────────────────────────
-  //
-  // The RJSF form is scoped to the current section (a nested object property).
-  // When it reports a change we merge the section data back into the full
-  // record data before persisting.  For non-section forms the section-scoped
-  // data IS the full data.
 
   const handleFormChange = useCallback(
     (sectionData: Record<string, unknown>) => {
-      const next = hasSections && activeSectionResolved
-        ? { ...formDataRef.current, [activeSectionResolved]: sectionData }
-        : sectionData;
+      const next =
+        hasSections && activeSectionResolved
+          ? { ...formDataRef.current, [activeSectionResolved]: sectionData }
+          : sectionData;
       setFormData(next);
       formDataRef.current = next;
       markDirty();
@@ -267,6 +443,35 @@ export default function RecordEditPage() {
     }
   }, [refetchRecord]);
 
+  // ── Workflow actions ───────────────────────────────────────────────────────
+
+  const workflowMutation = useMutation({
+    mutationFn: ({
+      action,
+      comment,
+    }: {
+      action: WorkflowActionCode;
+      comment?: string;
+    }) =>
+      performWorkflowAction(recordId!, action, {
+        sectionCode: activeSectionResolved || null,
+        comment: comment ?? null,
+      }),
+    onSuccess: () => {
+      // Refresh workflow state so section icons + available actions update
+      void queryClient.invalidateQueries({ queryKey: ['workflow', recordId] });
+      // Also refresh the record (record_state cache may have changed)
+      void queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+    },
+  });
+
+  const handleWorkflowAction = useCallback(
+    (action: WorkflowActionCode, comment?: string) => {
+      workflowMutation.mutate({ action, comment });
+    },
+    [workflowMutation],
+  );
+
   // ── Section-filtered schema ────────────────────────────────────────────────
 
   const sectionSchema: RJSFSchema | undefined = formDef
@@ -275,7 +480,8 @@ export default function RecordEditPage() {
       : (formDef.schemaJson as RJSFSchema)
     : undefined;
 
-  const sectionUiSchema: UiSchema | undefined = formDef?.uiSchemaJson as UiSchema | undefined;
+  const sectionUiSchema: UiSchema | undefined =
+    formDef?.uiSchemaJson as UiSchema | undefined;
 
   // ── Loading / error states ─────────────────────────────────────────────────
 
@@ -314,10 +520,13 @@ export default function RecordEditPage() {
 
   // ── Column spans ───────────────────────────────────────────────────────────
 
-  const hasSections = sectionCodes.length > 0;
-  const leftColSpan = hasSections ? 4 : 0;
+  const leftColSpan   = hasSections ? 4 : 0;
   const centreColSpan = hasSections ? 14 : 18;
-  const rightColSpan = 6;
+  const rightColSpan  = 6;
+
+  const sectionLabel = activeSectionResolved
+    ? activeSectionResolved.replace(/_/g, ' ')
+    : 'Record';
 
   return (
     <Layout style={{ background: 'transparent', height: '100%' }}>
@@ -361,6 +570,18 @@ export default function RecordEditPage() {
           />
         )}
 
+        {/* ── Workflow action error ── */}
+        {workflowMutation.isError && (
+          <Alert
+            type="error"
+            showIcon
+            closable
+            message="Workflow action failed"
+            description={String(workflowMutation.error)}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+
         {/* ── Three-column body ── */}
         <Row gutter={16}>
           {hasSections && (
@@ -369,6 +590,7 @@ export default function RecordEditPage() {
                 sectionCodes={sectionCodes}
                 activeSection={activeSectionResolved}
                 onSelect={setActiveSection}
+                sectionStates={sectionStates}
               />
             </Col>
           )}
@@ -384,7 +606,10 @@ export default function RecordEditPage() {
                   : formData
               }
               onChange={handleFormChange}
-              disabled={autosaveStatus === 'conflict'}
+              disabled={
+                autosaveStatus === 'conflict' ||
+                activeSectionState?.isTerminal === true
+              }
             />
           </Col>
 
@@ -392,7 +617,7 @@ export default function RecordEditPage() {
             span={rightColSpan}
             style={{ borderLeft: '1px solid var(--colorBorder)', paddingLeft: 16 }}
           >
-            <RightPanel />
+            <RightPanel activeSectionState={activeSectionState} />
           </Col>
         </Row>
       </Content>
@@ -402,7 +627,7 @@ export default function RecordEditPage() {
         style={{
           position: 'fixed',
           bottom: 0,
-          left: 240, // matches App.tsx Sider width
+          left: 240,
           right: 0,
           padding: '12px 24px',
           background: 'var(--colorBgContainer)',
@@ -421,12 +646,12 @@ export default function RecordEditPage() {
           {t('forms:record.actions.saveDraft')}
         </Button>
 
-        {/* Workflow primary actions wired in Phase 1.11 */}
-        <Tooltip title="Available when record is ready to submit">
-          <Button type="primary" disabled>
-            {t('forms:record.actions.submitRecord')}
-          </Button>
-        </Tooltip>
+        <WorkflowActions
+          sectionState={activeSectionState}
+          sectionLabel={sectionLabel}
+          onAction={handleWorkflowAction}
+          loading={workflowMutation.isPending}
+        />
 
         <div style={{ marginLeft: 'auto' }}>
           <AutosaveIndicator status={autosaveStatus} savedAt={savedAt} />
@@ -441,37 +666,18 @@ export default function RecordEditPage() {
 /**
  * Extract the sub-schema for a single section from the full record schema.
  *
- * ## Convention
- *
- * The full schema has top-level properties for the "header" fields (village_name,
- * chainages, etc.) plus one nested object property per section (e.g. "srp",
- * "cala", "section_20a", …).  Each section property uses a $ref to a $defs
- * sub-schema.
- *
- * This function returns a synthetic schema that contains only the section's
- * nested object as a flat form — i.e. the properties of the section object
- * become top-level properties.  This is what RJSF renders for the active tab.
- *
- * Top-level header fields (village_name, chainages, etc.) are shown in the
- * first section tab and hidden in subsequent ones by convention — the first
- * section tab includes them via a "header" property group.
- *
- * ## $ref resolution
- *
- * The section property likely uses `{ "$ref": "#/$defs/SrpSection" }`.  We
- * inline the $defs from the parent schema so the sub-schema is self-contained.
+ * The full schema has top-level header fields plus one nested object property
+ * per section (e.g. "srp", "cala", "section_20a", …), often using a $ref to
+ * a $defs sub-schema.  This returns the section's object schema as a
+ * self-contained schema (with parent $defs carried along for nested $refs).
  */
 function buildSectionSchema(schema: RJSFSchema, sectionCode: string): RJSFSchema {
   const props = (schema.properties ?? {}) as Record<string, RJSFSchema>;
-  const defs = (schema.$defs ?? {}) as Record<string, RJSFSchema>;
+  const defs  = (schema.$defs ?? {}) as Record<string, RJSFSchema>;
 
   const sectionProp = props[sectionCode];
-  if (!sectionProp) {
-    // Section code not found in schema — return full schema as fallback
-    return schema;
-  }
+  if (!sectionProp) return schema;
 
-  // Resolve $ref if present
   let sectionSchema: RJSFSchema = sectionProp;
   const ref = sectionProp.$ref as string | undefined;
   if (ref) {
@@ -479,9 +685,5 @@ function buildSectionSchema(schema: RJSFSchema, sectionCode: string): RJSFSchema
     sectionSchema = defs[defName] ?? sectionProp;
   }
 
-  // Return the section's object schema, carrying the parent $defs for nested $refs
-  return {
-    ...sectionSchema,
-    $defs: defs,
-  };
+  return { ...sectionSchema, $defs: defs };
 }

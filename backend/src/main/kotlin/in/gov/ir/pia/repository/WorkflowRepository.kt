@@ -33,6 +33,12 @@ interface WorkflowTransitionRepository : JpaRepository<WorkflowTransition, UUID>
 }
 
 interface WorkflowInstanceRepository : JpaRepository<WorkflowInstance, UUID> {
+    /** All instances for an entity regardless of section code. */
+    fun findAllByEntityTypeAndEntityId(
+        entityType: String,
+        entityId: UUID,
+    ): List<WorkflowInstance>
+
     @Query(
         """
         SELECT wi FROM WorkflowInstance wi

@@ -7,6 +7,9 @@ import `in`.gov.ir.pia.service.activity.ActivityService
 import `in`.gov.ir.pia.service.activity.CreateActivityRecordRequest
 import `in`.gov.ir.pia.service.activity.CreateActivityRequest
 import `in`.gov.ir.pia.service.activity.PatchActivityRecordRequest
+import `in`.gov.ir.pia.service.activity.RecordWorkflowStateResponse
+import `in`.gov.ir.pia.service.activity.SectionWorkflowStateResponse
+import `in`.gov.ir.pia.service.activity.WorkflowActionRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
@@ -208,6 +211,109 @@ class ActivityController(
         response.setHeader("ETag", "\"${updated.version}\"")
         return updated
     }
+
+    // ── Workflow state + actions ──────────────────────────────────────────────
+
+    /**
+     * Returns the current workflow state for all section instances (or the
+     * single record-level instance) of a record.
+     *
+     * Used by the Record Edit Page to render section tab icons and action
+     * buttons.  Accessible to any user who can read the record.
+     */
+    @GetMapping("/api/v1/activity-records/{recordId}/workflow")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.READ.OWN')")
+    fun getWorkflowState(
+        @PathVariable recordId: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): RecordWorkflowStateResponse = activityService.getWorkflowState(recordId, principal)
+
+    /**
+     * Submits a section (or record) for verification.
+     *
+     * Body: `{ "sectionCode": "srp", "comment": null }`
+     * Role: `ROLE_DY_CE_C` (owning) or `ROLE_NODAL_DY_CE_C`.
+     */
+    @PostMapping("/api/v1/activity-records/{recordId}/submit")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.SUBMIT')")
+    fun submit(
+        @PathVariable recordId: UUID,
+        @RequestBody(required = false) request: WorkflowActionRequest?,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performWorkflowAction(recordId, "submit", request ?: WorkflowActionRequest(), principal)
+
+    /**
+     * Verifies a submitted section (or record).
+     *
+     * Role: `ROLE_NODAL_DY_CE_C`.
+     */
+    @PostMapping("/api/v1/activity-records/{recordId}/verify")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.VERIFY')")
+    fun verify(
+        @PathVariable recordId: UUID,
+        @RequestBody(required = false) request: WorkflowActionRequest?,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performWorkflowAction(recordId, "verify", request ?: WorkflowActionRequest(), principal)
+
+    /**
+     * Authenticates a verified section (or record).
+     *
+     * Role: `ROLE_CE_C`.
+     */
+    @PostMapping("/api/v1/activity-records/{recordId}/authenticate")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.AUTHENTICATE')")
+    fun authenticate(
+        @PathVariable recordId: UUID,
+        @RequestBody(required = false) request: WorkflowActionRequest?,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performWorkflowAction(recordId, "authenticate", request ?: WorkflowActionRequest(), principal)
+
+    /**
+     * Sends a section (or record) back for correction.
+     *
+     * Comment is required by the workflow definition.
+     * Role: `ROLE_NODAL_DY_CE_C` (from SUBMITTED_FOR_VERIFICATION) or
+     *       `ROLE_CE_C` (from VERIFIED).
+     */
+    @PostMapping("/api/v1/activity-records/{recordId}/send-back")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.SEND_BACK')")
+    fun sendBack(
+        @PathVariable recordId: UUID,
+        @RequestBody request: WorkflowActionRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performWorkflowAction(recordId, "send_back", request, principal)
+
+    /**
+     * Resubmits a section (or record) after it was sent back to Dy CE/C.
+     *
+     * Role: `ROLE_DY_CE_C` (owning).
+     */
+    @PostMapping("/api/v1/activity-records/{recordId}/resubmit")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.SUBMIT')")
+    fun resubmit(
+        @PathVariable recordId: UUID,
+        @RequestBody(required = false) request: WorkflowActionRequest?,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performWorkflowAction(recordId, "resubmit", request ?: WorkflowActionRequest(), principal)
+
+    /**
+     * Re-verifies a section (or record) after it was sent back to Nodal Dy CE/C.
+     *
+     * Role: `ROLE_NODAL_DY_CE_C`.
+     */
+    @PostMapping("/api/v1/activity-records/{recordId}/re-verify")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.VERIFY')")
+    fun reVerify(
+        @PathVariable recordId: UUID,
+        @RequestBody(required = false) request: WorkflowActionRequest?,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performWorkflowAction(recordId, "re_verify", request ?: WorkflowActionRequest(), principal)
 
     // ── Private helpers ───────────────────────────────────────────────────────
 

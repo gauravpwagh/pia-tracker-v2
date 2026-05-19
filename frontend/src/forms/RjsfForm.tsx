@@ -39,7 +39,8 @@ export const RjsfForm = forwardRef<RjsfFormHandle, RjsfFormProps>(function RjsfF
   { schema, uiSchema, formData, onChange, onSubmit, disabled, readonly },
   ref,
 ) {
-  const formRef = useRef<Form>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const formRef = useRef<any>(null);
 
   useImperativeHandle(ref, () => ({
     submit: () => {

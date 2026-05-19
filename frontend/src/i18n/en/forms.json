@@ -31,9 +31,31 @@
       "saveDraft": "Save Draft",
       "submitSection": "Submit Section",
       "submitRecord": "Submit Record",
+      "resubmit": "Resubmit",
       "verify": "Verify",
+      "reVerify": "Re-verify",
       "sendBack": "Send Back",
-      "authenticate": "Authenticate"
+      "authenticate": "Authenticate",
+      "submitTooltip": "Submit this section for Nodal verification",
+      "verifyTooltip": "Verify this section",
+      "authenticateTooltip": "Authenticate this section (irreversible)",
+      "sendBackTooltip": "Return this section for correction"
+    },
+    "sendBackModal": {
+      "title": "Send Back for Correction",
+      "commentLabel": "Reason for sending back",
+      "commentPlaceholder": "Explain what needs to be corrected…",
+      "commentRequired": "A comment is required when sending back",
+      "confirm": "Send Back",
+      "cancel": "Cancel"
+    },
+    "workflow": {
+      "sectionHeader": "Section Workflow",
+      "stateLabel": "Current state",
+      "actionsHeader": "Available actions",
+      "noActions": "No actions available in the current state",
+      "historyHeader": "History",
+      "enteredAt": "Entered {{date}}"
     },
     "error": {
       "loadFailed": "Failed to load record",

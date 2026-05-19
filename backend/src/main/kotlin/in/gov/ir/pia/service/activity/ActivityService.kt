@@ -41,6 +41,41 @@ data class PatchActivityRecordRequest(
     val dataJson: JsonNode,
 )
 
+/**
+ * Body for all workflow action endpoints (submit, verify, authenticate, send-back,
+ * resubmit, re-verify).
+ *
+ * [sectionCode] identifies which section instance to act on.  Null for record-level
+ * (non-section) workflow forms.
+ *
+ * [comment] is required when the transition demands one (e.g. send-back); the
+ * underlying [WorkflowService.transition] enforces this and throws
+ * [MissingCommentException] if absent.
+ */
+data class WorkflowActionRequest(
+    val sectionCode: String? = null,
+    val comment: String? = null,
+)
+
+/** Summary of a single workflow instance returned by the workflow-state endpoint. */
+data class SectionWorkflowStateResponse(
+    val instanceId: java.util.UUID,
+    val sectionCode: String?,
+    val currentStateCode: String,
+    val currentStateLabel: String,
+    val isTerminal: Boolean,
+    val isSlaBreached: Boolean,
+    val enteredStateAt: java.time.Instant,
+    /** Action codes the calling principal may perform right now. */
+    val availableActions: List<String>,
+)
+
+/** Workflow state for all sections (or the single record-level instance) of a record. */
+data class RecordWorkflowStateResponse(
+    val recordId: java.util.UUID,
+    val instances: List<SectionWorkflowStateResponse>,
+)
+
 data class ActivityDetailResponse(
     val id: UUID,
     val projectId: UUID,
@@ -375,6 +410,68 @@ class ActivityService(
         return updated.toDetailResponse()
     }
 
+    // ── Workflow state + actions ───────────────────────────────────────────────
+
+    /**
+     * Returns the current workflow state for every section (or the single
+     * record-level instance) of [recordId], together with the action codes that
+     * [principal] may perform in each.
+     *
+     * Access check: the caller must be able to reach the parent project (zone
+     * filter).  No DyCE-assignment check — CE/C and Nodal also need to read
+     * workflow state for Verify/Authenticate.
+     */
+    @Transactional(readOnly = true)
+    fun getWorkflowState(
+        recordId: UUID,
+        principal: PiaPrincipal,
+    ): RecordWorkflowStateResponse {
+        val record =
+            recordRepository.findByIdAndIsDeletedFalse(recordId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        getForPrincipal(record.projectActivityId, principal)  // zone access check
+
+        val instances = workflowService.getInstances("ACTIVITY_RECORD", recordId)
+        return RecordWorkflowStateResponse(
+            recordId = recordId,
+            instances = instances.map { it.toSectionResponse(principal) },
+        )
+    }
+
+    /**
+     * Performs a workflow [actionCode] (submit, verify, authenticate, send_back,
+     * resubmit, re_verify) on the section identified by [request.sectionCode],
+     * or on the record-level instance when [request.sectionCode] is null.
+     *
+     * Access check: caller must be able to reach the parent project.
+     * Role check and comment enforcement are delegated to [WorkflowService.transition].
+     */
+    @Transactional
+    fun performWorkflowAction(
+        recordId: UUID,
+        actionCode: String,
+        request: WorkflowActionRequest,
+        principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse {
+        val record =
+            recordRepository.findByIdAndIsDeletedFalse(recordId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        getForPrincipal(record.projectActivityId, principal)  // zone access check
+
+        val instance =
+            workflowService.getInstance("ACTIVITY_RECORD", recordId, request.sectionCode)
+                ?: throw ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    if (request.sectionCode != null)
+                        "No workflow instance found for section '${request.sectionCode}'"
+                    else
+                        "No workflow instance found for this record",
+                )
+
+        val updated = workflowService.transition(instance.id, actionCode, principal, request.comment)
+        return updated.toSectionResponse(principal)
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
@@ -454,5 +551,19 @@ class ActivityService(
             createdAt = createdAt,
             updatedAt = updatedAt,
             version = version,
+        )
+
+    private fun `in`.gov.ir.pia.domain.workflow.WorkflowInstance.toSectionResponse(
+        principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        SectionWorkflowStateResponse(
+            instanceId = id,
+            sectionCode = sectionCode,
+            currentStateCode = currentState.code,
+            currentStateLabel = currentState.label,
+            isTerminal = currentState.isTerminal,
+            isSlaBreached = workflowService.isSlaBreached(id),
+            enteredStateAt = enteredStateAt,
+            availableActions = workflowService.availableActions(this, principal),
         )
 }
