@@ -72,6 +72,9 @@ import { RjsfForm } from '@/forms/RjsfForm';
 import type { RjsfFormHandle } from '@/forms/RjsfForm';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { SendBackModal } from './SendBackModal';
+import { CommentPanel } from '@components/comments/CommentPanel';
+import { HistoryPanel } from '@components/comments/HistoryPanel';
+import { useAuthStore } from '@stores/authStore';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -187,34 +190,39 @@ function WorkflowPanel({ activeSectionState }: WorkflowPanelProps) {
   );
 }
 
-function RightPanel({ activeSectionState }: { activeSectionState: SectionWorkflowState | undefined }) {
+interface RightPanelProps {
+  activeSectionState: SectionWorkflowState | undefined;
+  recordId: string;
+}
+
+function RightPanel({ activeSectionState, recordId }: RightPanelProps) {
   const { t } = useTranslation('forms');
+  const currentUser = useAuthStore((s) => s.currentUser);
+
   return (
     <Tabs
-      defaultActiveKey="workflow"
+      defaultActiveKey="comments"
       items={[
-        {
-          key: 'workflow',
-          label: t('record.panel.workflow'),
-          children: <WorkflowPanel activeSectionState={activeSectionState} />,
-        },
         {
           key: 'comments',
           label: t('record.panel.comments'),
           children: (
-            <Text type="secondary" style={{ padding: 16, display: 'block' }}>
-              Comments — Phase 1.12
-            </Text>
+            <CommentPanel
+              entityType="ACTIVITY_RECORD"
+              entityId={recordId}
+              currentUserId={currentUser?.userId}
+            />
           ),
         },
         {
           key: 'history',
           label: t('record.panel.history'),
-          children: (
-            <Text type="secondary" style={{ padding: 16, display: 'block' }}>
-              History — Phase 1.12
-            </Text>
-          ),
+          children: <HistoryPanel recordId={recordId} />,
+        },
+        {
+          key: 'workflow',
+          label: t('record.panel.workflow'),
+          children: <WorkflowPanel activeSectionState={activeSectionState} />,
         },
       ]}
     />
@@ -462,6 +470,9 @@ export default function RecordEditPage() {
       void queryClient.invalidateQueries({ queryKey: ['workflow', recordId] });
       // Also refresh the record (record_state cache may have changed)
       void queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+      // Refresh comments panel (send-back auto-creates a comment) and history tab
+      void queryClient.invalidateQueries({ queryKey: ['comments', 'ACTIVITY_RECORD', recordId] });
+      void queryClient.invalidateQueries({ queryKey: ['recordHistory', recordId] });
     },
   });
 
@@ -617,7 +628,7 @@ export default function RecordEditPage() {
             span={rightColSpan}
             style={{ borderLeft: '1px solid var(--colorBorder)', paddingLeft: 16 }}
           >
-            <RightPanel activeSectionState={activeSectionState} />
+            <RightPanel activeSectionState={activeSectionState} recordId={recordId!} />
           </Col>
         </Row>
       </Content>

@@ -57,6 +57,16 @@
       "historyHeader": "History",
       "enteredAt": "Entered {{date}}"
     },
+    "comments": {
+      "placeholder": "Write a comment… (supports @[Name](uuid) mentions)",
+      "submit": "Post",
+      "empty": "No comments yet",
+      "delete": "Delete",
+      "deleteConfirm": "Delete this comment?"
+    },
+    "history": {
+      "empty": "No workflow history yet"
+    },
     "error": {
       "loadFailed": "Failed to load record",
       "schemaLoadFailed": "Failed to load form schema",

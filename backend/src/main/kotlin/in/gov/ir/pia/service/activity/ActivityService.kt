@@ -9,6 +9,8 @@ import `in`.gov.ir.pia.repository.ProjectActivityRepository
 import `in`.gov.ir.pia.repository.ProjectAssignmentRepository
 import `in`.gov.ir.pia.repository.ProjectRepository
 import `in`.gov.ir.pia.security.PiaPrincipal
+import `in`.gov.ir.pia.service.comment.CommentService
+import `in`.gov.ir.pia.service.comment.CreateCommentRequest
 import `in`.gov.ir.pia.workflow.WorkflowService
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -74,6 +76,22 @@ data class SectionWorkflowStateResponse(
 data class RecordWorkflowStateResponse(
     val recordId: java.util.UUID,
     val instances: List<SectionWorkflowStateResponse>,
+)
+
+/** One entry in the record history timeline (a workflow state transition). */
+data class RecordHistoryEntry(
+    val historyId: java.util.UUID,
+    val instanceId: java.util.UUID,
+    val sectionCode: String?,
+    val fromStateCode: String?,
+    val fromStateLabel: String?,
+    val toStateCode: String,
+    val toStateLabel: String,
+    val actionCode: String?,
+    val actorUserId: java.util.UUID,
+    val actorName: String,
+    val comment: String?,
+    val occurredAt: java.time.Instant,
 )
 
 data class ActivityDetailResponse(
@@ -145,6 +163,7 @@ class ActivityService(
     private val objectMapper: ObjectMapper,
     private val entityManager: EntityManager,
     private val workflowService: WorkflowService,
+    private val commentService: CommentService,
 ) {
     // ── Read ──────────────────────────────────────────────────────────────────
 
@@ -468,8 +487,83 @@ class ActivityService(
                         "No workflow instance found for this record",
                 )
 
+        // Capture the current state code before the transition (for the comment snapshot)
+        val stateBeforeAction = instance.currentState.code
+
         val updated = workflowService.transition(instance.id, actionCode, principal, request.comment)
+
+        // Auto-mirror the workflow comment into the Comments panel so it appears on the
+        // timeline alongside freeform user notes.
+        if (!request.comment.isNullOrBlank()) {
+            commentService.create(
+                CreateCommentRequest(
+                    entityType = "ACTIVITY_RECORD",
+                    entityId = recordId,
+                    bodyMarkdown = request.comment,
+                ),
+                principal,
+                workflowStateAtComment = stateBeforeAction,
+            )
+        }
+
         return updated.toSectionResponse(principal)
+    }
+
+    // ── History ───────────────────────────────────────────────────────────────
+
+    /**
+     * Returns all workflow transition history entries for a record, across all section
+     * instances, ordered by `at` ascending (oldest first).
+     */
+    @Transactional(readOnly = true)
+    fun getHistory(recordId: UUID, principal: PiaPrincipal): List<RecordHistoryEntry> {
+        val record = recordRepository.findByIdAndIsDeletedFalse(recordId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        getForPrincipal(record.projectActivityId, principal)  // zone access check
+
+        return jdbc.query(
+            """
+            SELECT
+                wh.id               AS history_id,
+                wi.id               AS instance_id,
+                wi.section_code,
+                fs.code             AS from_state_code,
+                fs.label            AS from_state_label,
+                ts.code             AS to_state_code,
+                ts.label            AS to_state_label,
+                wt.action_code,
+                u.id                AS actor_user_id,
+                u.name              AS actor_name,
+                wh.comment,
+                wh.at               AS occurred_at
+            FROM workflow_history wh
+            JOIN workflow_instances wi ON wi.id = wh.workflow_instance_id
+            JOIN workflow_states ts    ON ts.id = wh.to_state_id
+            LEFT JOIN workflow_states fs    ON fs.id = wh.from_state_id
+            LEFT JOIN workflow_transitions wt ON wt.id = wh.transition_id
+            JOIN users u                ON u.id = wh.actor_user_id
+            WHERE wi.entity_type = 'ACTIVITY_RECORD'
+              AND wi.entity_id = ?
+            ORDER BY wh.at ASC
+            """.trimIndent(),
+            { rs, _ ->
+                RecordHistoryEntry(
+                    historyId = UUID.fromString(rs.getString("history_id")),
+                    instanceId = UUID.fromString(rs.getString("instance_id")),
+                    sectionCode = rs.getString("section_code"),
+                    fromStateCode = rs.getString("from_state_code"),
+                    fromStateLabel = rs.getString("from_state_label"),
+                    toStateCode = rs.getString("to_state_code"),
+                    toStateLabel = rs.getString("to_state_label"),
+                    actionCode = rs.getString("action_code"),
+                    actorUserId = UUID.fromString(rs.getString("actor_user_id")),
+                    actorName = rs.getString("actor_name"),
+                    comment = rs.getString("comment"),
+                    occurredAt = rs.getTimestamp("occurred_at").toInstant(),
+                )
+            },
+            recordId,
+        )
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

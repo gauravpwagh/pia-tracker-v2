@@ -7,6 +7,7 @@ import `in`.gov.ir.pia.service.activity.ActivityService
 import `in`.gov.ir.pia.service.activity.CreateActivityRecordRequest
 import `in`.gov.ir.pia.service.activity.CreateActivityRequest
 import `in`.gov.ir.pia.service.activity.PatchActivityRecordRequest
+import `in`.gov.ir.pia.service.activity.RecordHistoryEntry
 import `in`.gov.ir.pia.service.activity.RecordWorkflowStateResponse
 import `in`.gov.ir.pia.service.activity.SectionWorkflowStateResponse
 import `in`.gov.ir.pia.service.activity.WorkflowActionRequest
@@ -314,6 +315,17 @@ class ActivityController(
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): SectionWorkflowStateResponse =
         activityService.performWorkflowAction(recordId, "re_verify", request ?: WorkflowActionRequest(), principal)
+
+    /**
+     * Returns all workflow transition history entries for a record, across all
+     * section instances, ordered oldest-first.  Used by the right-panel History tab.
+     */
+    @GetMapping("/api/v1/activity-records/{recordId}/history")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.READ.OWN')")
+    fun getHistory(
+        @PathVariable recordId: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): List<RecordHistoryEntry> = activityService.getHistory(recordId, principal)
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
