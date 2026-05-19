@@ -16,6 +16,7 @@
     "panel": {
       "comments": "Comments",
       "history": "History",
+      "attachments": "Files",
       "workflow": "Workflow"
     },
     "sections": {

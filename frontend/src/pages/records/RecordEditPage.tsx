@@ -74,6 +74,7 @@ import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { SendBackModal } from './SendBackModal';
 import { CommentPanel } from '@components/comments/CommentPanel';
 import { HistoryPanel } from '@components/comments/HistoryPanel';
+import { AttachmentPanel } from '@components/attachments/AttachmentPanel';
 import { useAuthStore } from '@stores/authStore';
 
 const { Content } = Layout;
@@ -218,6 +219,18 @@ function RightPanel({ activeSectionState, recordId }: RightPanelProps) {
           key: 'history',
           label: t('record.panel.history'),
           children: <HistoryPanel recordId={recordId} />,
+        },
+        {
+          key: 'attachments',
+          label: t('record.panel.attachments'),
+          children: (
+            <AttachmentPanel
+              entityType="ACTIVITY_RECORD"
+              entityId={recordId}
+              canUpload={currentUser?.permissions.includes('ATTACHMENT.UPLOAD.OWN_RECORDS')}
+              currentUserId={currentUser?.userId}
+            />
+          ),
         },
         {
           key: 'workflow',
