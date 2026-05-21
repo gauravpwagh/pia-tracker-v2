@@ -18,6 +18,11 @@ max_line_length = 140
 # which ktlint's standard rule rejects. The package is correct; the rule is overly strict here.
 ktlint_standard_package-name = disabled
 
+# Test files routinely contain long backtick function names and long assertion strings that
+# cannot be meaningfully shortened. Disable max_line_length for test sources only.
+[**/*Test.kt]
+max_line_length = off
+
 [*.{yml,yaml,json}]
 indent_size = 2
 

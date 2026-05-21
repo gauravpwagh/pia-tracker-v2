@@ -1,5 +1,6 @@
 package `in`.gov.ir.pia.activity
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import `in`.gov.ir.pia.api.SelectUserRequest
 import `in`.gov.ir.pia.service.activity.ActivityDetailResponse
 import `in`.gov.ir.pia.service.activity.ActivityRecordDetailResponse
@@ -9,7 +10,6 @@ import `in`.gov.ir.pia.service.project.AllocateProjectRequest
 import `in`.gov.ir.pia.service.project.AssignDyceRequest
 import `in`.gov.ir.pia.service.project.CreateProjectRequest
 import `in`.gov.ir.pia.service.project.ProjectDetailResponse
-import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -200,11 +200,11 @@ class RecordAutosaveIntegrationTest {
         val record = createRecordResp.body!!
         assertThat(record.projectActivityId).isEqualTo(activityId)
         assertThat(record.formDefinitionId).isEqualTo(LAND_ACQUISITION_FORM_DEF_ID)
-        assertThat(record.dataJson.isEmpty).isTrue()       // starts as {}
+        assertThat(record.dataJson.isEmpty).isTrue() // starts as {}
         assertThat(record.recordState).isEqualTo("DRAFT")
 
         val createETag = createRecordResp.headers.getFirst("ETag")
-        assertThat(createETag).isNotNull()                 // e.g. "\"0\""
+        assertThat(createETag).isNotNull() // e.g. "\"0\""
         val initialVersion = createETag!!.trim('"').toInt()
         assertThat(initialVersion).isEqualTo(0)
 
@@ -223,26 +223,28 @@ class RecordAutosaveIntegrationTest {
         assertThat(getBeforeResp.body!!.dataJson.isEmpty).isTrue()
 
         // ── Step 4: PATCH autosave with form data (simulates 30-second timer) ─
-        val patchData = objectMapper.readTree(
-            """
-            {
-              "village_name": "Raipur",
-              "chainage": "42+500",
-              "area_ha": 12.5,
-              "gazette_reference": {
-                "gazette_date": "2024-03-15",
-                "gazette_number": "GZ-2024-0042"
-              }
-            }
-            """.trimIndent()
-        )
-        val patchHeaders = headersFor(
-            dyceCookies,
-            mapOf(
-                "If-Match" to createETag,
-                "Content-Type" to MediaType.APPLICATION_JSON_VALUE,
-            ),
-        )
+        val patchData =
+            objectMapper.readTree(
+                """
+                {
+                  "village_name": "Raipur",
+                  "chainage": "42+500",
+                  "area_ha": 12.5,
+                  "gazette_reference": {
+                    "gazette_date": "2024-03-15",
+                    "gazette_number": "GZ-2024-0042"
+                  }
+                }
+                """.trimIndent(),
+            )
+        val patchHeaders =
+            headersFor(
+                dyceCookies,
+                mapOf(
+                    "If-Match" to createETag,
+                    "Content-Type" to MediaType.APPLICATION_JSON_VALUE,
+                ),
+            )
         val patchResp =
             restTemplate.exchange(
                 "/api/v1/activity-records/$recordId",
@@ -255,7 +257,7 @@ class RecordAutosaveIntegrationTest {
         val patchETag = patchResp.headers.getFirst("ETag")
         assertThat(patchETag).isNotNull()
         val newVersion = patchETag!!.trim('"').toInt()
-        assertThat(newVersion).isEqualTo(initialVersion + 1)   // version bumped
+        assertThat(newVersion).isEqualTo(initialVersion + 1) // version bumped
 
         val patchedRecord = patchResp.body!!
         assertThat(patchedRecord.dataJson.get("village_name").asText()).isEqualTo("Raipur")
@@ -272,16 +274,22 @@ class RecordAutosaveIntegrationTest {
             )
         assertThat(getAfterResp.statusCode).isEqualTo(HttpStatus.OK)
         assertThat(getAfterResp.headers.getFirst("ETag")).isEqualTo(patchETag)
-        assertThat(getAfterResp.body!!.dataJson.get("village_name").asText()).isEqualTo("Raipur")
+        assertThat(
+            getAfterResp.body!!
+                .dataJson
+                .get("village_name")
+                .asText(),
+        ).isEqualTo("Raipur")
 
         // ── Step 6: Stale PATCH (using the original, now-outdated ETag) ───────
-        val staleHeaders = headersFor(
-            dyceCookies,
-            mapOf(
-                "If-Match" to createETag,   // old version — should 409
-                "Content-Type" to MediaType.APPLICATION_JSON_VALUE,
-            ),
-        )
+        val staleHeaders =
+            headersFor(
+                dyceCookies,
+                mapOf(
+                    "If-Match" to createETag, // old version — should 409
+                    "Content-Type" to MediaType.APPLICATION_JSON_VALUE,
+                ),
+            )
         val staleResp =
             restTemplate.exchange(
                 "/api/v1/activity-records/$recordId",
@@ -343,7 +351,7 @@ class RecordAutosaveIntegrationTest {
                 CreateActivityRecordRequest(),
                 dyceCookies,
                 ActivityRecordDetailResponse::class.java,
-            ).body!!.id  // create a second to get a fresh ID easily
+            ).body!!.id // create a second to get a fresh ID easily
 
         // PATCH without If-Match — Spring MVC will return 400 for missing required header
         val noMatchHeaders = headersFor(dyceCookies, mapOf("Content-Type" to MediaType.APPLICATION_JSON_VALUE))

@@ -140,9 +140,9 @@ class WorkflowServiceIntegrationTest {
      */
     private fun createActivityRecord(): UUID {
         val nrZoneId = jdbc.queryForObject("SELECT id FROM zones WHERE code = 'NR'", UUID::class.java)!!
-        val edgsUserId = UUID.fromString("11111111-1111-1111-1111-111111111101")   // EMP001 EDGS_CI
-        val dyceUserId = UUID.fromString("11111111-1111-1111-1111-111111111104")   // EMP004 DY_CE_C
-        val formDefId  = UUID.fromString("ffffffff-0001-0001-0001-000000000001")   // LAND_ACQUISITION_V1
+        val edgsUserId = UUID.fromString("11111111-1111-1111-1111-111111111101") // EMP001 EDGS_CI
+        val dyceUserId = UUID.fromString("11111111-1111-1111-1111-111111111104") // EMP004 DY_CE_C
+        val formDefId = UUID.fromString("ffffffff-0001-0001-0001-000000000001") // LAND_ACQUISITION_V1
 
         // 1. Create a minimal project
         val projectId = UUID.randomUUID()

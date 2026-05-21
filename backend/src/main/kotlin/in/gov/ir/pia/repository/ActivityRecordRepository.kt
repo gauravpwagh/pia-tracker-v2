@@ -14,9 +14,7 @@ import java.util.UUID
  */
 interface ActivityRecordRepository : JpaRepository<ActivityRecord, UUID> {
     /** All non-deleted records for an activity. */
-    fun findAllByProjectActivityIdAndIsDeletedFalseOrderByCreatedAtAsc(
-        projectActivityId: UUID,
-    ): List<ActivityRecord>
+    fun findAllByProjectActivityIdAndIsDeletedFalseOrderByCreatedAtAsc(projectActivityId: UUID): List<ActivityRecord>
 
     /** Single non-deleted record. Returns null → 404 in service. */
     fun findByIdAndIsDeletedFalse(id: UUID): ActivityRecord?

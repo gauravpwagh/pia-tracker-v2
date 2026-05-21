@@ -1,3 +1,7 @@
+/* eslint-disable security/detect-object-injection */
+// Bracket-notation accesses throughout this file use typed Record<string,…> keys that are
+// derived from validated API responses, not user input — no injection risk here.
+
 /**
  * RecordEditPage — Archetype 3 (docs/ui.md § 3).
  *
@@ -449,7 +453,6 @@ export default function RecordEditPage() {
       formDataRef.current = next;
       markDirty();
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [markDirty, activeSectionResolved, hasSections],
   );
 

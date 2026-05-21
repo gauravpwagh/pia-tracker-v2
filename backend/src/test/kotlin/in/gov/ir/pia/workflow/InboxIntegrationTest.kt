@@ -55,7 +55,6 @@ import java.util.UUID
 @Testcontainers
 @TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data"])
 class InboxIntegrationTest {
-
     companion object {
         @JvmField
         @Container
@@ -72,27 +71,30 @@ class InboxIntegrationTest {
             registry.add("spring.flyway.password", postgres::getPassword)
         }
 
-        val EDGS_CI_USER_ID:   UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_C_USER_ID:     UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
-        val CE_C_USER_ID:      UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
-        val DYCE_1_USER_ID:    UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
-        val DYCE_2_USER_ID:    UUID = UUID.fromString("11111111-1111-1111-1111-111111111105")
-        val SUPER_ADMIN_ID:    UUID = UUID.fromString("11111111-1111-1111-1111-111111111107")
+        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
+        val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
+        val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
+        val DYCE_2_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111105")
+        val SUPER_ADMIN_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111107")
+
         // A seeded DyCE who belongs to a different zone (SR)
-        val DYCE_SR_USER_ID:   UUID = UUID.fromString("11111111-1111-1111-1111-111111111108")
+        val DYCE_SR_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111108")
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
+
     @Autowired lateinit var jdbc: JdbcTemplate
 
     // ── Session helpers ───────────────────────────────────────────────────────
 
     private fun loginAs(userId: UUID): List<String> {
-        val resp = restTemplate.postForEntity(
-            "/api/v1/auth/select-user",
-            SelectUserRequest(userId),
-            Void::class.java,
-        )
+        val resp =
+            restTemplate.postForEntity(
+                "/api/v1/auth/select-user",
+                SelectUserRequest(userId),
+                Void::class.java,
+            )
         assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
         return resp.headers["Set-Cookie"] ?: emptyList()
     }
@@ -103,16 +105,21 @@ class InboxIntegrationTest {
         return h
     }
 
-    private fun <T> post(url: String, body: Any, cookies: List<String>, type: Class<T>) =
-        restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
+    private fun <T> post(
+        url: String,
+        body: Any,
+        cookies: List<String>,
+        type: Class<T>,
+    ) = restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
 
     private fun inbox(cookies: List<String>): InboxResponse =
-        restTemplate.exchange(
-            "/api/v1/workflow/inbox",
-            HttpMethod.GET,
-            HttpEntity<Void>(headersFor(cookies)),
-            InboxResponse::class.java,
-        ).body!!
+        restTemplate
+            .exchange(
+                "/api/v1/workflow/inbox",
+                HttpMethod.GET,
+                HttpEntity<Void>(headersFor(cookies)),
+                InboxResponse::class.java,
+            ).body!!
 
     // ── Project / record lifecycle helpers ───────────────────────────────────
 
@@ -120,31 +127,48 @@ class InboxIntegrationTest {
         val nrZoneId = jdbc.queryForObject("SELECT id FROM zones WHERE code = 'NR'", UUID::class.java)!!
 
         val edgs = loginAs(EDGS_CI_USER_ID)
-        val projectId = post(
-            "/api/v1/projects",
-            CreateProjectRequest(name = "Inbox Test Project", zoneId = nrZoneId),
-            edgs,
-            ProjectDetailResponse::class.java,
-        ).body!!.id
+        val projectId =
+            post(
+                "/api/v1/projects",
+                CreateProjectRequest(name = "Inbox Test Project", zoneId = nrZoneId),
+                edgs,
+                ProjectDetailResponse::class.java,
+            ).body!!.id
 
         val cao = loginAs(CAO_C_USER_ID)
-        post("/api/v1/projects/$projectId/allocate", AllocateProjectRequest(ceUserId = CE_C_USER_ID), cao, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/$projectId/allocate",
+            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            cao,
+            ProjectDetailResponse::class.java,
+        )
 
         val ce = loginAs(CE_C_USER_ID)
-        post("/api/v1/projects/$projectId/assign-dyce", AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)), ce, ProjectDetailResponse::class.java)
-        post("/api/v1/projects/$projectId/designate-nodal", DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID), ce, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/$projectId/assign-dyce",
+            AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
+        post(
+            "/api/v1/projects/$projectId/designate-nodal",
+            DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
 
         return projectId
     }
 
     private fun createRecord(projectId: UUID): UUID {
         val dyce = loginAs(DYCE_1_USER_ID)
-        val activityId = post(
-            "/api/v1/projects/$projectId/activities",
-            CreateActivityRequest(activityTypeCode = "LAND_ACQUISITION", name = "Inbox Test LA"),
-            dyce,
-            ActivityDetailResponse::class.java,
-        ).body!!.id
+        val activityId =
+            post(
+                "/api/v1/projects/$projectId/activities",
+                CreateActivityRequest(activityTypeCode = "LAND_ACQUISITION", name = "Inbox Test LA"),
+                dyce,
+                ActivityDetailResponse::class.java,
+            ).body!!.id
 
         return post(
             "/api/v1/activities/$activityId/records",
@@ -159,7 +183,7 @@ class InboxIntegrationTest {
     @Test
     fun `after record creation DyCE sees 9 DRAFT sections in awaiting`() {
         val projectId = createActiveProjectWithNodal()
-        val recordId  = createRecord(projectId)
+        val recordId = createRecord(projectId)
 
         val dyce = loginAs(DYCE_1_USER_ID)
         val response = inbox(dyce)
@@ -178,9 +202,9 @@ class InboxIntegrationTest {
     @Test
     fun `after DyCE submits a section, Nodal sees it in awaiting, DyCE sees record in inProgress`() {
         val projectId = createActiveProjectWithNodal()
-        val recordId  = createRecord(projectId)
+        val recordId = createRecord(projectId)
 
-        val dyce  = loginAs(DYCE_1_USER_ID)
+        val dyce = loginAs(DYCE_1_USER_ID)
         val nodal = loginAs(DYCE_2_USER_ID)
 
         post(
@@ -191,10 +215,10 @@ class InboxIntegrationTest {
         )
 
         // Re-login so session picks up any role changes
-        val dyceAfter  = loginAs(DYCE_1_USER_ID)
+        val dyceAfter = loginAs(DYCE_1_USER_ID)
         val nodalAfter = loginAs(DYCE_2_USER_ID)
 
-        val dyceInbox  = inbox(dyceAfter)
+        val dyceInbox = inbox(dyceAfter)
         val nodalInbox = inbox(nodalAfter)
 
         // DyCE: the submitted section is gone from awaiting; 8 DRAFT sections remain
@@ -217,13 +241,23 @@ class InboxIntegrationTest {
     @Test
     fun `CE sees VERIFIED section in awaiting after Nodal verifies`() {
         val projectId = createActiveProjectWithNodal()
-        val recordId  = createRecord(projectId)
+        val recordId = createRecord(projectId)
 
-        val dyce  = loginAs(DYCE_1_USER_ID)
+        val dyce = loginAs(DYCE_1_USER_ID)
         val nodal = loginAs(DYCE_2_USER_ID)
 
-        post("/api/v1/activity-records/$recordId/submit", WorkflowActionRequest(sectionCode = "srp"), dyce, SectionWorkflowStateResponse::class.java)
-        post("/api/v1/activity-records/$recordId/verify", WorkflowActionRequest(sectionCode = "srp"), nodal, SectionWorkflowStateResponse::class.java)
+        post(
+            "/api/v1/activity-records/$recordId/submit",
+            WorkflowActionRequest(sectionCode = "srp"),
+            dyce,
+            SectionWorkflowStateResponse::class.java,
+        )
+        post(
+            "/api/v1/activity-records/$recordId/verify",
+            WorkflowActionRequest(sectionCode = "srp"),
+            nodal,
+            SectionWorkflowStateResponse::class.java,
+        )
 
         val ce = loginAs(CE_C_USER_ID)
         val ceInbox = inbox(ce)
@@ -237,20 +271,35 @@ class InboxIntegrationTest {
     @Test
     fun `after authentication the section no longer appears in any inbox`() {
         val projectId = createActiveProjectWithNodal()
-        val recordId  = createRecord(projectId)
+        val recordId = createRecord(projectId)
 
-        val dyce  = loginAs(DYCE_1_USER_ID)
+        val dyce = loginAs(DYCE_1_USER_ID)
         val nodal = loginAs(DYCE_2_USER_ID)
-        val ce    = loginAs(CE_C_USER_ID)
+        val ce = loginAs(CE_C_USER_ID)
 
-        post("/api/v1/activity-records/$recordId/submit",      WorkflowActionRequest(sectionCode = "srp"), dyce,  SectionWorkflowStateResponse::class.java)
-        post("/api/v1/activity-records/$recordId/verify",      WorkflowActionRequest(sectionCode = "srp"), nodal, SectionWorkflowStateResponse::class.java)
-        post("/api/v1/activity-records/$recordId/authenticate", WorkflowActionRequest(sectionCode = "srp"), ce,   SectionWorkflowStateResponse::class.java)
+        post(
+            "/api/v1/activity-records/$recordId/submit",
+            WorkflowActionRequest(sectionCode = "srp"),
+            dyce,
+            SectionWorkflowStateResponse::class.java,
+        )
+        post(
+            "/api/v1/activity-records/$recordId/verify",
+            WorkflowActionRequest(sectionCode = "srp"),
+            nodal,
+            SectionWorkflowStateResponse::class.java,
+        )
+        post(
+            "/api/v1/activity-records/$recordId/authenticate",
+            WorkflowActionRequest(sectionCode = "srp"),
+            ce,
+            SectionWorkflowStateResponse::class.java,
+        )
 
         // Re-login for fresh sessions
-        val dyceAfter  = loginAs(DYCE_1_USER_ID)
+        val dyceAfter = loginAs(DYCE_1_USER_ID)
         val nodalAfter = loginAs(DYCE_2_USER_ID)
-        val ceAfter    = loginAs(CE_C_USER_ID)
+        val ceAfter = loginAs(CE_C_USER_ID)
 
         // The SRP section must not appear in any role's awaiting list
         assertThat(inbox(dyceAfter).awaiting.filter { it.recordId == recordId && it.sectionCode == "srp" }).isEmpty()
@@ -262,8 +311,8 @@ class InboxIntegrationTest {
 
     @Test
     fun `DyCE from a different zone does not see records from NR zone`() {
-        val projectId = createActiveProjectWithNodal()   // NR zone project
-        createRecord(projectId)                          // creates 9 DRAFT sections
+        val projectId = createActiveProjectWithNodal() // NR zone project
+        createRecord(projectId) // creates 9 DRAFT sections
 
         // DYCE_SR belongs to SR zone — should not see NR records
         val srDyce = loginAs(DYCE_SR_USER_ID)
@@ -277,7 +326,7 @@ class InboxIntegrationTest {
 
     @Test
     fun `super-admin sees records from all zones`() {
-        val projectId = createActiveProjectWithNodal()   // NR zone project
+        val projectId = createActiveProjectWithNodal() // NR zone project
         createRecord(projectId)
 
         val admin = loginAs(SUPER_ADMIN_ID)

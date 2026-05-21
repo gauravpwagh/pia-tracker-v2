@@ -59,23 +59,30 @@ class CommentService(
     // ── List ──────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    fun list(entityType: String, entityId: UUID): List<CommentDto> {
-        val topLevel = commentRepo.findByEntityTypeAndEntityIdAndParentCommentIdIsNullOrderByCreatedAtAsc(
-            entityType, entityId,
-        )
+    fun list(
+        entityType: String,
+        entityId: UUID,
+    ): List<CommentDto> {
+        val topLevel =
+            commentRepo.findByEntityTypeAndEntityIdAndParentCommentIdIsNullOrderByCreatedAtAsc(
+                entityType,
+                entityId,
+            )
         if (topLevel.isEmpty()) return emptyList()
 
         // Bulk-load all authors for efficiency
         val authorIds = topLevel.map { it.authorUserId }.toSet()
-        val replyMap = topLevel.associate { parent ->
-            parent.id to commentRepo.findByParentCommentIdOrderByCreatedAtAsc(parent.id)
-        }
+        val replyMap =
+            topLevel.associate { parent ->
+                parent.id to commentRepo.findByParentCommentIdOrderByCreatedAtAsc(parent.id)
+            }
         val allAuthorIds = authorIds + replyMap.values.flatten().map { it.authorUserId }
         val authors = userRepo.findAllById(allAuthorIds).associateBy { it.id }
 
         fun Comment.toDto(replies: List<CommentDto> = emptyList()): CommentDto {
-            val user = authors[authorUserId]
-                ?: throw IllegalStateException("Author $authorUserId not found for comment $id")
+            val user =
+                authors[authorUserId]
+                    ?: throw IllegalStateException("Author $authorUserId not found for comment $id")
             return CommentDto(
                 id = id,
                 entityType = entityType,
@@ -109,9 +116,10 @@ class CommentService(
 
         // Threading: replies can only be to top-level comments
         if (request.parentCommentId != null) {
-            val parent = commentRepo.findById(request.parentCommentId).orElseThrow {
-                ResponseStatusException(HttpStatus.NOT_FOUND, "Parent comment ${request.parentCommentId} not found")
-            }
+            val parent =
+                commentRepo.findById(request.parentCommentId).orElseThrow {
+                    ResponseStatusException(HttpStatus.NOT_FOUND, "Parent comment ${request.parentCommentId} not found")
+                }
             if (parent.parentCommentId != null) {
                 throw ResponseStatusException(
                     HttpStatus.UNPROCESSABLE_ENTITY,
@@ -122,25 +130,28 @@ class CommentService(
 
         // Extract @-mentioned user IDs from the markdown body and store as JSON array
         val mentionedUuids = extractMentionedUserIds(request.bodyMarkdown)
-        val mentionedJson = JsonNodeFactory.instance.arrayNode().also { arr ->
-            mentionedUuids.forEach { arr.add(it.toString()) }
-        }
+        val mentionedJson =
+            JsonNodeFactory.instance.arrayNode().also { arr ->
+                mentionedUuids.forEach { arr.add(it.toString()) }
+            }
 
-        val comment = commentRepo.save(
-            Comment(
-                entityType = request.entityType,
-                entityId = request.entityId,
-                parentCommentId = request.parentCommentId,
-                authorUserId = actor.userId,
-                bodyMarkdown = request.bodyMarkdown.trim(),
-                mentionedUserIds = mentionedJson,
-                workflowStateAtComment = workflowStateAtComment,
-            ),
-        )
+        val comment =
+            commentRepo.save(
+                Comment(
+                    entityType = request.entityType,
+                    entityId = request.entityId,
+                    parentCommentId = request.parentCommentId,
+                    authorUserId = actor.userId,
+                    bodyMarkdown = request.bodyMarkdown.trim(),
+                    mentionedUserIds = mentionedJson,
+                    workflowStateAtComment = workflowStateAtComment,
+                ),
+            )
 
-        val author = userRepo.findById(actor.userId).orElseThrow {
-            IllegalStateException("Actor ${actor.userId} not found in users table")
-        }
+        val author =
+            userRepo.findById(actor.userId).orElseThrow {
+                IllegalStateException("Actor ${actor.userId} not found in users table")
+            }
 
         return CommentDto(
             id = comment.id,
@@ -157,10 +168,15 @@ class CommentService(
 
     // ── Delete (soft) ─────────────────────────────────────────────────────────
 
-    fun delete(commentId: UUID, actor: Principal, canDeleteAny: Boolean) {
-        val comment = commentRepo.findById(commentId).orElseThrow {
-            ResponseStatusException(HttpStatus.NOT_FOUND, "Comment $commentId not found")
-        }
+    fun delete(
+        commentId: UUID,
+        actor: Principal,
+        canDeleteAny: Boolean,
+    ) {
+        val comment =
+            commentRepo.findById(commentId).orElseThrow {
+                ResponseStatusException(HttpStatus.NOT_FOUND, "Comment $commentId not found")
+            }
         if (!canDeleteAny && comment.authorUserId != actor.userId) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Cannot delete another user's comment")
         }
@@ -180,11 +196,14 @@ class CommentService(
     private fun extractMentionedUserIds(markdown: String): Set<UUID> {
         // Match @[...](uuid) style mentions
         val uuidMention = Regex("""\@\[.*?]\(([0-9a-fA-F-]{36})\)""")
-        val candidates = uuidMention.findAll(markdown)
-            .mapNotNull { runCatching { UUID.fromString(it.groupValues[1]) }.getOrNull() }
-            .toSet()
-        return candidates.filter { id ->
-            jdbc.queryForObject("SELECT count(*) FROM users WHERE id = ?", Long::class.java, id)!! > 0L
-        }.toSet()
+        val candidates =
+            uuidMention
+                .findAll(markdown)
+                .mapNotNull { runCatching { UUID.fromString(it.groupValues[1]) }.getOrNull() }
+                .toSet()
+        return candidates
+            .filter { id ->
+                jdbc.queryForObject("SELECT count(*) FROM users WHERE id = ?", Long::class.java, id)!! > 0L
+            }.toSet()
     }
 }

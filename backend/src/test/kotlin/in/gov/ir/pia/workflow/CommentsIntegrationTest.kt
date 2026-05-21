@@ -55,7 +55,6 @@ import java.util.UUID
 @Testcontainers
 @TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data"])
 class CommentsIntegrationTest {
-
     companion object {
         @JvmField
         @Container
@@ -72,24 +71,26 @@ class CommentsIntegrationTest {
             registry.add("spring.flyway.password", postgres::getPassword)
         }
 
-        val EDGS_CI_USER_ID:   UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_C_USER_ID:     UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
-        val CE_C_USER_ID:      UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
-        val DYCE_1_USER_ID:    UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
-        val DYCE_2_USER_ID:    UUID = UUID.fromString("11111111-1111-1111-1111-111111111105")
+        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
+        val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
+        val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
+        val DYCE_2_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111105")
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
+
     @Autowired lateinit var jdbc: JdbcTemplate
 
     // ── Session / HTTP helpers ─────────────────────────────────────────────────
 
     private fun loginAs(userId: UUID): List<String> {
-        val resp = restTemplate.postForEntity(
-            "/api/v1/auth/select-user",
-            SelectUserRequest(userId),
-            Void::class.java,
-        )
+        val resp =
+            restTemplate.postForEntity(
+                "/api/v1/auth/select-user",
+                SelectUserRequest(userId),
+                Void::class.java,
+            )
         assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
         return resp.headers["Set-Cookie"] ?: emptyList()
     }
@@ -100,48 +101,77 @@ class CommentsIntegrationTest {
         return h
     }
 
-    private fun <T> post(url: String, body: Any, cookies: List<String>, type: Class<T>) =
-        restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
+    private fun <T> post(
+        url: String,
+        body: Any,
+        cookies: List<String>,
+        type: Class<T>,
+    ) = restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
 
-    private fun <T> get(url: String, cookies: List<String>, type: Class<T>) =
-        restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), type)
+    private fun <T> get(
+        url: String,
+        cookies: List<String>,
+        type: Class<T>,
+    ) = restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), type)
 
-    private fun <T> getList(url: String, cookies: List<String>, typeRef: ParameterizedTypeReference<T>) =
-        restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), typeRef)
+    private fun <T> getList(
+        url: String,
+        cookies: List<String>,
+        typeRef: ParameterizedTypeReference<T>,
+    ) = restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), typeRef)
 
-    private fun delete(url: String, cookies: List<String>) =
-        restTemplate.exchange(url, HttpMethod.DELETE, HttpEntity<Void>(headersFor(cookies)), Void::class.java)
+    private fun delete(
+        url: String,
+        cookies: List<String>,
+    ) = restTemplate.exchange(url, HttpMethod.DELETE, HttpEntity<Void>(headersFor(cookies)), Void::class.java)
 
     // ── Lifecycle helpers ──────────────────────────────────────────────────────
 
     private fun createActiveProjectWithNodal(): UUID {
         val nrZoneId = jdbc.queryForObject("SELECT id FROM zones WHERE code = 'NR'", UUID::class.java)!!
         val edgs = loginAs(EDGS_CI_USER_ID)
-        val projectId = post(
-            "/api/v1/projects",
-            CreateProjectRequest(name = "Comments Test Project", zoneId = nrZoneId),
-            edgs,
-            ProjectDetailResponse::class.java,
-        ).body!!.id
+        val projectId =
+            post(
+                "/api/v1/projects",
+                CreateProjectRequest(name = "Comments Test Project", zoneId = nrZoneId),
+                edgs,
+                ProjectDetailResponse::class.java,
+            ).body!!.id
 
         val cao = loginAs(CAO_C_USER_ID)
-        post("/api/v1/projects/$projectId/allocate", AllocateProjectRequest(ceUserId = CE_C_USER_ID), cao, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/$projectId/allocate",
+            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            cao,
+            ProjectDetailResponse::class.java,
+        )
 
         val ce = loginAs(CE_C_USER_ID)
-        post("/api/v1/projects/$projectId/assign-dyce", AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)), ce, ProjectDetailResponse::class.java)
-        post("/api/v1/projects/$projectId/designate-nodal", DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID), ce, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/$projectId/assign-dyce",
+            AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
+        post(
+            "/api/v1/projects/$projectId/designate-nodal",
+            DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
 
         return projectId
     }
 
     private fun createRecord(projectId: UUID): UUID {
         val dyce = loginAs(DYCE_1_USER_ID)
-        val activityId = post(
-            "/api/v1/projects/$projectId/activities",
-            CreateActivityRequest(activityTypeCode = "LAND_ACQUISITION", name = "Comments Test LA"),
-            dyce,
-            ActivityDetailResponse::class.java,
-        ).body!!.id
+        val activityId =
+            post(
+                "/api/v1/projects/$projectId/activities",
+                CreateActivityRequest(activityTypeCode = "LAND_ACQUISITION", name = "Comments Test LA"),
+                dyce,
+                ActivityDetailResponse::class.java,
+            ).body!!.id
 
         return post(
             "/api/v1/activities/$activityId/records",
@@ -156,13 +186,18 @@ class CommentsIntegrationTest {
     @Test
     fun `send-back comment appears in comments panel and history shows the transition`() {
         val projectId = createActiveProjectWithNodal()
-        val recordId  = createRecord(projectId)
+        val recordId = createRecord(projectId)
 
-        val dyce  = loginAs(DYCE_1_USER_ID)
+        val dyce = loginAs(DYCE_1_USER_ID)
         val nodal = loginAs(DYCE_2_USER_ID)
 
         // DyCE submits, Nodal sends back with a comment
-        post("/api/v1/activity-records/$recordId/submit", WorkflowActionRequest(sectionCode = "srp"), dyce, SectionWorkflowStateResponse::class.java)
+        post(
+            "/api/v1/activity-records/$recordId/submit",
+            WorkflowActionRequest(sectionCode = "srp"),
+            dyce,
+            SectionWorkflowStateResponse::class.java,
+        )
         post(
             "/api/v1/activity-records/$recordId/send-back",
             WorkflowActionRequest(sectionCode = "srp", comment = "Please fix the chainage value."),
@@ -172,25 +207,30 @@ class CommentsIntegrationTest {
 
         // Gate 1: comment appears in the Comments panel
         val nodalAfter = loginAs(DYCE_2_USER_ID)
-        val commentsResp = getList(
-            "/api/v1/comments?entityType=ACTIVITY_RECORD&entityId=$recordId",
-            nodalAfter,
-            object : ParameterizedTypeReference<List<CommentDto>>() {},
-        )
+        val commentsResp =
+            getList(
+                "/api/v1/comments?entityType=ACTIVITY_RECORD&entityId=$recordId",
+                nodalAfter,
+                object : ParameterizedTypeReference<List<CommentDto>>() {},
+            )
         assertThat(commentsResp.statusCode).isEqualTo(HttpStatus.OK)
         val comments = commentsResp.body!!
         assertThat(comments).isNotEmpty
         assertThat(comments.any { it.bodyMarkdown == "Please fix the chainage value." }).isTrue()
-        assertThat(comments.first { it.bodyMarkdown == "Please fix the chainage value." }
-            .workflowStateAtComment).isEqualTo("SUBMITTED_FOR_VERIFICATION")
+        assertThat(
+            comments
+                .first { it.bodyMarkdown == "Please fix the chainage value." }
+                .workflowStateAtComment,
+        ).isEqualTo("SUBMITTED_FOR_VERIFICATION")
 
         // Gate 2: history shows the send-back transition
         val dyceAfter = loginAs(DYCE_1_USER_ID)
-        val historyResp = getList(
-            "/api/v1/activity-records/$recordId/history",
-            dyceAfter,
-            object : ParameterizedTypeReference<List<RecordHistoryEntry>>() {},
-        )
+        val historyResp =
+            getList(
+                "/api/v1/activity-records/$recordId/history",
+                dyceAfter,
+                object : ParameterizedTypeReference<List<RecordHistoryEntry>>() {},
+            )
         assertThat(historyResp.statusCode).isEqualTo(HttpStatus.OK)
         val history = historyResp.body!!
         assertThat(history).isNotEmpty
@@ -207,21 +247,22 @@ class CommentsIntegrationTest {
     @Test
     fun `freeform comment can be posted without a workflow action`() {
         val projectId = createActiveProjectWithNodal()
-        val recordId  = createRecord(projectId)
+        val recordId = createRecord(projectId)
 
         val dyce = loginAs(DYCE_1_USER_ID)
 
         // No workflow action — just post a standalone comment
-        val createResp = post(
-            "/api/v1/comments",
-            mapOf(
-                "entityType" to "ACTIVITY_RECORD",
-                "entityId" to recordId.toString(),
-                "bodyMarkdown" to "Need to verify land ownership documents before submitting.",
-            ),
-            dyce,
-            CommentDto::class.java,
-        )
+        val createResp =
+            post(
+                "/api/v1/comments",
+                mapOf(
+                    "entityType" to "ACTIVITY_RECORD",
+                    "entityId" to recordId.toString(),
+                    "bodyMarkdown" to "Need to verify land ownership documents before submitting.",
+                ),
+                dyce,
+                CommentDto::class.java,
+            )
         assertThat(createResp.statusCode).isEqualTo(HttpStatus.CREATED)
         assertThat(createResp.body!!.bodyMarkdown)
             .isEqualTo("Need to verify land ownership documents before submitting.")
@@ -229,11 +270,12 @@ class CommentsIntegrationTest {
 
         // Gate 4: comment count in GET response
         val dyceAfter = loginAs(DYCE_1_USER_ID)
-        val listResp = getList(
-            "/api/v1/comments?entityType=ACTIVITY_RECORD&entityId=$recordId",
-            dyceAfter,
-            object : ParameterizedTypeReference<List<CommentDto>>() {},
-        )
+        val listResp =
+            getList(
+                "/api/v1/comments?entityType=ACTIVITY_RECORD&entityId=$recordId",
+                dyceAfter,
+                object : ParameterizedTypeReference<List<CommentDto>>() {},
+            )
         assertThat(listResp.body!!).hasSize(1)
 
         // Post a second comment; count should be 2
@@ -248,11 +290,12 @@ class CommentsIntegrationTest {
             CommentDto::class.java,
         )
 
-        val listResp2 = getList(
-            "/api/v1/comments?entityType=ACTIVITY_RECORD&entityId=$recordId",
-            loginAs(DYCE_1_USER_ID),
-            object : ParameterizedTypeReference<List<CommentDto>>() {},
-        )
+        val listResp2 =
+            getList(
+                "/api/v1/comments?entityType=ACTIVITY_RECORD&entityId=$recordId",
+                loginAs(DYCE_1_USER_ID),
+                object : ParameterizedTypeReference<List<CommentDto>>() {},
+            )
         assertThat(listResp2.body!!).hasSize(2)
     }
 
@@ -261,22 +304,23 @@ class CommentsIntegrationTest {
     @Test
     fun `user can delete own comment but not someone else's`() {
         val projectId = createActiveProjectWithNodal()
-        val recordId  = createRecord(projectId)
+        val recordId = createRecord(projectId)
 
-        val dyce  = loginAs(DYCE_1_USER_ID)
+        val dyce = loginAs(DYCE_1_USER_ID)
         val nodal = loginAs(DYCE_2_USER_ID)
 
         // DyCE posts a comment
-        val commentId = post(
-            "/api/v1/comments",
-            mapOf(
-                "entityType" to "ACTIVITY_RECORD",
-                "entityId" to recordId.toString(),
-                "bodyMarkdown" to "This is DyCE's comment.",
-            ),
-            dyce,
-            CommentDto::class.java,
-        ).body!!.id
+        val commentId =
+            post(
+                "/api/v1/comments",
+                mapOf(
+                    "entityType" to "ACTIVITY_RECORD",
+                    "entityId" to recordId.toString(),
+                    "bodyMarkdown" to "This is DyCE's comment.",
+                ),
+                dyce,
+                CommentDto::class.java,
+            ).body!!.id
 
         // Nodal tries to delete DyCE's comment → should be 403
         val forbiddenResp = delete("/api/v1/comments/$commentId", nodal)
@@ -287,11 +331,12 @@ class CommentsIntegrationTest {
         assertThat(deleteResp.statusCode).isEqualTo(HttpStatus.NO_CONTENT)
 
         // Comment no longer appears in the list
-        val listResp = getList(
-            "/api/v1/comments?entityType=ACTIVITY_RECORD&entityId=$recordId",
-            loginAs(DYCE_1_USER_ID),
-            object : ParameterizedTypeReference<List<CommentDto>>() {},
-        )
+        val listResp =
+            getList(
+                "/api/v1/comments?entityType=ACTIVITY_RECORD&entityId=$recordId",
+                loginAs(DYCE_1_USER_ID),
+                object : ParameterizedTypeReference<List<CommentDto>>() {},
+            )
         assertThat(listResp.body!!).isEmpty()
     }
 }

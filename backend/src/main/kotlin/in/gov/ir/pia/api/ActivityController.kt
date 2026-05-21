@@ -21,7 +21,6 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
-import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
@@ -138,8 +137,7 @@ class ActivityController(
     fun listRecords(
         @PathVariable activityId: UUID,
         @AuthenticationPrincipal principal: PiaPrincipal,
-    ): List<ActivityRecordDetailResponse> =
-        activityService.listRecordsForActivity(activityId, principal).map { it.toResponse() }
+    ): List<ActivityRecordDetailResponse> = activityService.listRecordsForActivity(activityId, principal).map { it.toResponse() }
 
     /**
      * Creates an empty record for an activity.
@@ -285,8 +283,7 @@ class ActivityController(
         @PathVariable recordId: UUID,
         @RequestBody request: WorkflowActionRequest,
         @AuthenticationPrincipal principal: PiaPrincipal,
-    ): SectionWorkflowStateResponse =
-        activityService.performWorkflowAction(recordId, "send_back", request, principal)
+    ): SectionWorkflowStateResponse = activityService.performWorkflowAction(recordId, "send_back", request, principal)
 
     /**
      * Resubmits a section (or record) after it was sent back to Dy CE/C.

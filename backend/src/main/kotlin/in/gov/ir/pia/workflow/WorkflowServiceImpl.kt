@@ -216,13 +216,13 @@ class WorkflowServiceImpl(
         instance: WorkflowInstance,
         actor: Principal,
     ): List<String> =
-        transitionRepo.findByFromStateId(instance.currentState.id)
+        transitionRepo
+            .findByFromStateId(instance.currentState.id)
             .filter { t ->
                 t.roleRequiredCode == null ||
                     actor.isSuperAdmin ||
                     actor.roleCodes.contains(t.roleRequiredCode)
-            }
-            .map { it.actionCode }
+            }.map { it.actionCode }
 
     // ── isSlaBreached ────────────────────────────────────────────────────────
 

@@ -32,34 +32,46 @@ class LandAcquisitionValidator : FormValidator {
         val errors = mutableListOf<ValidationError>()
 
         // ── Rule 1: 20A notification date ≤ 20E declaration date ─────────────
-        val notificationDate: LocalDate? = data
-            .path("section_20a").path("notification_date")
-            .textOrNull()?.parseDate()
+        val notificationDate: LocalDate? =
+            data
+                .path("section_20a")
+                .path("notification_date")
+                .textOrNull()
+                ?.parseDate()
 
-        val declarationDate: LocalDate? = data
-            .path("section_20e").path("declaration_gazette").path("published_on")
-            .textOrNull()?.parseDate()
+        val declarationDate: LocalDate? =
+            data
+                .path("section_20e")
+                .path("declaration_gazette")
+                .path("published_on")
+                .textOrNull()
+                ?.parseDate()
 
-        if (notificationDate != null && declarationDate != null
-            && declarationDate.isBefore(notificationDate)
+        if (notificationDate != null &&
+            declarationDate != null &&
+            declarationDate.isBefore(notificationDate)
         ) {
-            errors += ValidationError(
-                field = "section_20e.declaration_gazette.published_on",
-                message = "Section 20E declaration date (${declarationDate}) must be on or " +
-                    "after the Section 20A notification date (${notificationDate})",
-            )
+            errors +=
+                ValidationError(
+                    field = "section_20e.declaration_gazette.published_on",
+                    message =
+                        "Section 20E declaration date ($declarationDate) must be on or " +
+                            "after the Section 20A notification date ($notificationDate)",
+                )
         }
 
         // ── Rule 2: chainage_from ≤ chainage_to ──────────────────────────────
         val chainageFrom = data.path("village_chainage_from").textOrNull()?.parseChainage()
-        val chainageTo   = data.path("village_chainage_to").textOrNull()?.parseChainage()
+        val chainageTo = data.path("village_chainage_to").textOrNull()?.parseChainage()
 
         if (chainageFrom != null && chainageTo != null && chainageTo < chainageFrom) {
-            errors += ValidationError(
-                field = "village_chainage_to",
-                message = "Village chainage-to (${data.path("village_chainage_to").asText()}) " +
-                    "must be ≥ chainage-from (${data.path("village_chainage_from").asText()})",
-            )
+            errors +=
+                ValidationError(
+                    field = "village_chainage_to",
+                    message =
+                        "Village chainage-to (${data.path("village_chainage_to").asText()}) " +
+                            "must be ≥ chainage-from (${data.path("village_chainage_from").asText()})",
+                )
         }
 
         return errors
@@ -67,11 +79,14 @@ class LandAcquisitionValidator : FormValidator {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private fun JsonNode.textOrNull(): String? =
-        if (this.isMissingNode || this.isNull) null else this.asText().takeIf { it.isNotBlank() }
+    private fun JsonNode.textOrNull(): String? = if (this.isMissingNode || this.isNull) null else this.asText().takeIf { it.isNotBlank() }
 
     private fun String.parseDate(): LocalDate? =
-        try { LocalDate.parse(this) } catch (_: DateTimeParseException) { null }
+        try {
+            LocalDate.parse(this)
+        } catch (_: DateTimeParseException) {
+            null
+        }
 
     /**
      * Parse a chainage string `"132+450"` to an integer representing total
@@ -80,7 +95,7 @@ class LandAcquisitionValidator : FormValidator {
     private fun String.parseChainage(): Int? {
         val match = Regex("""^(\d+)\+(\d{3})$""").matchEntire(this) ?: return null
         val km = match.groupValues[1].toIntOrNull() ?: return null
-        val m  = match.groupValues[2].toIntOrNull() ?: return null
+        val m = match.groupValues[2].toIntOrNull() ?: return null
         return km * 1000 + m
     }
 }

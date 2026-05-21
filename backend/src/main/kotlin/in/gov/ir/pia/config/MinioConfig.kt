@@ -18,10 +18,10 @@ data class MinioProperties(
 @Configuration
 @EnableConfigurationProperties(MinioProperties::class)
 class MinioConfig {
-
     @Bean
     fun minioClient(props: MinioProperties): MinioClient =
-        MinioClient.builder()
+        MinioClient
+            .builder()
             .endpoint(props.endpoint)
             .credentials(props.accessKey, props.secretKey)
             .build()

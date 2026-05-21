@@ -67,7 +67,10 @@ class NotificationService(
         )
 
     @Transactional(readOnly = true)
-    fun listForUser(userId: UUID, limit: Int = 30): NotificationSummaryDto {
+    fun listForUser(
+        userId: UUID,
+        limit: Int = 30,
+    ): NotificationSummaryDto {
         val notifications =
             notificationRepo
                 .findByRecipientUserIdOrderByCreatedAtDesc(userId, PageRequest.of(0, limit))
@@ -76,7 +79,10 @@ class NotificationService(
         return NotificationSummaryDto(unreadCount = unreadCount, notifications = notifications)
     }
 
-    fun markRead(id: UUID, userId: UUID) {
+    fun markRead(
+        id: UUID,
+        userId: UUID,
+    ) {
         val updated = notificationRepo.markRead(id, userId)
         if (updated == 0) {
             // Either not found, not owned by user, or already read — silently ignore

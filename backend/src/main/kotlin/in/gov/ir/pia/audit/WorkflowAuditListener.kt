@@ -21,17 +21,19 @@ class WorkflowAuditListener(
 ) {
     @EventListener
     fun onWorkflowStateChanged(event: WorkflowStateChangedEvent) {
-        val beforeJson = event.fromStateCode?.let {
-            objectMapper.createObjectNode().apply {
-                put("stateCode", it)
-                event.sectionCode?.let { s -> put("sectionCode", s) }
+        val beforeJson =
+            event.fromStateCode?.let {
+                objectMapper.createObjectNode().apply {
+                    put("stateCode", it)
+                    event.sectionCode?.let { s -> put("sectionCode", s) }
+                }
             }
-        }
-        val afterJson = objectMapper.createObjectNode().apply {
-            put("stateCode", event.toStateCode)
-            event.sectionCode?.let { s -> put("sectionCode", s) }
-            put("instanceId", event.instanceId.toString())
-        }
+        val afterJson =
+            objectMapper.createObjectNode().apply {
+                put("stateCode", event.toStateCode)
+                event.sectionCode?.let { s -> put("sectionCode", s) }
+                put("instanceId", event.instanceId.toString())
+            }
 
         auditLogWriter.write(
             actorUserId = event.actor.userId,

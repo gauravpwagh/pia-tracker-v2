@@ -30,22 +30,16 @@ import java.util.UUID
 class Comment(
     @Id
     val id: UUID = UUID.randomUUID(),
-
     @Column(name = "entity_type", nullable = false, length = 32)
     val entityType: String,
-
     @Column(name = "entity_id", nullable = false)
     val entityId: UUID,
-
     @Column(name = "parent_comment_id")
     val parentCommentId: UUID? = null,
-
     @Column(name = "author_user_id", nullable = false)
     val authorUserId: UUID,
-
     @Column(name = "body_markdown", nullable = false, columnDefinition = "text")
     var bodyMarkdown: String,
-
     /**
      * JSON array of UUID strings for @-mentioned users; used for notification
      * fan-out in Phase 1.14.  Stored as `jsonb` for portability.
@@ -54,29 +48,23 @@ class Comment(
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "mentioned_user_ids", nullable = false, columnDefinition = "jsonb")
     var mentionedUserIds: JsonNode = JsonNodeFactory.instance.arrayNode(),
-
     /** Snapshot of the workflow state code at time of posting (for timeline context). */
     @Column(name = "workflow_state_at_comment", length = 64)
     val workflowStateAtComment: String? = null,
-
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: Instant = Instant.now(),
-
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.now(),
-
     @Column(name = "is_deleted", nullable = false)
     var isDeleted: Boolean = false,
-
     @Column(name = "deleted_at")
     var deletedAt: Instant? = null,
-
     @Column(name = "deleted_by_user_id")
     var deletedByUserId: UUID? = null,
-
     @Version
     val version: Int = 0,
 ) {
     override fun equals(other: Any?): Boolean = other is Comment && id == other.id
+
     override fun hashCode(): Int = id.hashCode()
 }

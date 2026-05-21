@@ -78,6 +78,5 @@ class ProjectActivity(
 
     override fun hashCode(): Int = id.hashCode()
 
-    override fun toString(): String =
-        "ProjectActivity(id=$id, projectId=$projectId, type=$activityTypeCode, status=$status)"
+    override fun toString(): String = "ProjectActivity(id=$id, projectId=$projectId, type=$activityTypeCode, status=$status)"
 }

@@ -1,5 +1,8 @@
 package `in`.gov.ir.pia.service.activity
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import `in`.gov.ir.pia.audit.AuditLogWriter
 import `in`.gov.ir.pia.domain.activity.ActivityRecord
 import `in`.gov.ir.pia.domain.activity.ProjectActivity
@@ -12,9 +15,6 @@ import `in`.gov.ir.pia.security.PiaPrincipal
 import `in`.gov.ir.pia.service.comment.CommentService
 import `in`.gov.ir.pia.service.comment.CreateCommentRequest
 import `in`.gov.ir.pia.workflow.WorkflowService
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import jakarta.persistence.EntityManager
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -403,7 +403,7 @@ class ActivityService(
                  WHERE id = ? AND version = ? AND is_deleted = false
                 """.trimIndent(),
                 dataJsonString,
-                existing.schemaVersionAtSave,  // keep the version-at-save from creation; Phase 1.10 may bump it
+                existing.schemaVersionAtSave, // keep the version-at-save from creation; Phase 1.10 may bump it
                 principal.userId,
                 recordId,
                 expectedVersion,
@@ -448,7 +448,7 @@ class ActivityService(
         val record =
             recordRepository.findByIdAndIsDeletedFalse(recordId)
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-        getForPrincipal(record.projectActivityId, principal)  // zone access check
+        getForPrincipal(record.projectActivityId, principal) // zone access check
 
         val instances = workflowService.getInstances("ACTIVITY_RECORD", recordId)
         return RecordWorkflowStateResponse(
@@ -475,16 +475,17 @@ class ActivityService(
         val record =
             recordRepository.findByIdAndIsDeletedFalse(recordId)
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-        getForPrincipal(record.projectActivityId, principal)  // zone access check
+        getForPrincipal(record.projectActivityId, principal) // zone access check
 
         val instance =
             workflowService.getInstance("ACTIVITY_RECORD", recordId, request.sectionCode)
                 ?: throw ResponseStatusException(
                     HttpStatus.NOT_FOUND,
-                    if (request.sectionCode != null)
+                    if (request.sectionCode != null) {
                         "No workflow instance found for section '${request.sectionCode}'"
-                    else
-                        "No workflow instance found for this record",
+                    } else {
+                        "No workflow instance found for this record"
+                    },
                 )
 
         // Capture the current state code before the transition (for the comment snapshot)
@@ -516,10 +517,14 @@ class ActivityService(
      * instances, ordered by `at` ascending (oldest first).
      */
     @Transactional(readOnly = true)
-    fun getHistory(recordId: UUID, principal: PiaPrincipal): List<RecordHistoryEntry> {
-        val record = recordRepository.findByIdAndIsDeletedFalse(recordId)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-        getForPrincipal(record.projectActivityId, principal)  // zone access check
+    fun getHistory(
+        recordId: UUID,
+        principal: PiaPrincipal,
+    ): List<RecordHistoryEntry> {
+        val record =
+            recordRepository.findByIdAndIsDeletedFalse(recordId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        getForPrincipal(record.projectActivityId, principal) // zone access check
 
         return jdbc.query(
             """
@@ -647,9 +652,7 @@ class ActivityService(
             version = version,
         )
 
-    private fun `in`.gov.ir.pia.domain.workflow.WorkflowInstance.toSectionResponse(
-        principal: PiaPrincipal,
-    ): SectionWorkflowStateResponse =
+    private fun `in`.gov.ir.pia.domain.workflow.WorkflowInstance.toSectionResponse(principal: PiaPrincipal): SectionWorkflowStateResponse =
         SectionWorkflowStateResponse(
             instanceId = id,
             sectionCode = sectionCode,

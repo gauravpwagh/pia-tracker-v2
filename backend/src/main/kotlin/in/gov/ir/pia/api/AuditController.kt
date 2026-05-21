@@ -1,9 +1,7 @@
 package `in`.gov.ir.pia.api
 
-import `in`.gov.ir.pia.security.PiaPrincipal
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.access.prepost.PreAuthorize
-import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -34,6 +32,9 @@ data class AuditLogEntryDto(
 class AuditController(
     private val jdbc: JdbcTemplate,
 ) {
+    // Phase 1: access-control is enforced by @PreAuthorize; no record-level
+    // filtering needed yet. The principal parameter will be re-introduced in
+    // Phase 2 when per-entity zone filtering is added.
     @GetMapping("/api/v1/audit")
     @PreAuthorize(
         "@pe.hasPermission(authentication, null, 'AUDIT_LOG.READ.OWN') or " +
@@ -42,7 +43,6 @@ class AuditController(
     fun list(
         @RequestParam entityType: String,
         @RequestParam entityId: UUID,
-        @AuthenticationPrincipal principal: PiaPrincipal,
     ): List<AuditLogEntryDto> =
         jdbc.query(
             """

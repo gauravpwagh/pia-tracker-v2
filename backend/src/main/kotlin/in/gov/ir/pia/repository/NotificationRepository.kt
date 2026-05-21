@@ -9,7 +9,6 @@ import org.springframework.data.repository.query.Param
 import java.util.UUID
 
 interface NotificationRepository : JpaRepository<Notification, UUID> {
-
     /** Latest N notifications for a user (read + unread), newest first. */
     fun findByRecipientUserIdOrderByCreatedAtDesc(
         recipientUserId: UUID,
@@ -42,5 +41,7 @@ interface NotificationRepository : JpaRepository<Notification, UUID> {
         WHERE n.recipientUserId = :userId AND n.isRead = false
         """,
     )
-    fun markAllRead(@Param("userId") userId: UUID): Int
+    fun markAllRead(
+        @Param("userId") userId: UUID,
+    ): Int
 }

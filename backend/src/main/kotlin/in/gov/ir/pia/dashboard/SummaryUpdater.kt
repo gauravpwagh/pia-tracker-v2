@@ -36,14 +36,16 @@ class SummaryUpdater(
     fun onWorkflowStateChanged(event: WorkflowStateChangedEvent) {
         if (event.entityType != "ACTIVITY_RECORD") return
 
-        val record = activityRecordRepo.findById(event.entityId).orElse(null) ?: run {
-            log.warn("SummaryUpdater: record {} not found", event.entityId)
-            return
-        }
-        val activity = projectActivityRepo.findById(record.projectActivityId).orElse(null) ?: run {
-            log.warn("SummaryUpdater: activity {} not found", record.projectActivityId)
-            return
-        }
+        val record =
+            activityRecordRepo.findById(event.entityId).orElse(null) ?: run {
+                log.warn("SummaryUpdater: record {} not found", event.entityId)
+                return
+            }
+        val activity =
+            projectActivityRepo.findById(record.projectActivityId).orElse(null) ?: run {
+                log.warn("SummaryUpdater: activity {} not found", record.projectActivityId)
+                return
+            }
 
         val projectId = activity.projectId
         val typeCode = activity.activityTypeCode
@@ -59,7 +61,8 @@ class SummaryUpdater(
             VALUES (?, ?)
             ON CONFLICT (project_id, activity_type_code) DO NOTHING
             """.trimIndent(),
-            projectId, typeCode,
+            projectId,
+            typeCode,
         )
 
         // Decrement fromState column (guard against null — e.g. first transition from DRAFT
@@ -71,7 +74,8 @@ class SummaryUpdater(
                 SET $fromCol = GREATEST(0, $fromCol - 1)
                 WHERE project_id = ? AND activity_type_code = ?
                 """.trimIndent(),
-                projectId, typeCode,
+                projectId,
+                typeCode,
             )
         }
 
@@ -83,7 +87,8 @@ class SummaryUpdater(
                 SET $toCol = $toCol + 1
                 WHERE project_id = ? AND activity_type_code = ?
                 """.trimIndent(),
-                projectId, typeCode,
+                projectId,
+                typeCode,
             )
         }
 
@@ -95,7 +100,8 @@ class SummaryUpdater(
                               + authenticated_count + sent_back_count
             WHERE project_id = ? AND activity_type_code = ?
             """.trimIndent(),
-            projectId, typeCode,
+            projectId,
+            typeCode,
         )
     }
 

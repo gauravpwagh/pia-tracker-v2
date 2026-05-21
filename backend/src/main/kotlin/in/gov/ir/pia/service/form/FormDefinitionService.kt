@@ -33,8 +33,7 @@ class FormDefinitionService(
     private val crossFieldValidators: List<FormValidator>,
 ) {
     /** Returns all active form definitions ordered by activity type then code. */
-    fun listActive(): List<FormDefinition> =
-        formDefinitionRepository.findAllByIsActiveTrueOrderByActivityTypeCodeAscCodeAsc()
+    fun listActive(): List<FormDefinition> = formDefinitionRepository.findAllByIsActiveTrueOrderByActivityTypeCodeAscCodeAsc()
 
     /**
      * Returns the latest active version of the form definition with [code],

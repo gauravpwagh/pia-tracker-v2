@@ -6,7 +6,6 @@ import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RestController
-import java.time.Instant
 import java.util.UUID
 
 // ── Response types ─────────────────────────────────────────────────────────────
@@ -79,22 +78,37 @@ class WorkflowController(
         val skipZoneFilter =
             principal.isSuperAdmin ||
                 principal.permissions.contains("PROJECT.READ.ALL")
-
-        // ── Awaiting your action ──────────────────────────────────────────────
-        //
-        // Instances whose current state requires a role the caller holds.
-
-        val awaitingParams = mutableMapOf<String, Any>(
-            "roleCodes" to principal.roleCodes.toList(),
+        val awaiting = buildAwaitingItems(principal, skipZoneFilter)
+        val inProgress = buildInProgressItems(principal, skipZoneFilter)
+        return InboxResponse(
+            awaiting = awaiting,
+            inProgress = inProgress,
+            slaBreached = awaiting.filter { it.isSlaBreached },
         )
-        val awaitingZoneClause = if (skipZoneFilter) {
-            ""
-        } else {
-            awaitingParams["zoneIds"] = principal.accessibleZoneIds.map { it.toString() }.toList()
-            "AND p.zone_id = ANY(ARRAY[ :zoneIds ]::uuid[])"
-        }
+    }
 
-        val awaitingSql =
+    // ── Private query helpers ─────────────────────────────────────────────────
+
+    /**
+     * Instances whose current state requires a role the caller holds.
+     * Scoped to the caller's accessible zones unless [skipZoneFilter] is true.
+     */
+    private fun buildAwaitingItems(
+        principal: PiaPrincipal,
+        skipZoneFilter: Boolean,
+    ): List<InboxItem> {
+        val params =
+            mutableMapOf<String, Any>(
+                "roleCodes" to principal.roleCodes.toList(),
+            )
+        val zoneClause =
+            if (skipZoneFilter) {
+                ""
+            } else {
+                params["zoneIds"] = principal.accessibleZoneIds.map { it.toString() }.toList()
+                "AND p.zone_id = ANY(ARRAY[ :zoneIds ]::uuid[])"
+            }
+        val sql =
             """
             SELECT
                 wi.id                                                       AS instance_id,
@@ -123,12 +137,11 @@ class WorkflowController(
             WHERE wi.entity_type = 'ACTIVITY_RECORD'
               AND ws.is_terminal = false
               AND ws.role_required_code = ANY(ARRAY[ :roleCodes ])
-              $awaitingZoneClause
+              $zoneClause
             ORDER BY wi.entered_state_at ASC
             LIMIT 200
             """.trimIndent()
-
-        val awaiting = namedJdbc.query(awaitingSql, awaitingParams) { rs, _ ->
+        return namedJdbc.query(sql, params) { rs, _ ->
             InboxItem(
                 instanceId = UUID.fromString(rs.getString("instance_id")),
                 recordId = UUID.fromString(rs.getString("record_id")),
@@ -143,26 +156,29 @@ class WorkflowController(
                 isSlaBreached = rs.getBoolean("is_sla_breached"),
             )
         }
+    }
 
-        val slaBreached = awaiting.filter { it.isSlaBreached }
-
-        // ── In progress ───────────────────────────────────────────────────────
-        //
-        // Instances for records the caller created that are beyond DRAFT but
-        // not yet AUTHENTICATED (i.e. the caller submitted something and it
-        // is being reviewed upstream).
-
-        val inProgressParams = mutableMapOf<String, Any>(
-            "userId" to principal.userId,
-        )
-        val inProgressZoneClause = if (skipZoneFilter) {
-            ""
-        } else {
-            inProgressParams["zoneIds"] = principal.accessibleZoneIds.map { it.toString() }.toList()
-            "AND p.zone_id = ANY(ARRAY[ :zoneIds ]::uuid[])"
-        }
-
-        val inProgressSql =
+    /**
+     * Instances for records the caller created that are beyond DRAFT but not
+     * yet AUTHENTICATED — i.e. the caller submitted something being reviewed
+     * upstream. Scoped to the caller's accessible zones unless [skipZoneFilter].
+     */
+    private fun buildInProgressItems(
+        principal: PiaPrincipal,
+        skipZoneFilter: Boolean,
+    ): List<InboxItem> {
+        val params =
+            mutableMapOf<String, Any>(
+                "userId" to principal.userId,
+            )
+        val zoneClause =
+            if (skipZoneFilter) {
+                ""
+            } else {
+                params["zoneIds"] = principal.accessibleZoneIds.map { it.toString() }.toList()
+                "AND p.zone_id = ANY(ARRAY[ :zoneIds ]::uuid[])"
+            }
+        val sql =
             """
             SELECT
                 wi.id                                                       AS instance_id,
@@ -188,12 +204,11 @@ class WorkflowController(
             WHERE wi.entity_type = 'ACTIVITY_RECORD'
               AND ws.code NOT IN ('DRAFT', 'AUTHENTICATED')
               AND ws.is_terminal = false
-              $inProgressZoneClause
+              $zoneClause
             ORDER BY wi.entered_state_at ASC
             LIMIT 200
             """.trimIndent()
-
-        val inProgress = namedJdbc.query(inProgressSql, inProgressParams) { rs, _ ->
+        return namedJdbc.query(sql, params) { rs, _ ->
             InboxItem(
                 instanceId = UUID.fromString(rs.getString("instance_id")),
                 recordId = UUID.fromString(rs.getString("record_id")),
@@ -208,11 +223,5 @@ class WorkflowController(
                 isSlaBreached = false,
             )
         }
-
-        return InboxResponse(
-            awaiting = awaiting,
-            inProgress = inProgress,
-            slaBreached = slaBreached,
-        )
     }
 }

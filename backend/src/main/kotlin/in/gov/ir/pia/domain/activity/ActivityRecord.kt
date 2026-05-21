@@ -81,6 +81,5 @@ class ActivityRecord(
 
     override fun hashCode(): Int = id.hashCode()
 
-    override fun toString(): String =
-        "ActivityRecord(id=$id, activityId=$projectActivityId, state=$recordState)"
+    override fun toString(): String = "ActivityRecord(id=$id, activityId=$projectActivityId, state=$recordState)"
 }

@@ -83,9 +83,7 @@ import java.util.UUID
     ],
 )
 class AttachmentIntegrationTest {
-
     companion object {
-
         // ── EICAR test signature ──────────────────────────────────────────────
         // Universally recognised by all compliant scanners; safe to embed in
         // source code — it is not a real virus payload, just a detection marker.
@@ -114,13 +112,15 @@ class AttachmentIntegrationTest {
          */
         @JvmField
         @Container
-        val clamav: GenericContainer<*> = GenericContainer("clamav/clamav:1")
-            .withEnv("CLAMAV_NO_FRESHCLAM", "true")
-            .withExposedPorts(3310)
-            .waitingFor(
-                Wait.forListeningPort()
-                    .withStartupTimeout(Duration.ofMinutes(3)),
-            )
+        val clamav: GenericContainer<*> =
+            GenericContainer("clamav/clamav:1")
+                .withEnv("CLAMAV_NO_FRESHCLAM", "true")
+                .withExposedPorts(3310)
+                .waitingFor(
+                    Wait
+                        .forListeningPort()
+                        .withStartupTimeout(Duration.ofMinutes(3)),
+                )
 
         @JvmStatic
         @DynamicPropertySource
@@ -147,32 +147,36 @@ class AttachmentIntegrationTest {
         @BeforeAll
         fun ensureBucket() {
             // Create the attachments bucket in the Testcontainers MinIO instance.
-            val client = MinioClient.builder()
-                .endpoint(minio.s3URL)
-                .credentials(minio.userName, minio.password)
-                .build()
+            val client =
+                MinioClient
+                    .builder()
+                    .endpoint(minio.s3URL)
+                    .credentials(minio.userName, minio.password)
+                    .build()
             if (!client.bucketExists(BucketExistsArgs.builder().bucket(BUCKET_ATTACHMENTS).build())) {
                 client.makeBucket(MakeBucketArgs.builder().bucket(BUCKET_ATTACHMENTS).build())
             }
         }
 
         val EDGS_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111102")
-        val CE_USER_ID: UUID   = UUID.fromString("11111111-1111-1111-1111-111111111103")
+        val CAO_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
+        val CE_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
         val DYCE_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
+
     @Autowired lateinit var jdbc: JdbcTemplate
 
     // ── Test helpers ──────────────────────────────────────────────────────────
 
     private fun loginAs(userId: UUID): List<String> {
-        val resp = restTemplate.postForEntity(
-            "/api/v1/auth/select-user",
-            SelectUserRequest(userId),
-            Void::class.java,
-        )
+        val resp =
+            restTemplate.postForEntity(
+                "/api/v1/auth/select-user",
+                SelectUserRequest(userId),
+                Void::class.java,
+            )
         assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
         return resp.headers["Set-Cookie"] ?: emptyList()
     }
@@ -217,14 +221,16 @@ class AttachmentIntegrationTest {
         val nrZoneId = jdbc.queryForObject("SELECT id FROM zones WHERE code = 'NR'", UUID::class.java)!!
 
         val edgs = loginAs(EDGS_USER_ID)
-        val project = restTemplate.postForEntity(
-            "/api/v1/projects",
-            HttpEntity(
-                CreateProjectRequest(name = "Attachment IT ${UUID.randomUUID()}", zoneId = nrZoneId),
-                headersFor(edgs),
-            ),
-            ProjectDetailResponse::class.java,
-        ).body!!
+        val project =
+            restTemplate
+                .postForEntity(
+                    "/api/v1/projects",
+                    HttpEntity(
+                        CreateProjectRequest(name = "Attachment IT ${UUID.randomUUID()}", zoneId = nrZoneId),
+                        headersFor(edgs),
+                    ),
+                    ProjectDetailResponse::class.java,
+                ).body!!
 
         val cao = loginAs(CAO_USER_ID)
         restTemplate.postForEntity(
@@ -241,20 +247,24 @@ class AttachmentIntegrationTest {
         )
 
         val dyce = loginAs(DYCE_USER_ID)
-        val activity = restTemplate.postForEntity(
-            "/api/v1/projects/${project.id}/activities",
-            HttpEntity(
-                CreateActivityRequest(activityTypeCode = "LAND_ACQUISITION", name = "AT Activity"),
-                headersFor(dyce),
-            ),
-            ActivityDetailResponse::class.java,
-        ).body!!
+        val activity =
+            restTemplate
+                .postForEntity(
+                    "/api/v1/projects/${project.id}/activities",
+                    HttpEntity(
+                        CreateActivityRequest(activityTypeCode = "LAND_ACQUISITION", name = "AT Activity"),
+                        headersFor(dyce),
+                    ),
+                    ActivityDetailResponse::class.java,
+                ).body!!
 
-        return restTemplate.postForEntity(
-            "/api/v1/activities/${activity.id}/records",
-            HttpEntity(CreateActivityRecordRequest(), headersFor(dyce)),
-            ActivityRecordDetailResponse::class.java,
-        ).body!!.id
+        return restTemplate
+            .postForEntity(
+                "/api/v1/activities/${activity.id}/records",
+                HttpEntity(CreateActivityRecordRequest(), headersFor(dyce)),
+                ActivityRecordDetailResponse::class.java,
+            ).body!!
+            .id
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
@@ -280,20 +290,22 @@ class AttachmentIntegrationTest {
         assertThat(dto.entityId).isEqualTo(recordId)
 
         // Verify the row was committed to the database
-        val count = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM attachments WHERE id = ? AND is_deleted = false",
-            Int::class.java,
-            dto.id,
-        )
+        val count =
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attachments WHERE id = ? AND is_deleted = false",
+                Int::class.java,
+                dto.id,
+            )
         assertThat(count).isEqualTo(1)
 
         // Presigned download URL must be returned without error
-        val downloadResp = restTemplate.exchange(
-            "/api/v1/attachments/${dto.id}/download",
-            HttpMethod.GET,
-            HttpEntity<Void>(headersFor(dyce)),
-            AttachmentDownloadDto::class.java,
-        )
+        val downloadResp =
+            restTemplate.exchange(
+                "/api/v1/attachments/${dto.id}/download",
+                HttpMethod.GET,
+                HttpEntity<Void>(headersFor(dyce)),
+                AttachmentDownloadDto::class.java,
+            )
         assertThat(downloadResp.statusCode).isEqualTo(HttpStatus.OK)
         assertThat(downloadResp.body!!.presignedUrl).isNotBlank()
     }
@@ -312,11 +324,12 @@ class AttachmentIntegrationTest {
             .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)
 
         // No row should be committed to the database
-        val count = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM attachments WHERE entity_id = ? AND original_filename = 'infected.pdf'",
-            Int::class.java,
-            recordId,
-        )
+        val count =
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attachments WHERE entity_id = ? AND original_filename = 'infected.pdf'",
+                Int::class.java,
+                recordId,
+            )
         assertThat(count)
             .`as`("Infected file must not be committed to the attachments table")
             .isEqualTo(0)

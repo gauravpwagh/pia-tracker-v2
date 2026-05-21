@@ -130,7 +130,7 @@ export function HistoryPanel({ recordId }: HistoryPanelProps) {
             italic
             style={{ fontSize: 12, display: 'block', marginTop: 4 }}
           >
-            "{entry.comment}"
+            &ldquo;{entry.comment}&rdquo;
           </Text>
         )}
       </div>
