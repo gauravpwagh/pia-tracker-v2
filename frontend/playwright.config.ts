@@ -32,12 +32,16 @@ export default defineConfig({
   use: {
     baseURL: process.env.BASE_URL ?? 'http://localhost:5173',
     trace: 'on-first-retry',
+    // Local dev uses mkcert / self-signed TLS — ignore cert errors so tests
+    // pass against https://localhost without needing the CA installed system-wide.
+    ignoreHTTPSErrors: true,
     // Expose CDP so playwright-lighthouse can connect
     launchOptions: {
       args: [
         '--remote-debugging-port=9222',
         '--no-sandbox',
         '--disable-setuid-sandbox',
+        '--ignore-certificate-errors',
       ],
     },
   },

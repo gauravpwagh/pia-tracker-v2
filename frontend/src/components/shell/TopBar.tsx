@@ -152,6 +152,7 @@ export function TopBar() {
         {/* Role picker — dev/beta dummy auth */}
         {users.length > 0 && (
           <Select
+            aria-label="Select user role"
             placeholder="Select user…"
             style={{ minWidth: 200, maxWidth: 280 }}
             value={currentUser?.userId ?? undefined}

@@ -25,7 +25,13 @@ services:
         condition: service_completed_successfully
     networks: [pia]
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      # Use wget with --no-check-certificate against the HTTPS healthz endpoint.
+      # The plain HTTP healthz location should return 200 directly (before the
+      # catch-all 301 redirect), but busybox wget in alpine:3.x incorrectly
+      # attempts TLS negotiation when a 301 → https:// is followed, causing a
+      # cert-verification failure.  Targeting HTTPS with --no-check-certificate
+      # avoids the redirect entirely and is resilient to the mkcert self-signed cert.
+      test: ["CMD", "wget", "--no-check-certificate", "-qO-", "https://localhost/healthz"]
       interval: 15s
       timeout: 3s
       retries: 3

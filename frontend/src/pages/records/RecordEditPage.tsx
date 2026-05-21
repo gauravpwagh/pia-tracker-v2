@@ -50,7 +50,6 @@ import {
   Button,
   Col,
   Flex,
-  Layout,
   Row,
   Space,
   Spin,
@@ -81,7 +80,6 @@ import { HistoryPanel } from '@components/comments/HistoryPanel';
 import { AttachmentPanel } from '@components/attachments/AttachmentPanel';
 import { useAuthStore } from '@stores/authStore';
 
-const { Content } = Layout;
 const { Title, Text } = Typography;
 
 // ── State badge ───────────────────────────────────────────────────────────────
@@ -556,8 +554,11 @@ export default function RecordEditPage() {
     : 'Record';
 
   return (
-    <Layout style={{ background: 'transparent', height: '100%' }}>
-      <Content style={{ padding: '0 0 80px 0' }}>
+    // Use plain divs here — App.tsx's Layout.Content already renders a <main>
+    // landmark; adding another <Layout><Content> would create a duplicate main,
+    // which violates landmark-no-duplicate-main / landmark-main-is-top-level.
+    <div style={{ height: '100%' }}>
+      <div style={{ padding: '0 0 80px 0' }}>
         {/* ── Breadcrumb + header ── */}
         <div style={{ marginBottom: 16 }}>
           <Breadcrumb
@@ -574,7 +575,9 @@ export default function RecordEditPage() {
             ]}
           />
           <Flex justify="space-between" align="center" style={{ marginTop: 8 }}>
-            <Title level={4} style={{ margin: 0 }}>
+            {/* level={1} satisfies the page-has-heading-one a11y rule;
+                fontSize override keeps it visually consistent with other page headers. */}
+            <Title level={1} style={{ margin: 0, fontSize: 16, fontWeight: 600, lineHeight: '1.5' }}>
               {activity?.name ?? '—'}
             </Title>
             <RecordStateBadge state={record.recordState} />
@@ -647,7 +650,7 @@ export default function RecordEditPage() {
             <RightPanel activeSectionState={activeSectionState} recordId={recordId!} />
           </Col>
         </Row>
-      </Content>
+      </div>
 
       {/* ── Sticky bottom action bar ── */}
       <div
@@ -684,7 +687,7 @@ export default function RecordEditPage() {
           <AutosaveIndicator status={autosaveStatus} savedAt={savedAt} />
         </div>
       </div>
-    </Layout>
+    </div>
   );
 }
 
