@@ -197,13 +197,24 @@ class ActivityService(
 
     /**
      * Returns all non-deleted records for [activityId].
+     *
+     * Pass a non-null [subtype] to filter by [ActivityRecord.recordSubtype]
+     * (e.g. utility type for Utility Shifting records).
      */
     fun listRecordsForActivity(
         activityId: UUID,
         principal: PiaPrincipal,
+        subtype: String? = null,
     ): List<ActivityRecord> {
         val activity = getForPrincipal(activityId, principal)
-        return recordRepository.findAllByProjectActivityIdAndIsDeletedFalseOrderByCreatedAtAsc(activity.id)
+        return if (subtype != null) {
+            recordRepository.findAllByProjectActivityIdAndRecordSubtypeAndIsDeletedFalseOrderByCreatedAtAsc(
+                activity.id,
+                subtype,
+            )
+        } else {
+            recordRepository.findAllByProjectActivityIdAndIsDeletedFalseOrderByCreatedAtAsc(activity.id)
+        }
     }
 
     /**

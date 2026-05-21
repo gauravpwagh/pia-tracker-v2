@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
@@ -136,8 +137,9 @@ class ActivityController(
     @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.READ.OWN')")
     fun listRecords(
         @PathVariable activityId: UUID,
+        @RequestParam(required = false) subtype: String?,
         @AuthenticationPrincipal principal: PiaPrincipal,
-    ): List<ActivityRecordDetailResponse> = activityService.listRecordsForActivity(activityId, principal).map { it.toResponse() }
+    ): List<ActivityRecordDetailResponse> = activityService.listRecordsForActivity(activityId, principal, subtype).map { it.toResponse() }
 
     /**
      * Creates an empty record for an activity.

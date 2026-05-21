@@ -103,6 +103,56 @@ class SummaryUpdater(
             projectId,
             typeCode,
         )
+
+        // ── Per-subtype summary (Utility Shifting) ────────────────────────────
+        // Maintain project_utility_subtype_summary when the record has a subtype.
+        val subtype = record.recordSubtype ?: return
+
+        jdbc.update(
+            """
+            INSERT INTO project_utility_subtype_summary
+                (project_id, record_subtype)
+            VALUES (?, ?)
+            ON CONFLICT (project_id, record_subtype) DO NOTHING
+            """.trimIndent(),
+            projectId,
+            subtype,
+        )
+
+        if (fromCol != null) {
+            jdbc.update(
+                """
+                UPDATE project_utility_subtype_summary
+                SET $fromCol = GREATEST(0, $fromCol - 1)
+                WHERE project_id = ? AND record_subtype = ?
+                """.trimIndent(),
+                projectId,
+                subtype,
+            )
+        }
+
+        if (toCol != null) {
+            jdbc.update(
+                """
+                UPDATE project_utility_subtype_summary
+                SET $toCol = $toCol + 1
+                WHERE project_id = ? AND record_subtype = ?
+                """.trimIndent(),
+                projectId,
+                subtype,
+            )
+        }
+
+        jdbc.update(
+            """
+            UPDATE project_utility_subtype_summary
+            SET total_records = draft_count + submitted_count + verified_count
+                              + authenticated_count + sent_back_count
+            WHERE project_id = ? AND record_subtype = ?
+            """.trimIndent(),
+            projectId,
+            subtype,
+        )
     }
 
     /** Maps a workflow state code to its summary column name, or null if unmapped. */

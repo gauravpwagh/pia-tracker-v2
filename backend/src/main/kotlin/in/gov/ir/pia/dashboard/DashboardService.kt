@@ -8,6 +8,22 @@ import java.util.UUID
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
+data class UtilitySubtypeSummaryDto(
+    val recordSubtype: String,
+    val totalRecords: Int,
+    val draftCount: Int,
+    val submittedCount: Int,
+    val verifiedCount: Int,
+    val authenticatedCount: Int,
+    val sentBackCount: Int,
+    val updatedAt: Instant,
+)
+
+data class UtilitySubtypeBreakdownDto(
+    val projectId: UUID,
+    val subtypes: List<UtilitySubtypeSummaryDto>,
+)
+
 data class ActivitySummaryDto(
     val activityTypeCode: String,
     val totalRecords: Int,
@@ -62,5 +78,37 @@ class DashboardService(
                 projectId,
             )
         return ProjectDashboardDto(projectId = projectId, summaries = summaries)
+    }
+
+    /**
+     * Returns per-utility-subtype counts for [projectId] from
+     * [project_utility_subtype_summary]. Used for the Utility Shifting
+     * activity-level dashboard (Phase 2.3).
+     */
+    fun getUtilitySubtypeBreakdown(projectId: UUID): UtilitySubtypeBreakdownDto {
+        val subtypes =
+            jdbc.query(
+                """
+                SELECT record_subtype, total_records, draft_count, submitted_count,
+                       verified_count, authenticated_count, sent_back_count, updated_at
+                FROM project_utility_subtype_summary
+                WHERE project_id = ?
+                ORDER BY record_subtype
+                """.trimIndent(),
+                { rs, _ ->
+                    UtilitySubtypeSummaryDto(
+                        recordSubtype = rs.getString("record_subtype"),
+                        totalRecords = rs.getInt("total_records"),
+                        draftCount = rs.getInt("draft_count"),
+                        submittedCount = rs.getInt("submitted_count"),
+                        verifiedCount = rs.getInt("verified_count"),
+                        authenticatedCount = rs.getInt("authenticated_count"),
+                        sentBackCount = rs.getInt("sent_back_count"),
+                        updatedAt = rs.getTimestamp("updated_at").toInstant(),
+                    )
+                },
+                projectId,
+            )
+        return UtilitySubtypeBreakdownDto(projectId = projectId, subtypes = subtypes)
     }
 }

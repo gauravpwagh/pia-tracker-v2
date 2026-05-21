@@ -16,6 +16,12 @@ interface ActivityRecordRepository : JpaRepository<ActivityRecord, UUID> {
     /** All non-deleted records for an activity. */
     fun findAllByProjectActivityIdAndIsDeletedFalseOrderByCreatedAtAsc(projectActivityId: UUID): List<ActivityRecord>
 
+    /** All non-deleted records for an activity filtered by subtype (e.g. utility type). */
+    fun findAllByProjectActivityIdAndRecordSubtypeAndIsDeletedFalseOrderByCreatedAtAsc(
+        projectActivityId: UUID,
+        recordSubtype: String,
+    ): List<ActivityRecord>
+
     /** Single non-deleted record. Returns null → 404 in service. */
     fun findByIdAndIsDeletedFalse(id: UUID): ActivityRecord?
 }
