@@ -8,6 +8,22 @@ import java.util.UUID
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
+data class ForestStageSummaryDto(
+    val stageCode: String,
+    val totalRecords: Int,
+    val draftCount: Int,
+    val submittedCount: Int,
+    val verifiedCount: Int,
+    val authenticatedCount: Int,
+    val sentBackCount: Int,
+    val updatedAt: Instant,
+)
+
+data class ForestStageBreakdownDto(
+    val projectId: UUID,
+    val stages: List<ForestStageSummaryDto>,
+)
+
 data class UtilitySubtypeSummaryDto(
     val recordSubtype: String,
     val totalRecords: Int,
@@ -110,5 +126,40 @@ class DashboardService(
                 projectId,
             )
         return UtilitySubtypeBreakdownDto(projectId = projectId, subtypes = subtypes)
+    }
+
+    /**
+     * Returns per-stage workflow counts for Forest Clearance records in [projectId]
+     * from [project_forest_stage_summary].  Used for the Forest Clearance
+     * stage-progression dashboard widget (Phase 2.4).
+     *
+     * Only stages that have had at least one workflow transition appear in the
+     * result (rows are created lazily on first transition, not at record creation).
+     */
+    fun getForestStageBreakdown(projectId: UUID): ForestStageBreakdownDto {
+        val stages =
+            jdbc.query(
+                """
+                SELECT stage_code, total_records, draft_count, submitted_count,
+                       verified_count, authenticated_count, sent_back_count, updated_at
+                FROM project_forest_stage_summary
+                WHERE project_id = ?
+                ORDER BY stage_code
+                """.trimIndent(),
+                { rs, _ ->
+                    ForestStageSummaryDto(
+                        stageCode = rs.getString("stage_code"),
+                        totalRecords = rs.getInt("total_records"),
+                        draftCount = rs.getInt("draft_count"),
+                        submittedCount = rs.getInt("submitted_count"),
+                        verifiedCount = rs.getInt("verified_count"),
+                        authenticatedCount = rs.getInt("authenticated_count"),
+                        sentBackCount = rs.getInt("sent_back_count"),
+                        updatedAt = rs.getTimestamp("updated_at").toInstant(),
+                    )
+                },
+                projectId,
+            )
+        return ForestStageBreakdownDto(projectId = projectId, stages = stages)
     }
 }

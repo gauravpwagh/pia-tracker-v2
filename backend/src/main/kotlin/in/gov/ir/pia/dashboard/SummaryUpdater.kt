@@ -104,6 +104,60 @@ class SummaryUpdater(
             typeCode,
         )
 
+        // ── Per-stage summary (Forest Clearance) ─────────────────────────────
+        // Maintain project_forest_stage_summary when the activity is Forest
+        // Clearance and the event carries a section code (stage_i / stage_ii /
+        // post_approval).  One row per (project_id, stage_code).
+        if (activity.activityTypeCode == "FOREST_CLEARANCE" && event.sectionCode != null) {
+            val stageCode = event.sectionCode!!
+
+            jdbc.update(
+                """
+                INSERT INTO project_forest_stage_summary
+                    (project_id, stage_code)
+                VALUES (?, ?)
+                ON CONFLICT (project_id, stage_code) DO NOTHING
+                """.trimIndent(),
+                projectId,
+                stageCode,
+            )
+
+            if (fromCol != null) {
+                jdbc.update(
+                    """
+                    UPDATE project_forest_stage_summary
+                    SET $fromCol = GREATEST(0, $fromCol - 1)
+                    WHERE project_id = ? AND stage_code = ?
+                    """.trimIndent(),
+                    projectId,
+                    stageCode,
+                )
+            }
+
+            if (toCol != null) {
+                jdbc.update(
+                    """
+                    UPDATE project_forest_stage_summary
+                    SET $toCol = $toCol + 1
+                    WHERE project_id = ? AND stage_code = ?
+                    """.trimIndent(),
+                    projectId,
+                    stageCode,
+                )
+            }
+
+            jdbc.update(
+                """
+                UPDATE project_forest_stage_summary
+                SET total_records = draft_count + submitted_count + verified_count
+                                  + authenticated_count + sent_back_count
+                WHERE project_id = ? AND stage_code = ?
+                """.trimIndent(),
+                projectId,
+                stageCode,
+            )
+        }
+
         // ── Per-subtype summary (Utility Shifting) ────────────────────────────
         // Maintain project_utility_subtype_summary when the record has a subtype.
         val subtype = record.recordSubtype ?: return

@@ -1,6 +1,7 @@
 package `in`.gov.ir.pia.api
 
 import `in`.gov.ir.pia.dashboard.DashboardService
+import `in`.gov.ir.pia.dashboard.ForestStageBreakdownDto
 import `in`.gov.ir.pia.dashboard.ProjectDashboardDto
 import `in`.gov.ir.pia.dashboard.UtilitySubtypeBreakdownDto
 import org.springframework.security.access.prepost.PreAuthorize
@@ -48,4 +49,25 @@ class DashboardController(
     fun getUtilityBreakdown(
         @PathVariable projectId: UUID,
     ): UtilitySubtypeBreakdownDto = dashboardService.getUtilitySubtypeBreakdown(projectId)
+
+    /**
+     * Returns per-stage workflow counts for Forest Clearance records in a project.
+     *
+     * Reads from [project_forest_stage_summary] — maintained by SummaryUpdater
+     * alongside the main activity summary on every stage-level workflow transition.
+     *
+     * Stages appear in the result only after their first workflow transition;
+     * stages still in the initial DRAFT (never submitted) are absent.
+     *
+     * Used by the Forest Clearance stage-progression dashboard widget (Phase 2.4).
+     */
+    @GetMapping("/api/v1/dashboard/projects/{projectId}/forest-stage-breakdown")
+    @PreAuthorize(
+        "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PROJECT') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.ZONE') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PAN_INDIA')",
+    )
+    fun getForestStageBreakdown(
+        @PathVariable projectId: UUID,
+    ): ForestStageBreakdownDto = dashboardService.getForestStageBreakdown(projectId)
 }
