@@ -204,8 +204,10 @@ class AttachmentService(
      * Opens a TCP connection to clamd, sends the INSTREAM command, and returns
      * the raw response line.
      *
-     * Protocol: "zINSTREAM\0" → <4-byte big-endian chunk length><data> → <0-length chunk>
-     * Response: "stream: OK\n" or "stream: {virus-name} FOUND\n"
+     * Uses the n-prefix protocol (newline-terminated command) which is
+     * equivalent to the z-prefix (null-terminated command):
+     *   "nINSTREAM\n" → <4-byte big-endian chunk length><data> → <0-length chunk>
+     * Response: "stream: OK" or "stream: {virus-name} FOUND"
      *
      * Throws [ResponseStatusException] 503 on any [IOException] so that a missing
      * or unreachable scanner always blocks the upload (fail-closed).
@@ -217,7 +219,9 @@ class AttachmentService(
                 val out = socket.getOutputStream()
                 val responseIn = socket.getInputStream()
 
-                out.write("zINSTREAM ".toByteArray(Charsets.UTF_8))
+                // n-prefix commands are newline-terminated; clamd processes them
+                // identically to z-prefix (null-terminated) commands.
+                out.write("nINSTREAM\n".toByteArray(Charsets.UTF_8))
                 // 4-byte big-endian content length, then the payload
                 out.write(ByteBuffer.allocate(Int.SIZE_BYTES).putInt(bytes.size).array())
                 out.write(bytes)

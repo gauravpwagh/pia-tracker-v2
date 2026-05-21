@@ -287,7 +287,10 @@ class ProjectLifecycleIntegrationTest {
                 String::class.java,
                 projectId,
             )
-        assertThat(auditActions).containsExactlyInAnyOrder(
+        // WorkflowAuditListener also writes WORKFLOW.* entries for the same
+        // entity_type + entity_id on each transition; use contains() (not
+        // containsExactlyInAnyOrder) so those extra rows don't break the assertion.
+        assertThat(auditActions).contains(
             "PROJECT.CREATE",
             "PROJECT.ALLOCATE",
             "PROJECT.ASSIGN_DYCE",

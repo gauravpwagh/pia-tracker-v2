@@ -107,19 +107,31 @@ class AttachmentIntegrationTest {
          * container starts faster in CI (no network call for definition updates;
          * the bundled database is sufficient for EICAR detection).
          *
-         * Startup timeout is 3 minutes: even without freshclam, clamd still loads
-         * its database into memory before accepting connections.
+         * Wait strategy: `forListeningPort()` fires as soon as the port opens, but
+         * clamd opens the TCP socket *before* it finishes loading the virus database.
+         * During that window every scan returns "OK" — including EICAR.  Instead we
+         * wait for the clamd log line "Self checking every 600 seconds" which only
+         * appears once all signatures are fully loaded into memory.
          */
         @JvmField
         @Container
         val clamav: GenericContainer<*> =
-            GenericContainer("clamav/clamav:1")
-                .withEnv("CLAMAV_NO_FRESHCLAM", "true")
+            GenericContainer("clamav/clamav:1.4")
                 .withExposedPorts(3310)
+                // Run clamd directly instead of the default entrypoint script that also starts
+                // freshclam.  freshclam triggers a database reload in clamd which opens a window
+                // where every INSTREAM scan returns "OK" — including EICAR — causing flaky tests.
+                // Using withCreateContainerCmdModifier (a Testcontainers API call) avoids the
+                // git-bash path-translation problem that occurs when the path is passed via a
+                // shell command on Windows.
+                .withCreateContainerCmdModifier { cmd ->
+                    cmd.withEntrypoint("/usr/sbin/clamd")
+                    cmd.withCmd("--foreground")
+                }
                 .waitingFor(
                     Wait
-                        .forListeningPort()
-                        .withStartupTimeout(Duration.ofMinutes(3)),
+                        .forLogMessage(".*Self checking every 600 seconds.*", 1)
+                        .withStartupTimeout(Duration.ofMinutes(4)),
                 )
 
         @JvmStatic
@@ -211,6 +223,38 @@ class AttachmentIntegrationTest {
             headersFor(cookies).apply { contentType = MediaType.MULTIPART_FORM_DATA },
         ),
         AttachmentDto::class.java,
+    )
+
+    /**
+     * Upload helper that returns the raw response body as a [String].
+     * Use this when the expected HTTP status is non-2xx (e.g. 422 for EICAR), because
+     * [TestRestTemplate] still tries to deserialise the error body as the requested type and
+     * throws [HttpMessageNotReadableException] if the body doesn't match the DTO schema.
+     */
+    private fun uploadFileRaw(
+        cookies: List<String>,
+        recordId: UUID,
+        fileBytes: ByteArray,
+        filename: String = "doc.pdf",
+    ) = restTemplate.postForEntity(
+        "/api/v1/attachments",
+        HttpEntity(
+            LinkedMultiValueMap<String, Any>().apply {
+                add("entityType", "ACTIVITY_RECORD")
+                add("entityId", recordId.toString())
+                add(
+                    "file",
+                    HttpEntity(
+                        object : ByteArrayResource(fileBytes) {
+                            override fun getFilename() = filename
+                        },
+                        HttpHeaders().apply { contentType = MediaType.APPLICATION_PDF },
+                    ),
+                )
+            },
+            headersFor(cookies).apply { contentType = MediaType.MULTIPART_FORM_DATA },
+        ),
+        String::class.java,
     )
 
     /**
@@ -317,7 +361,10 @@ class AttachmentIntegrationTest {
 
         val eicarBytes = EICAR.toByteArray(Charsets.UTF_8)
 
-        val resp = uploadFile(dyce, recordId, eicarBytes, "infected.pdf")
+        // Use the raw (String body) variant — the 422 error response is not an AttachmentDto
+        // and TestRestTemplate would throw HttpMessageNotReadableException if we asked it to
+        // deserialise a ProblemDetail JSON as AttachmentDto.
+        val resp = uploadFileRaw(dyce, recordId, eicarBytes, "infected.pdf")
 
         assertThat(resp.statusCode)
             .`as`("EICAR must be rejected with 422 — malware scan FOUND")
