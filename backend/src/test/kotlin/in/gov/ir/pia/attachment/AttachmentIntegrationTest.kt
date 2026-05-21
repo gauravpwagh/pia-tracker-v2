@@ -127,8 +127,7 @@ class AttachmentIntegrationTest {
                 .withCreateContainerCmdModifier { cmd ->
                     cmd.withEntrypoint("/usr/sbin/clamd")
                     cmd.withCmd("--foreground")
-                }
-                .waitingFor(
+                }.waitingFor(
                     Wait
                         .forLogMessage(".*Self checking every 600 seconds.*", 1)
                         .withStartupTimeout(Duration.ofMinutes(4)),
