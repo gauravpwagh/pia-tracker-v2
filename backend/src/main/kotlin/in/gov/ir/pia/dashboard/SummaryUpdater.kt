@@ -4,12 +4,15 @@ import `in`.gov.ir.pia.repository.ActivityRecordRepository
 import `in`.gov.ir.pia.repository.ProjectActivityRepository
 import `in`.gov.ir.pia.workflow.WorkflowStateChangedEvent
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.context.event.EventListener
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
+import java.util.UUID
 
 /**
- * Maintains [project_activity_summary] counts in response to workflow transitions.
+ * Maintains [project_activity_summary] counts in response to workflow transitions,
+ * then cascades those changes into [project_summary] and [zone_summary].
  *
  * Runs inside the same DB transaction as the originating write — rolls back
  * atomically if the transition fails.
@@ -23,12 +26,21 @@ import org.springframework.stereotype.Component
  *
  * Any fromState decrements its column; toState increments its column.
  * total_records is recomputed as the sum of all state counts.
+ *
+ * Cascade chain (all in one transaction):
+ *   WorkflowStateChangedEvent
+ *     → update project_activity_summary
+ *     → publish ProjectSummaryChangedEvent
+ *       → update project_summary
+ *       → publish ZoneSummaryChangedEvent
+ *         → update zone_summary
  */
 @Component
 class SummaryUpdater(
     private val activityRecordRepo: ActivityRecordRepository,
     private val projectActivityRepo: ProjectActivityRepository,
     private val jdbc: JdbcTemplate,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
     private val log = LoggerFactory.getLogger(SummaryUpdater::class.java)
 
@@ -103,6 +115,9 @@ class SummaryUpdater(
             projectId,
             typeCode,
         )
+
+        // Cascade to project summary and then zone summary
+        eventPublisher.publishEvent(ProjectSummaryChangedEvent(projectId))
 
         // ── Per-stage summary (Forest Clearance) ─────────────────────────────
         // Maintain project_forest_stage_summary when the activity is Forest
@@ -206,6 +221,97 @@ class SummaryUpdater(
             """.trimIndent(),
             projectId,
             subtype,
+        )
+    }
+
+    /**
+     * Refreshes [project_summary] for [event.projectId] by re-aggregating its
+     * activity-level summaries and current drawing counts.
+     *
+     * Published synchronously within the originating transaction.
+     */
+    @EventListener
+    fun onProjectSummaryChanged(event: ProjectSummaryChangedEvent) {
+        val projectId = event.projectId
+
+        // Upsert project_summary — aggregate from project_activity_summary +
+        // live drawing count from activity_records.
+        jdbc.update(
+            """
+            INSERT INTO project_summary
+                (project_id, total_records, authenticated_count, drawings_in_approval, sla_breach_count)
+            SELECT
+                ?                                                          AS project_id,
+                COALESCE(SUM(pas.total_records), 0)                       AS total_records,
+                COALESCE(SUM(pas.authenticated_count), 0)                 AS authenticated_count,
+                (SELECT COUNT(*)
+                 FROM activity_records ar
+                 JOIN project_activities pa ON ar.project_activity_id = pa.id
+                 WHERE pa.project_id = ?
+                   AND pa.activity_type_code = 'DRAWING_APPROVAL'
+                   AND ar.record_state = 'IN_APPROVAL'
+                   AND NOT ar.is_deleted)                                  AS drawings_in_approval,
+                0                                                          AS sla_breach_count
+            FROM project_activity_summary pas
+            WHERE pas.project_id = ?
+            ON CONFLICT (project_id) DO UPDATE
+                SET total_records        = EXCLUDED.total_records,
+                    authenticated_count  = EXCLUDED.authenticated_count,
+                    drawings_in_approval = EXCLUDED.drawings_in_approval,
+                    sla_breach_count     = EXCLUDED.sla_breach_count
+            """.trimIndent(),
+            projectId, projectId, projectId,
+        )
+
+        // Cascade to zone summary
+        val zoneId = jdbc.queryForObject(
+            "SELECT zone_id FROM projects WHERE id = ?",
+            UUID::class.java, projectId,
+        ) ?: run {
+            log.warn("SummaryUpdater: zone_id not found for project {}", projectId)
+            return
+        }
+
+        eventPublisher.publishEvent(ZoneSummaryChangedEvent(zoneId))
+    }
+
+    /**
+     * Refreshes [zone_summary] for [event.zoneId] by re-counting projects
+     * and summing their KPIs from [project_summary].
+     *
+     * Published synchronously within the originating transaction.
+     */
+    @EventListener
+    fun onZoneSummaryChanged(event: ZoneSummaryChangedEvent) {
+        val zoneId = event.zoneId
+
+        jdbc.update(
+            """
+            INSERT INTO zone_summary
+                (zone_id, projects_active, projects_with_sla_breaches, total_drawings_in_approval)
+            VALUES (
+                ?,
+                (SELECT COUNT(*)
+                 FROM projects
+                 WHERE zone_id = ?
+                   AND NOT is_deleted
+                   AND lifecycle_state NOT IN ('COMPLETED', 'DROPPED')),
+                (SELECT COUNT(*)
+                 FROM project_summary ps
+                 JOIN projects p ON ps.project_id = p.id
+                 WHERE p.zone_id = ?
+                   AND ps.sla_breach_count > 0),
+                (SELECT COALESCE(SUM(ps.drawings_in_approval), 0)
+                 FROM project_summary ps
+                 JOIN projects p ON ps.project_id = p.id
+                 WHERE p.zone_id = ?)
+            )
+            ON CONFLICT (zone_id) DO UPDATE
+                SET projects_active            = EXCLUDED.projects_active,
+                    projects_with_sla_breaches = EXCLUDED.projects_with_sla_breaches,
+                    total_drawings_in_approval = EXCLUDED.total_drawings_in_approval
+            """.trimIndent(),
+            zoneId, zoneId, zoneId, zoneId,
         )
     }
 
