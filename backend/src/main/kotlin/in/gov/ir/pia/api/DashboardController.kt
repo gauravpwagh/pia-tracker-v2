@@ -4,6 +4,8 @@ import `in`.gov.ir.pia.dashboard.DashboardService
 import `in`.gov.ir.pia.dashboard.ForestStageBreakdownDto
 import `in`.gov.ir.pia.dashboard.ProjectDashboardDto
 import `in`.gov.ir.pia.dashboard.UtilitySubtypeBreakdownDto
+import `in`.gov.ir.pia.dashboard.PanIndiaDashboardResponse
+import `in`.gov.ir.pia.dashboard.PanIndiaDashboardService
 import `in`.gov.ir.pia.dashboard.ZoneDashboardResponse
 import `in`.gov.ir.pia.dashboard.ZoneDashboardService
 import `in`.gov.ir.pia.security.PiaPrincipal
@@ -34,6 +36,7 @@ import java.util.UUID
 class DashboardController(
     private val dashboardService: DashboardService,
     private val zoneDashboardService: ZoneDashboardService,
+    private val panIndiaDashboardService: PanIndiaDashboardService,
 ) {
     @GetMapping("/api/v1/dashboard/projects/{projectId}")
     @PreAuthorize(
@@ -109,7 +112,7 @@ class DashboardController(
         @PathVariable projectId: UUID,
     ): ForestStageBreakdownDto = dashboardService.getForestStageBreakdown(projectId)
 
-    // ── Phase 2.8 — Zone scope dashboard ─────────────────────────────────────
+    // ── Phase 2.8 — Zone scope dashboard ──────────────────────────────────────
 
     @GetMapping("/api/v1/dashboard/zone")
     @PreAuthorize(
@@ -134,4 +137,26 @@ class DashboardController(
     fun getZoneDashboard(
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): ZoneDashboardResponse = zoneDashboardService.getZoneDashboard(principal)
+
+    // ── Phase 2.9 — PAN India dashboard ───────────────────────────────────────
+
+    @GetMapping("/api/v1/dashboard/pan-india")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PAN_INDIA')")
+    @Operation(
+        summary = "PAN India dashboard",
+        description =
+            "Returns system-wide KPI totals and a full zone breakdown for every active zone. " +
+                "Top-level KPIs (totalProjectsActive, totalProjectsWithSlaBreaches, " +
+                "totalDrawingsInApproval) are read from the singleton pan_india_summary row, " +
+                "which is recomputed from zone_summary on every workflow event via SummaryUpdater. " +
+                "The zones list matches what GET /api/v1/dashboard/zone returns for a super admin. " +
+                "Projects within each zone are a live query — always current. " +
+                "Gated to DASHBOARD.VIEW.PAN_INDIA (EDGS/CI, Board Viewer, Super Admin).",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "PAN India dashboard returned"),
+        ApiResponse(responseCode = "403", description = "Insufficient permission"),
+    )
+    fun getPanIndiaDashboard(): PanIndiaDashboardResponse =
+        panIndiaDashboardService.getPanIndiaDashboard()
 }

@@ -69,19 +69,36 @@ class ZoneDashboardService(
     fun getZoneDashboard(principal: PiaPrincipal): ZoneDashboardResponse {
         val accessibleZoneIds: List<UUID> =
             if (principal.isSuperAdmin) {
-                // Super admin sees every active zone
-                jdbc.queryForList(
-                    "SELECT id FROM zones WHERE is_active ORDER BY display_order",
-                    UUID::class.java,
-                )
+                allActiveZoneIds()
             } else {
                 principal.accessibleZoneIds.toList()
             }
 
         if (accessibleZoneIds.isEmpty()) return ZoneDashboardResponse(zones = emptyList())
+        return ZoneDashboardResponse(zones = loadZones(accessibleZoneIds))
+    }
 
-        // Load zone metadata + pre-computed KPIs for all accessible zones in one query.
-        val placeholders = accessibleZoneIds.joinToString(",") { "?" }
+    /**
+     * Returns zone KPI strips and project lists for ALL active zones.
+     * Used by [PanIndiaDashboardService] which is not principal-scoped.
+     */
+    fun loadAllZones(): List<ZoneSummaryDto> = loadZones(allActiveZoneIds())
+
+    private fun allActiveZoneIds(): List<UUID> =
+        jdbc.queryForList(
+            "SELECT id FROM zones WHERE is_active ORDER BY display_order",
+            UUID::class.java,
+        )
+
+    /**
+     * Core zone-loading logic: fetches zone metadata + KPIs from [zone_summary]
+     * and a live project list for each of the given [zoneIds].
+     */
+    fun loadZones(zoneIds: List<UUID>): List<ZoneSummaryDto> {
+        if (zoneIds.isEmpty()) return emptyList()
+
+        // Load zone metadata + pre-computed KPIs for all requested zones in one query.
+        val placeholders = zoneIds.joinToString(",") { "?" }
         data class ZoneRow(
             val zoneId: UUID,
             val zoneCode: String,
@@ -114,12 +131,12 @@ class ZoneDashboardService(
                     totalDrawingsInApproval = rs.getInt("total_drawings_in_approval"),
                 )
             },
-            *accessibleZoneIds.toTypedArray(),
+            *zoneIds.toTypedArray(),
         )
 
         val today = LocalDate.now()
 
-        val zones: List<ZoneSummaryDto> = zoneRows.map { zone ->
+        return zoneRows.map { zone ->
             // Live project list — always current, not from the summary table.
             val projects: List<ZoneProjectDto> = jdbc.query(
                 """
@@ -128,7 +145,7 @@ class ZoneDashboardService(
                        p.name,
                        p.lifecycle_state,
                        p.recommended_by_board_on,
-                       COALESCE(ps.sla_breach_count, 0)    AS sla_breach_count,
+                       COALESCE(ps.sla_breach_count, 0)     AS sla_breach_count,
                        COALESCE(ps.drawings_in_approval, 0) AS drawings_in_approval
                 FROM projects p
                 LEFT JOIN project_summary ps ON ps.project_id = p.id
@@ -164,7 +181,5 @@ class ZoneDashboardService(
                 projects = projects,
             )
         }
-
-        return ZoneDashboardResponse(zones = zones)
     }
 }

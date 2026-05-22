@@ -277,7 +277,8 @@ class SummaryUpdater(
 
     /**
      * Refreshes [zone_summary] for [event.zoneId] by re-counting projects
-     * and summing their KPIs from [project_summary].
+     * and summing their KPIs from [project_summary], then cascades the change
+     * into [pan_india_summary] (the terminal step in the summary cascade chain).
      *
      * Published synchronously within the originating transaction.
      */
@@ -312,6 +313,24 @@ class SummaryUpdater(
                     total_drawings_in_approval = EXCLUDED.total_drawings_in_approval
             """.trimIndent(),
             zoneId, zoneId, zoneId, zoneId,
+        )
+
+        // Cascade to PAN India summary (terminal step — no further event needed)
+        jdbc.update(
+            """
+            INSERT INTO pan_india_summary
+                (singleton, total_projects_active, total_projects_with_sla_breaches, total_drawings_in_approval)
+            SELECT
+                true,
+                COALESCE(SUM(projects_active), 0),
+                COALESCE(SUM(projects_with_sla_breaches), 0),
+                COALESCE(SUM(total_drawings_in_approval), 0)
+            FROM zone_summary
+            ON CONFLICT (singleton) DO UPDATE
+                SET total_projects_active            = EXCLUDED.total_projects_active,
+                    total_projects_with_sla_breaches = EXCLUDED.total_projects_with_sla_breaches,
+                    total_drawings_in_approval       = EXCLUDED.total_drawings_in_approval
+            """.trimIndent(),
         )
     }
 
