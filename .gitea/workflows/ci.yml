@@ -1,0 +1,117 @@
+# PIA Tracker — Gitea Actions CI
+#
+# Runs on every push to main/develop and every PR targeting main.
+# Full Phase 1 + Phase 2 integration test suite must complete in < 25 min.
+#
+# Job sequence:
+#   lint  →  test
+#
+# Testcontainers spawns its own postgres:16-alpine per test class,
+# so no external Postgres service container is needed.
+# Docker socket access is required (Testcontainers + Ryuk).
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # lint
+  # ──────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (ktlint + detekt)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant Gradle wrapper permission
+        run: chmod +x gradlew
+
+      - name: Run ktlint check
+        run: ./gradlew ktlintCheck --no-daemon --quiet
+
+      - name: Run detekt
+        run: ./gradlew detekt --no-daemon --quiet
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # test
+  # ──────────────────────────────────────────────────────────────────────────
+  test:
+    name: Test (unit + integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: lint
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant Gradle wrapper permission
+        run: chmod +x gradlew
+
+      - name: Pull Testcontainers images (cache warm-up)
+        # Pre-pull the image Testcontainers will use so the first pull doesn't
+        # eat into the 25-min budget.
+        run: docker pull postgres:16-alpine
+
+      - name: Run tests
+        run: |
+          ./gradlew test \
+            --no-daemon \
+            --parallel \
+            --max-workers=2 \
+            -Dspring.profiles.active=dev \
+            -Dtestcontainers.ryuk.disabled=false
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "false"
+          # Allow Testcontainers to reach the Docker daemon
+          DOCKER_HOST: unix:///var/run/docker.sock
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ gitea.run_number }}
+          path: backend/build/reports/tests/
+          retention-days: 7
+
+      - name: Upload JaCoCo coverage (if available)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ gitea.run_number }}
+          path: backend/build/reports/jacoco/
+          retention-days: 7
+          if-no-files-found: ignore
