@@ -301,16 +301,39 @@ class ActivityService(
         val activity = getForPrincipal(activityId, principal)
         requireDyceAssignment(activity.projectId, principal)
 
-        val formDefId =
-            activity.defaultFormDefinitionId
-                ?: throw ResponseStatusException(
-                    HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Activity has no form definition; cannot create a record yet",
-                )
-
+        // ── Resolve form definition ───────────────────────────────────────────
+        //
+        // Drawing activities (DRAWING_APPROVAL) have one form definition per
+        // drawing type.  The caller supplies [request.recordSubtype] (e.g. "ESP",
+        // "SIP", "TUNNEL_DESIGN") and we look up "{subtype}_DRAWING_V1".
+        //
+        // All other activity types use the activity's defaultFormDefinitionId,
+        // which was set at activity-creation time from the latest active form for
+        // the activity type.
         val formDef =
-            formDefinitionRepository.findById(formDefId).orElseThrow {
-                ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Form definition not found")
+            if (activity.activityTypeCode == "DRAWING_APPROVAL") {
+                val subtype =
+                    request.recordSubtype
+                        ?: throw ResponseStatusException(
+                            HttpStatus.UNPROCESSABLE_ENTITY,
+                            "Drawing records require recordSubtype (e.g. 'ESP', 'SIP', 'GAD_MINOR')",
+                        )
+                val formCode = "${subtype}_DRAWING_V1"
+                formDefinitionRepository.findLatestActiveByCode(formCode)
+                    ?: throw ResponseStatusException(
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        "No active drawing form definition found for type '$subtype' (looked up code '$formCode')",
+                    )
+            } else {
+                val formDefId =
+                    activity.defaultFormDefinitionId
+                        ?: throw ResponseStatusException(
+                            HttpStatus.UNPROCESSABLE_ENTITY,
+                            "Activity has no form definition; cannot create a record yet",
+                        )
+                formDefinitionRepository.findById(formDefId).orElseThrow {
+                    ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Form definition not found")
+                }
             }
 
         val record =

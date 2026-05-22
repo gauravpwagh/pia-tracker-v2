@@ -193,7 +193,7 @@ class DrawingGateIntegrationTest {
         val createResp =
             restTemplate.postForEntity(
                 "/api/v1/activities/${activity.id}/records",
-                HttpEntity(CreateActivityRecordRequest(), headersFor(dyce1)),
+                HttpEntity(CreateActivityRecordRequest(recordSubtype = "ESP"), headersFor(dyce1)),
                 ActivityRecordDetailResponse::class.java,
             )
         assertThat(createResp.statusCode).isEqualTo(HttpStatus.CREATED)
