@@ -14,6 +14,7 @@ import `in`.gov.ir.pia.repository.ProjectRepository
 import `in`.gov.ir.pia.security.PiaPrincipal
 import `in`.gov.ir.pia.service.comment.CommentService
 import `in`.gov.ir.pia.service.comment.CreateCommentRequest
+import `in`.gov.ir.pia.workflow.DrawingService
 import `in`.gov.ir.pia.workflow.WorkflowService
 import jakarta.persistence.EntityManager
 import org.springframework.http.HttpStatus
@@ -164,6 +165,7 @@ class ActivityService(
     private val entityManager: EntityManager,
     private val workflowService: WorkflowService,
     private val commentService: CommentService,
+    private val drawingService: DrawingService,
 ) {
     // ── Read ──────────────────────────────────────────────────────────────────
 
@@ -326,32 +328,38 @@ class ActivityService(
 
         // ── Start per-section (or per-record) workflow instances ──────────────
         //
-        // For section-level-workflow forms (e.g. Land Acquisition with 9
-        // section_codes): start one SECTION_STANDARD_V1 instance per section.
+        // Drawing records use the checklist model (DrawingService) instead of
+        // the workflow engine — no WorkflowInstance rows are created.
+        //
+        // For section-level-workflow forms (e.g. Land Acquisition, Forest
+        // Clearance): start one SECTION_STANDARD_V1 instance per section code.
         //
         // For record-level forms (empty section_codes): start one
         // RECORD_STANDARD_V1 instance for the whole record.
-        //
-        // The section code is stored on the workflow_instance row so that
-        // WorkflowService.currentState(entityType, entityId, sectionCode) can
-        // look up per-section state.
-        val sectionCodes = formDef.sectionCodes
-        if (sectionCodes.isNotEmpty()) {
-            sectionCodes.forEach { sectionCode ->
+        if (formDef.activityTypeCode == "DRAWING_APPROVAL") {
+            // Drawing checklist: seed default approvers from form definition.
+            // Resolve the project zone for matching approver users.
+            val project = projectRepository.findByIdAndIsDeletedFalse(activity.projectId)
+            drawingService.seedDefaultApprovers(record.id, formDef, project?.zoneId)
+        } else {
+            val sectionCodes = formDef.sectionCodes
+            if (sectionCodes.isNotEmpty()) {
+                sectionCodes.forEach { sectionCode ->
+                    workflowService.start(
+                        definitionCode = "SECTION_STANDARD_V1",
+                        entityType = "ACTIVITY_RECORD",
+                        entityId = record.id,
+                        sectionCode = sectionCode,
+                    )
+                }
+            } else {
                 workflowService.start(
-                    definitionCode = "SECTION_STANDARD_V1",
+                    definitionCode = "RECORD_STANDARD_V1",
                     entityType = "ACTIVITY_RECORD",
                     entityId = record.id,
-                    sectionCode = sectionCode,
+                    sectionCode = null,
                 )
             }
-        } else {
-            workflowService.start(
-                definitionCode = "RECORD_STANDARD_V1",
-                entityType = "ACTIVITY_RECORD",
-                entityId = record.id,
-                sectionCode = null,
-            )
         }
 
         auditLogWriter.write(
