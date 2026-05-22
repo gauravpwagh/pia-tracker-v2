@@ -116,6 +116,28 @@ class SummaryUpdater(
             typeCode,
         )
 
+        // Recompute sla_breach_count — live count of workflow instances that have
+        // been in their current non-terminal state longer than sla_days allows.
+        jdbc.update(
+            """
+            UPDATE project_activity_summary pas
+            SET sla_breach_count = (
+                SELECT COUNT(*)
+                FROM workflow_instances wi
+                JOIN workflow_states ws ON ws.id = wi.current_state_id
+                JOIN activity_records ar ON ar.id = wi.entity_id AND NOT ar.is_deleted
+                JOIN project_activities pa ON pa.id = ar.project_activity_id
+                WHERE pa.project_id = ?
+                  AND pa.activity_type_code = ?
+                  AND ws.sla_days IS NOT NULL
+                  AND ws.is_terminal = false
+                  AND EXTRACT(EPOCH FROM (now() - wi.entered_state_at)) > ws.sla_days * 86400.0
+            )
+            WHERE pas.project_id = ? AND pas.activity_type_code = ?
+            """.trimIndent(),
+            projectId, typeCode, projectId, typeCode,
+        )
+
         // Cascade to project summary and then zone summary
         eventPublisher.publishEvent(ProjectSummaryChangedEvent(projectId))
 
@@ -236,6 +258,7 @@ class SummaryUpdater(
 
         // Upsert project_summary — aggregate from project_activity_summary +
         // live drawing count from activity_records.
+        // sla_breach_count is now summed from project_activity_summary (not hardcoded 0).
         jdbc.update(
             """
             INSERT INTO project_summary
@@ -251,7 +274,7 @@ class SummaryUpdater(
                    AND pa.activity_type_code = 'DRAWING_APPROVAL'
                    AND ar.record_state = 'IN_APPROVAL'
                    AND NOT ar.is_deleted)                                  AS drawings_in_approval,
-                0                                                          AS sla_breach_count
+                COALESCE(SUM(pas.sla_breach_count), 0)                    AS sla_breach_count
             FROM project_activity_summary pas
             WHERE pas.project_id = ?
             ON CONFLICT (project_id) DO UPDATE

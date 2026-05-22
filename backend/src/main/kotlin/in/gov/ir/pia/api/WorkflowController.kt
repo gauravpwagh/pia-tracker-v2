@@ -1,10 +1,21 @@
 package `in`.gov.ir.pia.api
 
 import `in`.gov.ir.pia.security.PiaPrincipal
+import `in`.gov.ir.pia.workflow.BulkTransitionRequest
+import `in`.gov.ir.pia.workflow.BulkTransitionResponse
+import `in`.gov.ir.pia.workflow.BulkTransitionService
+import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.responses.ApiResponse
+import io.swagger.v3.oas.annotations.responses.ApiResponses
+import io.swagger.v3.oas.annotations.tags.Tag
+import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
@@ -65,9 +76,51 @@ data class InboxResponse(
  * `now() - entered_state_at > sla_days * 24 h`.
  */
 @RestController
+@Tag(name = "Workflow", description = "Workflow inbox and bulk-transition endpoints")
 class WorkflowController(
     private val namedJdbc: NamedParameterJdbcTemplate,
+    private val bulkTransitionService: BulkTransitionService,
 ) {
+    // ── Bulk transition ───────────────────────────────────────────────────────
+
+    /**
+     * Applies a single workflow action to multiple activity records in one call.
+     *
+     * Each record is transitioned independently — a failure on one does NOT roll
+     * back successful earlier transitions.  The [BulkTransitionResponse] details
+     * per-record success / failure.
+     *
+     * Each successful transition writes an audit log row (via [WorkflowAuditListener]).
+     * 5 records authenticated → 5 `WORKFLOW.AUTHENTICATED` audit entries.
+     *
+     * Role enforcement (e.g. authenticate requires ROLE_CE_C) is applied per record
+     * by the workflow engine. An actor lacking the required role will get failures
+     * for every record.
+     *
+     * Limited to 50 records per call to prevent runaway commits.
+     */
+    @PostMapping("/api/v1/workflow/bulk-transition")
+    @ResponseStatus(HttpStatus.OK)
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.BULK_TRANSITION')")
+    @Operation(
+        summary = "Bulk workflow transition",
+        description =
+            "Applies a single workflow action (e.g. 'authenticate') to up to 50 activity records. " +
+                "Each record is transitioned independently; per-record results are returned. " +
+                "Each successful transition writes an audit log row. " +
+                "Action code is normalised to lowercase before dispatch. " +
+                "Gated to ACTIVITY_RECORD.BULK_TRANSITION.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Batch processed (check per-record results for failures)"),
+        ApiResponse(responseCode = "400", description = "recordIds empty or exceeds limit"),
+        ApiResponse(responseCode = "403", description = "Insufficient permission"),
+    )
+    fun bulkTransition(
+        @RequestBody request: BulkTransitionRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): BulkTransitionResponse = bulkTransitionService.bulkTransition(request, principal)
+
     // ── Inbox ─────────────────────────────────────────────────────────────────
 
     @GetMapping("/api/v1/workflow/inbox")

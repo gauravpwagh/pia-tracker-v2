@@ -3,6 +3,7 @@ package `in`.gov.ir.pia.api
 import `in`.gov.ir.pia.dashboard.DashboardService
 import `in`.gov.ir.pia.dashboard.ForestStageBreakdownDto
 import `in`.gov.ir.pia.dashboard.ProjectDashboardDto
+import `in`.gov.ir.pia.dashboard.ProjectOverviewDto
 import `in`.gov.ir.pia.dashboard.UtilitySubtypeBreakdownDto
 import `in`.gov.ir.pia.dashboard.PanIndiaDashboardResponse
 import `in`.gov.ir.pia.dashboard.PanIndiaDashboardService
@@ -111,6 +112,33 @@ class DashboardController(
     fun getForestStageBreakdown(
         @PathVariable projectId: UUID,
     ): ForestStageBreakdownDto = dashboardService.getForestStageBreakdown(projectId)
+
+    // ── Phase 2.11 — Cross-activity project overview ──────────────────────────
+
+    @GetMapping("/api/v1/dashboard/projects/{projectId}/overview")
+    @PreAuthorize(
+        "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PROJECT') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.ZONE') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PAN_INDIA')",
+    )
+    @Operation(
+        summary = "Cross-activity project overview",
+        description =
+            "Returns a composed project overview: metadata, per-activity KPI cards " +
+                "(total records, authenticated count, pending count, SLA breach count, RAG status), " +
+                "and project-level totals (total SLA breaches, drawings in approval). " +
+                "All data is read from summary tables. " +
+                "RAG status per activity: RED if slaBreachCount > 0, AMBER if pendingCount > 0, GREEN otherwise. " +
+                "Used by the tree-view detail pane to surface bubble-up SLA warnings.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Project overview returned"),
+        ApiResponse(responseCode = "403", description = "Insufficient permission"),
+        ApiResponse(responseCode = "404", description = "Project not found"),
+    )
+    fun getProjectOverview(
+        @PathVariable projectId: UUID,
+    ): ProjectOverviewDto = dashboardService.getProjectOverview(projectId)
 
     // ── Phase 2.8 — Zone scope dashboard ──────────────────────────────────────
 
