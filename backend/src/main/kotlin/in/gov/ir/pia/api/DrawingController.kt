@@ -1,21 +1,28 @@
 package `in`.gov.ir.pia.api
 
 import `in`.gov.ir.pia.security.PiaPrincipal
+import `in`.gov.ir.pia.workflow.AddApproverRequest
 import `in`.gov.ir.pia.workflow.ApproveRequest
 import `in`.gov.ir.pia.workflow.DrawingApproverListResponse
+import `in`.gov.ir.pia.workflow.DrawingApproverResponse
 import `in`.gov.ir.pia.workflow.DrawingService
 import `in`.gov.ir.pia.workflow.ReapproveRequest
+import `in`.gov.ir.pia.workflow.ReassignApproverRequest
 import `in`.gov.ir.pia.workflow.SendBackRequest
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
+import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
@@ -26,11 +33,14 @@ import java.util.UUID
  * There are no WorkflowInstance rows for drawing activity records.
  *
  * Endpoint catalogue:
- *   GET  /api/v1/activity-records/{id}/drawing-approvers          — list approvers + derived state
- *   POST /api/v1/activity-records/{id}/submit-drawing             — DRAFT → IN_APPROVAL
- *   POST /api/v1/activity-records/{id}/drawing-approvers/{aid}/approve   — approve one slot
- *   POST /api/v1/activity-records/{id}/drawing-approvers/{aid}/send-back — send back one slot
- *   POST /api/v1/activity-records/{id}/reapprove-drawing          — re-submit after send-back
+ *   GET    /api/v1/activity-records/{id}/drawing-approvers              — list approvers + derived state
+ *   POST   /api/v1/activity-records/{id}/submit-drawing                 — DRAFT → IN_APPROVAL
+ *   POST   /api/v1/activity-records/{id}/drawing-approvers/{aid}/approve    — approve one slot
+ *   POST   /api/v1/activity-records/{id}/drawing-approvers/{aid}/send-back  — send back one slot
+ *   POST   /api/v1/activity-records/{id}/reapprove-drawing               — re-submit after send-back
+ *   POST   /api/v1/activity-records/{id}/drawing-approvers               — add approver slot (Phase 2.7)
+ *   DELETE /api/v1/activity-records/{id}/drawing-approvers/{aid}         — remove approver slot (Phase 2.7)
+ *   PATCH  /api/v1/activity-records/{id}/drawing-approvers/{aid}         — reassign user on slot (Phase 2.7)
  */
 @RestController
 @Tag(name = "Drawing Approvals", description = "Drawing checklist approval operations")
@@ -145,5 +155,79 @@ class DrawingController(
         @AuthenticationPrincipal principal: PiaPrincipal,
     ) {
         drawingService.reapprove(id, principal, request?.requestReApproval ?: false)
+    }
+
+    // ── Phase 2.7 — approver edit flow ────────────────────────────────────────
+
+    @PostMapping("/api/v1/activity-records/{id}/drawing-approvers")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'DRAWING.EDIT_APPROVERS')")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(
+        summary = "Add an approver slot",
+        description =
+            "Inserts a new PENDING approver slot on the drawing checklist. " +
+                "The designationCode must be an approval-role designation. " +
+                "If userId is supplied the named user receives an inbox notification. " +
+                "Gated to DRAWING.EDIT_APPROVERS (CE/C, Nodal Dy CE/C, Super Admin).",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "201", description = "Approver slot added"),
+        ApiResponse(responseCode = "403", description = "Insufficient permission"),
+        ApiResponse(responseCode = "404", description = "Record not found or not accessible"),
+        ApiResponse(responseCode = "422", description = "designationCode is not a valid approval-role designation"),
+    )
+    fun addApprover(
+        @PathVariable id: UUID,
+        @RequestBody request: AddApproverRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): DrawingApproverResponse = drawingService.addApprover(id, request, principal)
+
+    @DeleteMapping("/api/v1/activity-records/{id}/drawing-approvers/{approverId}")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'DRAWING.EDIT_APPROVERS')")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Operation(
+        summary = "Remove an approver slot",
+        description =
+            "Soft-deletes an approver slot (is_deleted = true). " +
+                "Decision BBBB: APPROVED slots cannot be removed — throws 409. " +
+                "Gated to DRAWING.EDIT_APPROVERS (CE/C, Nodal Dy CE/C, Super Admin).",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "204", description = "Approver slot removed"),
+        ApiResponse(responseCode = "403", description = "Insufficient permission"),
+        ApiResponse(responseCode = "404", description = "Record or approver slot not found"),
+        ApiResponse(responseCode = "409", description = "Slot is APPROVED and cannot be removed (decision BBBB)"),
+    )
+    fun removeApprover(
+        @PathVariable id: UUID,
+        @PathVariable approverId: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ) {
+        drawingService.removeApprover(id, approverId, principal)
+    }
+
+    @PatchMapping("/api/v1/activity-records/{id}/drawing-approvers/{approverId}")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'DRAWING.REASSIGN_APPROVER')")
+    @Operation(
+        summary = "Reassign an approver slot to a different user",
+        description =
+            "Swaps the userId on an existing PENDING or SENT_BACK slot. " +
+                "Decision BBBB: APPROVED slots cannot be reassigned — throws 409. " +
+                "If the new userId is non-null, the new user receives an inbox notification. " +
+                "Gated to DRAWING.REASSIGN_APPROVER (CE/C, Super Admin).",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Approver slot reassigned"),
+        ApiResponse(responseCode = "403", description = "Insufficient permission"),
+        ApiResponse(responseCode = "404", description = "Record or approver slot not found"),
+        ApiResponse(responseCode = "409", description = "Slot is APPROVED and cannot be reassigned (decision BBBB)"),
+    )
+    fun reassignApprover(
+        @PathVariable id: UUID,
+        @PathVariable approverId: UUID,
+        @RequestBody request: ReassignApproverRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ) {
+        drawingService.reassignApprover(id, approverId, request.userId, principal)
     }
 }

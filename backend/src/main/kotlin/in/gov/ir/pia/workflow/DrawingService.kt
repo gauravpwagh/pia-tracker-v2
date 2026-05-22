@@ -4,6 +4,7 @@ import `in`.gov.ir.pia.audit.AuditLogWriter
 import `in`.gov.ir.pia.domain.activity.ActivityRecord
 import `in`.gov.ir.pia.domain.drawing.DrawingApprover
 import `in`.gov.ir.pia.domain.form.FormDefinition
+import `in`.gov.ir.pia.notification.NotificationService
 import `in`.gov.ir.pia.repository.ActivityRecordRepository
 import `in`.gov.ir.pia.repository.DrawingApproverRepository
 import `in`.gov.ir.pia.repository.ProjectActivityRepository
@@ -48,6 +49,29 @@ data class ReapproveRequest(
     val requestReApproval: Boolean = false,
 )
 
+/**
+ * Request to add a new approver slot to a drawing (Phase 2.7).
+ *
+ * [designationCode] must be an approval-role designation (`is_approval_role = true`).
+ * [userId] is optional; null leaves the slot unassigned.
+ * [position] is optional; null appends after the last existing slot.
+ */
+data class AddApproverRequest(
+    val designationCode: String,
+    val userId: UUID? = null,
+    val position: Int? = null,
+)
+
+/**
+ * Request to reassign an approver slot to a different user (Phase 2.7).
+ *
+ * The slot must not be in APPROVED status (decision BBBB).
+ * Pass [userId] = null to clear the assignment.
+ */
+data class ReassignApproverRequest(
+    val userId: UUID?,
+)
+
 // ── Service ───────────────────────────────────────────────────────────────────
 
 /**
@@ -72,6 +96,7 @@ class DrawingService(
     private val projectRepository: ProjectRepository,
     private val jdbc: JdbcTemplate,
     private val auditLogWriter: AuditLogWriter,
+    private val notificationService: NotificationService,
 ) {
     // ── Read ──────────────────────────────────────────────────────────────────
 
@@ -311,6 +336,177 @@ class DrawingService(
         )
     }
 
+    /**
+     * Adds a new approver slot to a drawing (Phase 2.7).
+     *
+     * Gated to DRAWING.EDIT_APPROVERS in the controller (CE/C, Nodal Dy CE/C, Super Admin).
+     *
+     * [request.designationCode] must be an approval-role designation.
+     * [request.position] defaults to max(existing) + 1 if not supplied.
+     * If [request.userId] is provided, a notification is sent to that user.
+     *
+     * Throws 422 if [designationCode] is not a valid approval-role designation.
+     */
+    @Transactional
+    fun addApprover(
+        recordId: UUID,
+        request: AddApproverRequest,
+        actor: PiaPrincipal,
+    ): DrawingApproverResponse {
+        requireRecordAccess(recordId, actor)
+        requireApprovalRoleDesignation(request.designationCode)
+
+        val position =
+            request.position
+                ?: (
+                    jdbc.queryForObject(
+                        """
+                        SELECT COALESCE(MAX(position), -1) + 1
+                          FROM drawing_approvers
+                         WHERE activity_record_id = ?
+                           AND NOT is_deleted
+                        """.trimIndent(),
+                        Int::class.java,
+                        recordId,
+                    ) ?: 0
+                )
+
+        val approver =
+            DrawingApprover(
+                activityRecordId = recordId,
+                approvalDesignationCode = request.designationCode,
+                userId = request.userId,
+                status = "PENDING",
+                position = position,
+            )
+        drawingApproverRepository.save(approver)
+
+        // Notify the newly assigned user (if any)
+        request.userId?.let { uid ->
+            notificationService.create(
+                recipientUserId = uid,
+                notificationType = "DRAWING_APPROVER_ADDED",
+                title = "You have been added as a drawing approver",
+                body = "You have been added to the approver checklist for a drawing record. Please review and act on it.",
+                entityType = "ACTIVITY_RECORD",
+                entityId = recordId,
+                linkUrl = "/activity-records/$recordId/drawing-approvers",
+            )
+        }
+
+        auditLogWriter.write(
+            actorUserId = actor.userId,
+            action = "DRAWING.ADD_APPROVER",
+            entityType = "DRAWING_APPROVER",
+            entityId = approver.id,
+        )
+
+        return approver.toResponse()
+    }
+
+    /**
+     * Soft-deletes an approver slot (Phase 2.7).
+     *
+     * Gated to DRAWING.EDIT_APPROVERS in the controller.
+     *
+     * Decision BBBB: APPROVED slots cannot be removed. Throws 409 if the slot
+     * is already APPROVED.
+     */
+    @Transactional
+    fun removeApprover(
+        recordId: UUID,
+        approverId: UUID,
+        actor: PiaPrincipal,
+    ) {
+        requireRecordAccess(recordId, actor)
+        val approver = requireApproverSlot(approverId, recordId)
+
+        if (approver.status == "APPROVED") {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Cannot remove an APPROVED approver slot (decision BBBB); the approver has already signed off",
+            )
+        }
+
+        jdbc.update(
+            """
+            UPDATE drawing_approvers
+               SET is_deleted  = true,
+                   updated_at  = now()
+             WHERE id = ?
+               AND NOT is_deleted
+            """.trimIndent(),
+            approverId,
+        )
+
+        deriveAndCacheState(recordId)
+
+        auditLogWriter.write(
+            actorUserId = actor.userId,
+            action = "DRAWING.REMOVE_APPROVER",
+            entityType = "DRAWING_APPROVER",
+            entityId = approverId,
+        )
+    }
+
+    /**
+     * Reassigns an approver slot to a different user (Phase 2.7).
+     *
+     * Gated to DRAWING.REASSIGN_APPROVER in the controller (CE/C, Super Admin).
+     *
+     * Decision BBBB: APPROVED slots cannot be reassigned. Throws 409 if the slot
+     * is APPROVED.
+     * If [newUserId] is non-null, a notification is sent to the new user.
+     */
+    @Transactional
+    fun reassignApprover(
+        recordId: UUID,
+        approverId: UUID,
+        newUserId: UUID?,
+        actor: PiaPrincipal,
+    ) {
+        requireRecordAccess(recordId, actor)
+        val approver = requireApproverSlot(approverId, recordId)
+
+        if (approver.status == "APPROVED") {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Cannot reassign an APPROVED approver slot (decision BBBB)",
+            )
+        }
+
+        jdbc.update(
+            """
+            UPDATE drawing_approvers
+               SET user_id    = ?,
+                   updated_at = now()
+             WHERE id = ?
+               AND NOT is_deleted
+            """.trimIndent(),
+            newUserId,
+            approverId,
+        )
+
+        newUserId?.let { uid ->
+            notificationService.create(
+                recipientUserId = uid,
+                notificationType = "DRAWING_APPROVER_ADDED",
+                title = "You have been assigned as a drawing approver",
+                body = "You have been assigned to an approver slot on a drawing record. Please review and act on it.",
+                entityType = "ACTIVITY_RECORD",
+                entityId = recordId,
+                linkUrl = "/activity-records/$recordId/drawing-approvers",
+            )
+        }
+
+        auditLogWriter.write(
+            actorUserId = actor.userId,
+            action = "DRAWING.REASSIGN_APPROVER",
+            entityType = "DRAWING_APPROVER",
+            entityId = approverId,
+        )
+    }
+
     // ── State derivation ──────────────────────────────────────────────────────
 
     /**
@@ -362,6 +558,30 @@ class DrawingService(
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         }
         return record
+    }
+
+    /**
+     * Validates that [designationCode] exists in the designations table and has
+     * [is_approval_role = true].  Throws 422 otherwise.
+     */
+    private fun requireApprovalRoleDesignation(designationCode: String) {
+        val isValid =
+            jdbc.queryForObject(
+                """
+                SELECT EXISTS(
+                    SELECT 1 FROM designations
+                     WHERE code = ? AND is_approval_role = true
+                )
+                """.trimIndent(),
+                Boolean::class.java,
+                designationCode,
+            ) ?: false
+        if (!isValid) {
+            throw ResponseStatusException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "'$designationCode' is not a valid approval-role designation",
+            )
+        }
     }
 
     /**
