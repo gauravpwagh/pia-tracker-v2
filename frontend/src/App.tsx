@@ -8,6 +8,9 @@ import { Sidebar } from '@components/shell/Sidebar';
 // Placeholder pages for v1 scaffolding; real implementations land per docs/phasing.md
 import { HomePage } from '@pages/Home';
 
+// Phase 1.7+: Projects list + create
+const ProjectsPage = lazy(() => import('@pages/projects/ProjectsPage'));
+
 // Phase 1.9: Record Edit Page (code-split; RJSF is heavy)
 const RecordEditPage = lazy(() => import('@pages/records/RecordEditPage'));
 
@@ -33,7 +36,7 @@ export default function App() {
           <Suspense fallback={<Spin style={{ margin: 40 }} />}>
             <Routes>
               <Route path="/" element={<Navigate to="/projects" replace />} />
-              <Route path="/projects/*" element={<HomePage />} />
+              <Route path="/projects/*" element={<ProjectsPage />} />
               <Route path="/records/:recordId/edit" element={<RecordEditPage />} />
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />

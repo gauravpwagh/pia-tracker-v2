@@ -9,6 +9,7 @@ spring:
         show_sql: false  # use log4j SQL category instead
   flyway:
     clean-disabled: false  # allow clean on dev for `make reset`
+    out-of-order: true     # allow pending data seeds that pre-date higher-version schema migrations
 
 logging:
   level:
