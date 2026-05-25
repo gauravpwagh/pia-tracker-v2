@@ -28,11 +28,11 @@ export default function App() {
       <Header style={{ padding: 0, height: 56, lineHeight: '56px' }}>
         <TopBar />
       </Header>
-      <Layout>
+      <Layout style={{ height: 'calc(100vh - 56px)', overflow: 'hidden' }}>
         <Sider width={240} collapsible breakpoint="lg" collapsedWidth={64}>
           <Sidebar />
         </Sider>
-        <Content style={{ padding: 24 }}>
+        <Content style={{ padding: 24, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <Suspense fallback={<Spin style={{ margin: 40 }} />}>
             <Routes>
               <Route path="/" element={<Navigate to="/projects" replace />} />

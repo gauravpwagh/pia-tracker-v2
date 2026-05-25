@@ -38,6 +38,12 @@ export interface ProjectSummaryResponse {
   id: string;
   name: string;
   zoneId: string;
+  projectCode: string | null;
+  lifecycleState: string;
+  chainageFromKm: number | null;
+  chainageToKm: number | null;
+  lengthKm: number | null;
+  targetCompletionYear: number | null;
 }
 
 export interface ProjectDetailResponse {

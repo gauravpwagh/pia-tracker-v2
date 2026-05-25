@@ -26,6 +26,14 @@ data class ProjectSummaryResponse(
     val id: UUID,
     val name: String,
     val zoneId: UUID,
+    /** Unique project code, e.g. "NR-2024-001". May be null for draft projects. */
+    val projectCode: String?,
+    /** Cached lifecycle state for tree display — source of truth is workflow_instances. */
+    val lifecycleState: String,
+    val chainageFromKm: java.math.BigDecimal?,
+    val chainageToKm: java.math.BigDecimal?,
+    val lengthKm: java.math.BigDecimal?,
+    val targetCompletionYear: Int?,
 )
 
 // ─── Controller ────────────────────────────────────────────────────────────────
@@ -66,7 +74,19 @@ class ProjectController(
     ): List<ProjectSummaryResponse> =
         projectService
             .listForPrincipal(principal)
-            .map { ProjectSummaryResponse(it.id, it.name, it.zoneId) }
+            .map { p ->
+                ProjectSummaryResponse(
+                    id = p.id,
+                    name = p.name,
+                    zoneId = p.zoneId,
+                    projectCode = p.projectCode,
+                    lifecycleState = p.lifecycleState,
+                    chainageFromKm = p.chainageFromKm,
+                    chainageToKm = p.chainageToKm,
+                    lengthKm = p.lengthKm,
+                    targetCompletionYear = p.targetCompletionYear,
+                )
+            }
 
     /**
      * Returns a single project with full detail (all business columns).

@@ -43,6 +43,32 @@ button {
   justify-content: flex-end;
 }
 
+/* ── Project tree: allow two-line project rows and tighten activity rows ──── */
+.pia-project-tree .ant-tree-treenode {
+  align-items: center !important;
+  padding-bottom: 2px !important;
+}
+
+/* Project nodes are taller (name + subtitle) */
+.pia-project-tree .ant-tree-node-content-wrapper {
+  height: auto !important;
+  min-height: 36px;
+  display: flex !important;
+  align-items: center !important;
+  padding-top: 3px !important;
+  padding-bottom: 3px !important;
+}
+
+/* Activity / record rows: standard height */
+.pia-project-tree .ant-tree-child-tree .ant-tree-node-content-wrapper {
+  min-height: 30px;
+}
+
+/* Keep the expand/switcher vertically centred with the taller row */
+.pia-project-tree .ant-tree-switcher {
+  align-self: center !important;
+}
+
 /* No-print utility — hide elements when printing */
 @media print {
   .no-print {

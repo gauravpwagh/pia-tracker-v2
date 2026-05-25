@@ -16,7 +16,7 @@
  * PROJECT.CREATE (decision PPP in docs/ui.md § 3).
  */
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useMatch } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -24,9 +24,9 @@ import {
   Alert,
   Button,
   Descriptions,
+  Dropdown,
   Empty,
   Input,
-  Layout,
   Segmented,
   Select,
   Skeleton,
@@ -42,12 +42,16 @@ import type { ColumnsType } from 'antd/es/table';
 import type { DataNode } from 'antd/es/tree';
 import {
   AppstoreOutlined,
+  AuditOutlined,
   BranchesOutlined,
   CloseOutlined,
+  ClusterOutlined,
   ExportOutlined,
   FolderOutlined,
+  HomeOutlined,
+  MoreOutlined,
   PlusOutlined,
-  SearchOutlined,
+  ThunderboltOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import {
@@ -55,14 +59,12 @@ import {
   fetchProjects,
   fetchZones,
   type ActivityDetailResponse,
-  type ProjectDetailResponse,
   type ProjectSummaryResponse,
 } from '@api/projects';
 import { useAuthStore } from '@stores/authStore';
 import ProjectCreateWizard from './ProjectCreateWizard';
 import { ProjectDetailPanel } from './ProjectDetailPanel';
 
-const { Sider, Content } = Layout;
 const { Title, Text } = Typography;
 const { Search } = Input;
 
@@ -71,13 +73,33 @@ const { Search } = Input;
 export const PROJECTS_QUERY_KEY = ['projects'] as const;
 export const ZONES_QUERY_KEY = ['zones'] as const;
 
-// ── State colour map ──────────────────────────────────────────────────────────
+// ── Lifecycle badge config ────────────────────────────────────────────────────
+
+const LIFECYCLE_BADGE: Record<string, { color: string; label: string }> = {
+  DRAFT:                   { color: 'default', label: 'Draft' },
+  AWAITING_CAO_ALLOCATION: { color: 'orange',  label: 'Awaiting Allocation' },
+  AWAITING_CEC_ASSIGNMENT: { color: 'blue',    label: 'Awaiting Assignment' },
+  ACTIVE:                  { color: 'green',   label: 'Active' },
+  CLOSED:                  { color: 'default', label: 'Closed' },
+};
+
+// ── Activity status colours ───────────────────────────────────────────────────
 
 const ACTIVITY_STATUS_COLORS: Record<string, string> = {
   NOT_STARTED: 'default',
   IN_PROGRESS: 'blue',
-  COMPLETED: 'green',
-  ON_HOLD: 'orange',
+  COMPLETED:   'green',
+  ON_HOLD:     'orange',
+  LAGGING:     'red',
+};
+
+// ── Activity type → icon ──────────────────────────────────────────────────────
+
+const ACTIVITY_TYPE_ICONS: Record<string, React.ReactNode> = {
+  LAND_ACQUISITION: <HomeOutlined />,
+  FOREST_CLEARANCE: <ClusterOutlined />,
+  UTILITY_SHIFTING: <ThunderboltOutlined />,
+  DRAWING_APPROVAL: <AuditOutlined />,
 };
 
 // ── Tree node key helpers ─────────────────────────────────────────────────────
@@ -100,29 +122,94 @@ function ProjectNodeTitle({
   project: ProjectSummaryResponse;
   zoneShortName: string;
 }) {
+  const badge = LIFECYCLE_BADGE[project.lifecycleState] ?? { color: 'default', label: project.lifecycleState };
+
+  // Build subtitle parts: chainage range + length + zone
+  const subtitleParts: string[] = [];
+  if (project.chainageFromKm !== null && project.chainageToKm !== null) {
+    subtitleParts.push(`Km ${project.chainageFromKm}–${project.chainageToKm}`);
+  }
+  if (project.lengthKm !== null) {
+    subtitleParts.push(`${project.lengthKm} km`);
+  }
+  if (zoneShortName) subtitleParts.push(zoneShortName);
+  const subtitle = subtitleParts.join(' · ');
+
   return (
-    <Space size={4} style={{ width: '100%', justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-      <Space size={4} style={{ minWidth: 0, overflow: 'hidden' }}>
-        <Text strong style={{ whiteSpace: 'nowrap' }}>
+    <div
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 8, minWidth: 0 }}
+    >
+      {/* Left: name + subtitle */}
+      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+        <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '20px' }}>
           {project.name}
-        </Text>
+        </div>
+        {subtitle && (
+          <div style={{ fontSize: 11, color: 'var(--ant-color-text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '16px' }}>
+            {subtitle}
+          </div>
+        )}
+      </div>
+
+      {/* Right: target year + lifecycle badge + more */}
+      <Space size={6} style={{ flexShrink: 0, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+        {project.targetCompletionYear && (
+          <Text type="secondary" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
+            {project.targetCompletionYear}
+          </Text>
+        )}
+        <Tag color={badge.color} style={{ margin: 0, fontSize: 11, lineHeight: '18px', padding: '0 6px' }}>
+          {badge.label}
+        </Tag>
+        <Dropdown
+          trigger={['click']}
+          menu={{ items: [] }}  // wired in a later phase
+        >
+          <Button
+            type="text"
+            size="small"
+            icon={<MoreOutlined />}
+            style={{ width: 20, height: 20, minWidth: 20, padding: 0, fontSize: 13 }}
+          />
+        </Dropdown>
       </Space>
-      <Text type="secondary" style={{ whiteSpace: 'nowrap', fontSize: 12, flexShrink: 0 }}>
-        {zoneShortName}
-      </Text>
-    </Space>
+    </div>
   );
 }
 
 // ── Activity node title ───────────────────────────────────────────────────────
 
 function ActivityNodeTitle({ activity }: { activity: ActivityDetailResponse }) {
-  const color = ACTIVITY_STATUS_COLORS[activity.status] ?? 'default';
+  const statusColor = ACTIVITY_STATUS_COLORS[activity.status] ?? 'default';
+  const statusLabel = activity.status.replace(/_/g, ' ');
+
   return (
-    <Space size={4} style={{ width: '100%', justifyContent: 'space-between' }}>
-      <Text>{activity.name || activity.activityTypeCode}</Text>
-      <Tag color={color} style={{ fontSize: 11 }}>{activity.status.replace(/_/g, ' ')}</Tag>
-    </Space>
+    <div
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 8, minWidth: 0 }}
+    >
+      {/* Left: name (icon comes from tree node's `icon` prop) */}
+      <Text
+        strong
+        style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}
+      >
+        {activity.name || activity.activityTypeCode.replace(/_/g, ' ')}
+      </Text>
+
+      {/* Right: status badge + more */}
+      <Space size={6} style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+        <Tag color={statusColor} style={{ margin: 0, fontSize: 11, lineHeight: '18px', padding: '0 6px' }}>
+          {statusLabel}
+        </Tag>
+        <Dropdown trigger={['click']} menu={{ items: [] }}>
+          <Button
+            type="text"
+            size="small"
+            icon={<MoreOutlined />}
+            style={{ width: 20, height: 20, minWidth: 20, padding: 0, fontSize: 13 }}
+          />
+        </Dropdown>
+      </Space>
+    </div>
   );
 }
 
@@ -309,7 +396,7 @@ export default function ProjectsPage() {
       }
     } else if (urlProjectCode) {
       const proj = projectsQuery.data.find(
-        (p) => p.id === urlProjectCode || (p as unknown as ProjectDetailResponse).projectCode === urlProjectCode,
+        (p) => p.id === urlProjectCode || p.projectCode === urlProjectCode,
       );
       if (proj) {
         setSelectedKey(projectNodeKey(proj.id));
@@ -345,7 +432,7 @@ export default function ProjectsPage() {
       children: isExpanded
         ? activities.map((activity) => ({
             key: activityNodeKey(activity.id),
-            icon: <BranchesOutlined />,
+            icon: ACTIVITY_TYPE_ICONS[activity.activityTypeCode] ?? <BranchesOutlined />,
             title: <ActivityNodeTitle activity={activity} />,
             isLeaf: true,
           }))
@@ -378,7 +465,7 @@ export default function ProjectsPage() {
       if (proj) {
         setSelectedKey(key);
         // Use project code in URL if available, otherwise use id
-        const codeOrId = (proj as unknown as ProjectDetailResponse).projectCode ?? proj.id;
+        const codeOrId = proj.projectCode ?? proj.id;
         navigate(`/projects/${codeOrId}`);
       }
     } else if (isActivityKey(key)) {
@@ -389,7 +476,7 @@ export default function ProjectsPage() {
       for (const [pId, acts] of Object.entries(activityMap)) {
         if (acts.some((a) => a.id === activityId)) {
           const proj = projectsQuery.data?.find((p) => p.id === pId);
-          parentCode = (proj as unknown as ProjectDetailResponse).projectCode ?? pId;
+          parentCode = proj?.projectCode ?? pId;
           break;
         }
       }
@@ -411,7 +498,7 @@ export default function ProjectsPage() {
   const handleTableSelect = (project: ProjectSummaryResponse) => {
     setViewMode('tree');
     setSelectedKey(projectNodeKey(project.id));
-    const codeOrId = (project as unknown as ProjectDetailResponse).projectCode ?? project.id;
+    const codeOrId = project.projectCode ?? project.id;
     navigate(`/projects/${codeOrId}`);
   };
 
@@ -448,105 +535,103 @@ export default function ProjectsPage() {
 
   return (
     <>
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        {/* ── Header ─────────────────────────────────────────────────────────── */}
-        <Space style={{ width: '100%', justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-          <Space direction="vertical" size={0}>
-            <Title level={4} style={{ margin: 0 }}>
-              {t('projects.title', 'Projects')}
-            </Title>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {projectsQuery.data
-                ? t('projects.count', '{{count}} projects', { count: projectsQuery.data.length })
-                : '…'}
-            </Text>
-          </Space>
+      {/* Outer: flex column filling the Content area height */}
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10 }}>
 
-          <Space>
-            <Button icon={<ExportOutlined />} disabled>
-              {t('projects.export', 'Export')}
-            </Button>
-            <Tooltip
-              title={
-                canCreate
-                  ? undefined
-                  : t('projects.createDisabledTooltip', 'Only EDGS/C-I can create projects')
-              }
-            >
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                disabled={!canCreate}
-                onClick={() => setWizardOpen(true)}
-              >
-                {t('projects.newButton', '+ Add Project')}
+        {/* ── Fixed top strip (shrinks to content) ─────────────────────────── */}
+        <div style={{ flexShrink: 0 }}>
+          {/* Title row */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+            <div>
+              <Title level={4} style={{ margin: 0 }}>
+                {t('projects.title', 'Projects')}
+              </Title>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {projectsQuery.data
+                  ? t('projects.count', '{{count}} projects', { count: projectsQuery.data.length })
+                  : '…'}
+              </Text>
+            </div>
+
+            <Space>
+              <Button icon={<ExportOutlined />} disabled>
+                {t('projects.export', 'Export')}
               </Button>
-            </Tooltip>
+              <Tooltip
+                title={
+                  canCreate
+                    ? undefined
+                    : t('projects.createDisabledTooltip', 'Only EDGS/C-I can create projects')
+                }
+              >
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  disabled={!canCreate}
+                  onClick={() => setWizardOpen(true)}
+                >
+                  {t('projects.newButton', '+ Add Project')}
+                </Button>
+              </Tooltip>
+            </Space>
+          </div>
+
+          {/* Filter bar */}
+          <Space wrap style={{ marginBottom: 8 }}>
+            <Search
+              placeholder={t('projects.search', 'Search projects, activities, villages…')}
+              allowClear
+              style={{ width: 300 }}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
+            <Select
+              placeholder={t('projects.filterZone', 'Zone')}
+              allowClear
+              style={{ width: 180 }}
+              loading={zonesQuery.isLoading}
+              value={zoneFilter}
+              onChange={setZoneFilter}
+              options={zonesQuery.data?.map((z) => ({
+                value: z.id,
+                label: `${z.shortName} — ${z.name}`,
+              }))}
+            />
+            <Segmented
+              value={viewMode}
+              onChange={(v) => setViewMode(v as 'tree' | 'table')}
+              options={[
+                { value: 'tree', icon: <AppstoreOutlined />, label: t('projects.viewTree', 'Tree') },
+                { value: 'table', icon: <UnorderedListOutlined />, label: t('projects.viewTable', 'Table') },
+              ]}
+            />
           </Space>
-        </Space>
 
-        {/* ── Filter bar ─────────────────────────────────────────────────────── */}
-        <Space wrap>
-          <Search
-            placeholder={t('projects.search', 'Search projects, activities, villages…')}
-            allowClear
-            style={{ width: 320 }}
-            prefix={<SearchOutlined />}
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-          />
-          <Select
-            placeholder={t('projects.filterZone', 'Zone')}
-            allowClear
-            style={{ width: 180 }}
-            loading={zonesQuery.isLoading}
-            value={zoneFilter}
-            onChange={setZoneFilter}
-            options={zonesQuery.data?.map((z) => ({
-              value: z.id,
-              label: `${z.shortName} — ${z.name}`,
-            }))}
-          />
-        </Space>
+          {/* Error banner */}
+          {projectsQuery.isError && (
+            <Alert
+              type="error"
+              message={t('projects.loadError', 'Failed to load projects')}
+              description={
+                projectsQuery.error instanceof Error ? projectsQuery.error.message : undefined
+              }
+              showIcon
+              style={{ marginBottom: 8 }}
+            />
+          )}
+        </div>
 
-        {/* ── View toggle ────────────────────────────────────────────────────── */}
-        <Segmented
-          value={viewMode}
-          onChange={(v) => setViewMode(v as 'tree' | 'table')}
-          options={[
-            { value: 'tree', icon: <AppstoreOutlined />, label: t('projects.viewTree', 'Tree') },
-            { value: 'table', icon: <UnorderedListOutlined />, label: t('projects.viewTable', 'Table') },
-          ]}
-        />
+        {/* ── Expanding main section — fills all remaining viewport height ───── */}
+        {/* min-height:0 is required for flex children to shrink below content size */}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12 }}>
 
-        {/* ── Error ──────────────────────────────────────────────────────────── */}
-        {projectsQuery.isError && (
-          <Alert
-            type="error"
-            message={t('projects.loadError', 'Failed to load projects')}
-            description={
-              projectsQuery.error instanceof Error ? projectsQuery.error.message : undefined
-            }
-            showIcon
-          />
-        )}
-
-        {/* ── Main content (tree or table) with optional detail pane ─────────── */}
-        <Layout
-          style={{
-            background: 'transparent',
-            minHeight: 400,
-            transition: 'all 0.25s',
-          }}
-        >
-          {/* Tree or Table */}
-          <Content
-            style={{
-              width: paneOpen ? '40%' : '100%',
-              transition: 'width 0.25s',
-              overflow: 'hidden',
-            }}
-          >
+          {/* Tree / Table pane — independent vertical scroll */}
+          <div style={{
+            width: paneOpen ? '40%' : '100%',
+            transition: 'width 0.25s',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+          }}>
             {projectsQuery.isLoading ? (
               <Spin style={{ display: 'block', margin: '40px auto' }} />
             ) : viewMode === 'tree' ? (
@@ -563,6 +648,8 @@ export default function ProjectsPage() {
                   onSelect={handleTreeSelect}
                   onExpand={handleTreeExpand}
                   style={{ background: 'transparent' }}
+                  // Allow two-line project rows to render fully
+                  className="pia-project-tree"
                 />
               )
             ) : (
@@ -572,25 +659,25 @@ export default function ProjectsPage() {
                 onSelect={handleTableSelect}
               />
             )}
-          </Content>
+          </div>
 
-          {/* Detail pane */}
+          {/* Detail pane — independent vertical scroll, fills remaining width */}
           {paneOpen && (
-            <Sider
-              width="60%"
-              style={{
-                background: 'var(--ant-color-bg-container)',
-                border: '1px solid var(--ant-color-border)',
-                borderRadius: 8,
-                marginLeft: 16,
-                overflow: 'hidden',
-              }}
-            >
+            <div style={{
+              flex: 1,
+              minWidth: 0,
+              border: '1px solid var(--ant-color-border)',
+              borderRadius: 8,
+              background: 'var(--ant-color-bg-container)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}>
               {detailPaneContent}
-            </Sider>
+            </div>
           )}
-        </Layout>
-      </Space>
+        </div>
+      </div>
 
       {/* Create wizard */}
       <ProjectCreateWizard

@@ -57,9 +57,10 @@ export function Sidebar() {
         key: 'inbox',
         icon: <InboxOutlined />,
         label: (
-          <Badge count={awaitingCount} size="small" offset={[4, -2]}>
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             {t('sidebar.inbox')}
-          </Badge>
+            {awaitingCount > 0 && <Badge count={awaitingCount} size="small" />}
+          </span>
         ),
       },
       { key: 'projects', icon: <AppstoreOutlined />, label: t('sidebar.projects') },
