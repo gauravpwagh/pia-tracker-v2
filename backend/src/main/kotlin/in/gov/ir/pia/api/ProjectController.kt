@@ -68,19 +68,41 @@ class ProjectController(
             .map { ProjectSummaryResponse(it.id, it.name, it.zoneId) }
 
     /**
-     * Returns a single project.
+     * Returns a single project with full detail (all business columns).
      *
      * Returns 404 (not 403) when the project exists but is outside the
      * caller's accessible zones — to avoid zone-membership enumeration.
+     *
+     * `lifecycleState` is taken from the cached column on `projects` (kept in
+     * sync by [ProjectLifecycleSyncListener]) rather than reloading the workflow
+     * instance, which avoids an extra query on every tree node click.
      */
     @GetMapping("/{id}")
     @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.READ.OWN')")
     fun get(
         @PathVariable id: UUID,
         @AuthenticationPrincipal principal: PiaPrincipal,
-    ): ProjectSummaryResponse {
-        val project = projectService.getForPrincipal(id, principal)
-        return ProjectSummaryResponse(project.id, project.name, project.zoneId)
+    ): ProjectDetailResponse {
+        val p = projectService.getForPrincipal(id, principal)
+        return ProjectDetailResponse(
+            id = p.id,
+            name = p.name,
+            zoneId = p.zoneId,
+            projectCode = p.projectCode,
+            projectType = p.projectType,
+            divisionId = p.divisionId,
+            chainageFromKm = p.chainageFromKm,
+            chainageToKm = p.chainageToKm,
+            lengthKm = p.lengthKm,
+            recommendedByBoardOn = p.recommendedByBoardOn,
+            targetCompletionYear = p.targetCompletionYear,
+            lifecycleState = p.lifecycleState,
+            createdByUserId = p.createdByUserId,
+            updatedByUserId = p.updatedByUserId,
+            createdAt = p.createdAt,
+            updatedAt = p.updatedAt,
+            version = p.version,
+        )
     }
 
     // ── Write ─────────────────────────────────────────────────────────────────

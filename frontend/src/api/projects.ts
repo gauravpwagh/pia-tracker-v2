@@ -1,15 +1,18 @@
 /**
- * projects.ts — API types and fetch helpers for projects and zones.
+ * projects.ts — API types and fetch helpers for projects, zones, divisions, and activities.
  *
  * Endpoints:
- *   GET  /api/v1/zones             — active zone list (zone picker)
- *   GET  /api/v1/projects          — projects visible to the caller
- *   POST /api/v1/projects          — create a new project (EDGS/CI only)
+ *   GET  /api/v1/zones                           — active zone list
+ *   GET  /api/v1/divisions?zoneId={id}           — divisions for a zone
+ *   GET  /api/v1/projects                        — projects visible to the caller
+ *   GET  /api/v1/projects/{id}                   — single project detail
+ *   POST /api/v1/projects                        — create a new project (EDGS/CI only)
+ *   GET  /api/v1/projects/{projectId}/activities — activities on a project
  */
 
 const BASE = '/api/v1';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Zone ─────────────────────────────────────────────────────────────────────
 
 export interface ZoneResponse {
   id: string;
@@ -18,6 +21,18 @@ export interface ZoneResponse {
   shortName: string;
   displayOrder: number;
 }
+
+// ── Division ──────────────────────────────────────────────────────────────────
+
+export interface DivisionResponse {
+  id: string;
+  zoneId: string;
+  code: string;
+  name: string;
+  displayOrder: number;
+}
+
+// ── Project ───────────────────────────────────────────────────────────────────
 
 export interface ProjectSummaryResponse {
   id: string;
@@ -32,7 +47,14 @@ export interface ProjectDetailResponse {
   projectCode: string | null;
   projectType: string | null;
   divisionId: string | null;
+  chainageFromKm: number | null;
+  chainageToKm: number | null;
+  lengthKm: number | null;
+  recommendedByBoardOn: string | null;
+  targetCompletionYear: number | null;
   lifecycleState: string;
+  createdByUserId: string | null;
+  updatedByUserId: string | null;
   createdAt: string;
   updatedAt: string;
   version: number;
@@ -43,6 +65,29 @@ export interface CreateProjectRequest {
   zoneId: string;
   projectCode?: string;
   projectType?: string;
+  divisionId?: string;
+  chainageFromKm?: number;
+  chainageToKm?: number;
+  lengthKm?: number;
+  targetCompletionYear?: number;
+}
+
+// ── Activity ──────────────────────────────────────────────────────────────────
+
+export interface ActivityDetailResponse {
+  id: string;
+  projectId: string;
+  activityTypeCode: string;
+  name: string;
+  scopeNotes: string | null;
+  targetCompletionDate: string | null;
+  primaryDyceUserId: string | null;
+  status: string;
+  defaultFormDefinitionId: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -62,11 +107,24 @@ export async function fetchZones(): Promise<ZoneResponse[]> {
   return handleResponse<ZoneResponse[]>(res);
 }
 
+// ── Divisions ─────────────────────────────────────────────────────────────────
+
+export async function fetchDivisions(zoneId?: string): Promise<DivisionResponse[]> {
+  const url = zoneId ? `${BASE}/divisions?zoneId=${zoneId}` : `${BASE}/divisions`;
+  const res = await fetch(url, { credentials: 'include' });
+  return handleResponse<DivisionResponse[]>(res);
+}
+
 // ── Projects ──────────────────────────────────────────────────────────────────
 
 export async function fetchProjects(): Promise<ProjectSummaryResponse[]> {
   const res = await fetch(`${BASE}/projects`, { credentials: 'include' });
   return handleResponse<ProjectSummaryResponse[]>(res);
+}
+
+export async function fetchProjectDetail(id: string): Promise<ProjectDetailResponse> {
+  const res = await fetch(`${BASE}/projects/${id}`, { credentials: 'include' });
+  return handleResponse<ProjectDetailResponse>(res);
 }
 
 export async function createProject(
@@ -79,4 +137,11 @@ export async function createProject(
     body: JSON.stringify(request),
   });
   return handleResponse<ProjectDetailResponse>(res);
+}
+
+// ── Activities ────────────────────────────────────────────────────────────────
+
+export async function fetchActivities(projectId: string): Promise<ActivityDetailResponse[]> {
+  const res = await fetch(`${BASE}/projects/${projectId}/activities`, { credentials: 'include' });
+  return handleResponse<ActivityDetailResponse[]>(res);
 }
