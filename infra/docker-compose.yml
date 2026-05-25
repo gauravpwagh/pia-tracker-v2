@@ -37,7 +37,14 @@ services:
       retries: 3
 
   # ─── Frontend build sidecar ───────────────────────────────────────────────
-  # Builds the SPA and writes /dist into the shared volume that Nginx serves.
+  # Builds the SPA and writes the dist into the shared volume that Nginx serves.
+  #
+  # IMPORTANT: the volume is mounted at /dist-out (NOT at /workspace/dist).
+  # Docker only initialises a named volume from the image on first creation;
+  # subsequent `up` calls leave the old volume content in place, so mounting
+  # the volume at the same path as the Vite output (/workspace/dist) would
+  # silently serve stale files after every rebuild.  By mounting at a separate
+  # path, the command always copies fresh build output into the volume.
   frontend:
     build:
       context: ../frontend
@@ -45,9 +52,9 @@ services:
       target: build
     container_name: pia-frontend-build
     volumes:
-      - frontend_dist:/workspace/dist
+      - frontend_dist:/dist-out
     networks: [pia]
-    command: ["sh", "-c", "cp -r /workspace/dist/* /workspace/dist/ 2>/dev/null; echo Frontend dist ready"]
+    command: ["sh", "-c", "cp -r /workspace/dist/. /dist-out/ && echo Frontend dist ready"]
 
   # ─── Backend ─────────────────────────────────────────────────────────────
   backend:
