@@ -5,6 +5,8 @@ export interface UserSummary {
   name: string;
   email: string;
   designationCode: string;
+  /** Human-readable short label, e.g. "EDGS/C-I", "Dy CE/C". */
+  designationShortLabel: string;
   primaryZoneId: string | null;
 }
 

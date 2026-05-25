@@ -1,5 +1,6 @@
 package `in`.gov.ir.pia.api
 
+import `in`.gov.ir.pia.repository.DesignationRepository
 import `in`.gov.ir.pia.repository.UserRepository
 import `in`.gov.ir.pia.security.DummyAuthFilter.Companion.SESSION_USER_ID_KEY
 import `in`.gov.ir.pia.security.PiaPrincipal
@@ -24,6 +25,8 @@ data class UserSummaryResponse(
     val name: String,
     val email: String,
     val designationCode: String,
+    /** Human-readable label from designations.short_label, e.g. "EDGS/C-I", "Dy CE/C". */
+    val designationShortLabel: String,
     val primaryZoneId: UUID?,
 )
 
@@ -62,11 +65,18 @@ data class PrincipalResponse(
 @RequestMapping("/api/v1/auth")
 class AuthController(
     private val userRepository: UserRepository,
+    private val designationRepository: DesignationRepository,
 ) {
     /** Returns all active, non-deleted users for the role-picker dropdown. */
     @GetMapping("/users")
-    fun listUsers(): List<UserSummaryResponse> =
-        userRepository
+    fun listUsers(): List<UserSummaryResponse> {
+        // Build a code → shortLabel lookup once; avoids N+1 per user.
+        val shortLabels: Map<String, String> =
+            designationRepository
+                .findAllByOrderByDisplayOrder()
+                .associate { it.code to it.shortLabel }
+
+        return userRepository
             .findAllByIsActiveTrueAndIsDeletedFalseOrderByDesignationCodeAscNameAsc()
             .map { user ->
                 UserSummaryResponse(
@@ -74,9 +84,11 @@ class AuthController(
                     name = user.name,
                     email = user.email,
                     designationCode = user.designationCode,
+                    designationShortLabel = shortLabels[user.designationCode] ?: user.designationCode,
                     primaryZoneId = user.primaryZoneId,
                 )
             }
+    }
 
     /**
      * Sets the current session user. The [DummyAuthFilter] picks up the session

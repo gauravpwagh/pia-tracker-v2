@@ -46,7 +46,7 @@ export function TopBar() {
 
   const userOptions = users.map((u) => ({
     value: u.id,
-    label: `${u.name} (${u.designationCode})`,
+    label: `${u.name} (${u.designationShortLabel ?? u.designationCode})`,
   }));
 
   // ── Notifications ─────────────────────────────────────────────────────────
