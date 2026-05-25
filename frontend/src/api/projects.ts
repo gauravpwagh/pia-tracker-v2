@@ -139,9 +139,65 @@ export async function createProject(
   return handleResponse<ProjectDetailResponse>(res);
 }
 
+// ── Assignments ───────────────────────────────────────────────────────────────
+
+export interface ProjectAssignmentItem {
+  id: string;
+  userId: string;
+  assignmentRole: string;
+  assignedAt: string;
+  isActive: boolean;
+}
+
+export async function fetchProjectAssignments(projectId: string): Promise<ProjectAssignmentItem[]> {
+  const res = await fetch(`${BASE}/projects/${projectId}/assignments`, { credentials: 'include' });
+  return handleResponse<ProjectAssignmentItem[]>(res);
+}
+
 // ── Activities ────────────────────────────────────────────────────────────────
 
 export async function fetchActivities(projectId: string): Promise<ActivityDetailResponse[]> {
   const res = await fetch(`${BASE}/projects/${projectId}/activities`, { credentials: 'include' });
   return handleResponse<ActivityDetailResponse[]>(res);
+}
+
+// ── Project lifecycle actions ─────────────────────────────────────────────────
+
+export async function allocateProject(
+  projectId: string,
+  ceUserId: string,
+): Promise<ProjectDetailResponse> {
+  const res = await fetch(`${BASE}/projects/${projectId}/allocate`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ceUserId }),
+  });
+  return handleResponse<ProjectDetailResponse>(res);
+}
+
+export async function assignDyceUsers(
+  projectId: string,
+  dyceUserIds: string[],
+): Promise<ProjectDetailResponse> {
+  const res = await fetch(`${BASE}/projects/${projectId}/assign-dyce`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dyceUserIds }),
+  });
+  return handleResponse<ProjectDetailResponse>(res);
+}
+
+export async function designateNodalUser(
+  projectId: string,
+  nodalUserId: string,
+): Promise<ProjectDetailResponse> {
+  const res = await fetch(`${BASE}/projects/${projectId}/designate-nodal`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nodalUserId }),
+  });
+  return handleResponse<ProjectDetailResponse>(res);
 }

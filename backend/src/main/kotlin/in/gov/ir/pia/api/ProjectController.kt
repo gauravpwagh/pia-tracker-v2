@@ -5,6 +5,7 @@ import `in`.gov.ir.pia.service.project.AllocateProjectRequest
 import `in`.gov.ir.pia.service.project.AssignDyceRequest
 import `in`.gov.ir.pia.service.project.CreateProjectRequest
 import `in`.gov.ir.pia.service.project.DesignateNodalRequest
+import `in`.gov.ir.pia.service.project.ProjectAssignmentItem
 import `in`.gov.ir.pia.service.project.ProjectDetailResponse
 import `in`.gov.ir.pia.service.project.ProjectService
 import org.springframework.http.HttpStatus
@@ -104,6 +105,17 @@ class ProjectController(
             version = p.version,
         )
     }
+
+    /**
+     * Returns all active role assignments on a project (CE_C, DY_CE_C, NODAL_DY_CE_C, CAO_C).
+     * Used by the "Allocate", "Assign Dy CE/C", and "Designate Nodal" action pickers.
+     */
+    @GetMapping("/{id}/assignments")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.READ.OWN')")
+    fun listAssignments(
+        @PathVariable id: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): List<ProjectAssignmentItem> = projectService.listAssignments(id, principal)
 
     // ── Write ─────────────────────────────────────────────────────────────────
 

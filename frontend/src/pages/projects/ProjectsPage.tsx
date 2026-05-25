@@ -47,13 +47,11 @@ import {
   ExportOutlined,
   FolderOutlined,
   PlusOutlined,
-  ProjectOutlined,
   SearchOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import {
   fetchActivities,
-  fetchProjectDetail,
   fetchProjects,
   fetchZones,
   type ActivityDetailResponse,
@@ -62,6 +60,7 @@ import {
 } from '@api/projects';
 import { useAuthStore } from '@stores/authStore';
 import ProjectCreateWizard from './ProjectCreateWizard';
+import { ProjectDetailPanel } from './ProjectDetailPanel';
 
 const { Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -74,27 +73,12 @@ export const ZONES_QUERY_KEY = ['zones'] as const;
 
 // ── State colour map ──────────────────────────────────────────────────────────
 
-const LIFECYCLE_COLORS: Record<string, string> = {
-  DRAFT: 'default',
-  AWAITING_CAO_ALLOCATION: 'orange',
-  AWAITING_CEC_ASSIGNMENT: 'gold',
-  ACTIVE: 'green',
-  CLOSED: 'default',
-  CANCELLED: 'red',
-};
-
 const ACTIVITY_STATUS_COLORS: Record<string, string> = {
   NOT_STARTED: 'default',
   IN_PROGRESS: 'blue',
   COMPLETED: 'green',
   ON_HOLD: 'orange',
 };
-
-function lifecycleBadge(state: string) {
-  const color = LIFECYCLE_COLORS[state] ?? 'default';
-  const label = state.replace(/_/g, ' ');
-  return <Tag color={color} style={{ marginInlineStart: 'auto', flexShrink: 0 }}>{label}</Tag>;
-}
 
 // ── Tree node key helpers ─────────────────────────────────────────────────────
 
@@ -142,100 +126,7 @@ function ActivityNodeTitle({ activity }: { activity: ActivityDetailResponse }) {
   );
 }
 
-// ── Project Detail Panel ──────────────────────────────────────────────────────
-
-function ProjectDetailPanel({ projectId, onClose }: { projectId: string; onClose: () => void }) {
-  const { t } = useTranslation();
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['project', projectId],
-    queryFn: () => fetchProjectDetail(projectId),
-    staleTime: 60_000,
-  });
-
-  const zonesQuery = useQuery({
-    queryKey: ZONES_QUERY_KEY,
-    queryFn: fetchZones,
-    staleTime: 10 * 60 * 1000,
-  });
-
-  const zoneMap: Record<string, string> = {};
-  zonesQuery.data?.forEach((z) => { zoneMap[z.id] = `${z.shortName} — ${z.name}`; });
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 16px',
-        borderBottom: '1px solid var(--ant-color-border)',
-      }}>
-        <Space>
-          <ProjectOutlined />
-          <Text strong>{t('projects.detail.heading', 'Project')}</Text>
-        </Space>
-        <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} />
-      </div>
-
-      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        {isLoading && <Skeleton active paragraph={{ rows: 6 }} />}
-        {isError && (
-          <Alert type="error" message={t('projects.detail.loadError', 'Failed to load project')} showIcon />
-        )}
-        {data && <ProjectDetailContent project={data} zoneMap={zoneMap} />}
-      </div>
-    </div>
-  );
-}
-
-function ProjectDetailContent({
-  project,
-  zoneMap,
-}: {
-  project: ProjectDetailResponse;
-  zoneMap: Record<string, string>;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      <Space style={{ justifyContent: 'space-between', width: '100%' }}>
-        <Title level={5} style={{ margin: 0 }}>{project.name}</Title>
-        {lifecycleBadge(project.lifecycleState)}
-      </Space>
-
-      {project.projectCode && (
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {t('projects.detail.code', 'Code')}: <Text code>{project.projectCode}</Text>
-        </Text>
-      )}
-
-      <Descriptions size="small" column={1} bordered>
-        <Descriptions.Item label={t('projects.detail.zone', 'Zone')}>
-          {zoneMap[project.zoneId] ?? project.zoneId}
-        </Descriptions.Item>
-        {project.projectType && (
-          <Descriptions.Item label={t('projects.detail.type', 'Type')}>
-            {project.projectType.replace(/_/g, ' ')}
-          </Descriptions.Item>
-        )}
-        {project.targetCompletionYear && (
-          <Descriptions.Item label={t('projects.detail.targetYear', 'Target year')}>
-            {project.targetCompletionYear}
-          </Descriptions.Item>
-        )}
-        {(project.chainageFromKm != null || project.chainageToKm != null) && (
-          <Descriptions.Item label={t('projects.detail.chainage', 'Chainage')}>
-            {project.chainageFromKm ?? '?'} – {project.chainageToKm ?? '?'} km
-            {project.lengthKm != null && ` (${project.lengthKm} km)`}
-          </Descriptions.Item>
-        )}
-        <Descriptions.Item label={t('projects.detail.state', 'State')}>
-          {lifecycleBadge(project.lifecycleState)}
-        </Descriptions.Item>
-      </Descriptions>
-    </Space>
-  );
-}
+// ProjectDetailPanel is imported from ./ProjectDetailPanel
 
 // ── Activity Detail Panel ─────────────────────────────────────────────────────
 
@@ -530,6 +421,7 @@ export default function ProjectsPage() {
     isProjectKey(selectedKey) ? (
       <ProjectDetailPanel
         projectId={projectIdFromKey(selectedKey)}
+        currentUser={currentUser!}
         onClose={handleClosePane}
       />
     ) : isActivityKey(selectedKey) ? (

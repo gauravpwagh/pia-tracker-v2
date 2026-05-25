@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
@@ -67,27 +68,40 @@ class AuthController(
     private val userRepository: UserRepository,
     private val designationRepository: DesignationRepository,
 ) {
-    /** Returns all active, non-deleted users for the role-picker dropdown. */
+    /**
+     * Returns active, non-deleted users for the role-picker dropdown.
+     *
+     * @param designationCode Optional filter — when supplied, returns only users with
+     *   that designation (e.g. "CE_C" for the allocation picker, "DY_CE_C" for the
+     *   assign-Dy-CE/C picker).  Omit to get all users.
+     */
     @GetMapping("/users")
-    fun listUsers(): List<UserSummaryResponse> {
+    fun listUsers(
+        @RequestParam(required = false) designationCode: String?,
+    ): List<UserSummaryResponse> {
         // Build a code → shortLabel lookup once; avoids N+1 per user.
         val shortLabels: Map<String, String> =
             designationRepository
                 .findAllByOrderByDisplayOrder()
                 .associate { it.code to it.shortLabel }
 
-        return userRepository
-            .findAllByIsActiveTrueAndIsDeletedFalseOrderByDesignationCodeAscNameAsc()
-            .map { user ->
-                UserSummaryResponse(
-                    id = user.id,
-                    name = user.name,
-                    email = user.email,
-                    designationCode = user.designationCode,
-                    designationShortLabel = shortLabels[user.designationCode] ?: user.designationCode,
-                    primaryZoneId = user.primaryZoneId,
-                )
+        val users =
+            if (designationCode != null) {
+                userRepository.findAllByDesignationCodeAndIsActiveTrueAndIsDeletedFalseOrderByName(designationCode)
+            } else {
+                userRepository.findAllByIsActiveTrueAndIsDeletedFalseOrderByDesignationCodeAscNameAsc()
             }
+
+        return users.map { user ->
+            UserSummaryResponse(
+                id = user.id,
+                name = user.name,
+                email = user.email,
+                designationCode = user.designationCode,
+                designationShortLabel = shortLabels[user.designationCode] ?: user.designationCode,
+                primaryZoneId = user.primaryZoneId,
+            )
+        }
     }
 
     /**

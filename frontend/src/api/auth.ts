@@ -36,6 +36,14 @@ export async function fetchUsers(): Promise<UserSummary[]> {
   return handleResponse<UserSummary[]>(res);
 }
 
+/** Returns users filtered to a specific designation (e.g. "CE_C", "DY_CE_C"). */
+export async function fetchUsersByDesignation(designationCode: string): Promise<UserSummary[]> {
+  const res = await fetch(`${BASE}/auth/users?designationCode=${encodeURIComponent(designationCode)}`, {
+    credentials: 'include',
+  });
+  return handleResponse<UserSummary[]>(res);
+}
+
 /** Selects a user for the current session and returns the resolved principal. */
 export async function selectUser(userId: string): Promise<PrincipalInfo> {
   const res = await fetch(`${BASE}/auth/select-user`, {

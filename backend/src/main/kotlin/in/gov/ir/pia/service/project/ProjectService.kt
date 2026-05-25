@@ -49,6 +49,14 @@ data class DesignateNodalRequest(
 
 // ── Response model ─────────────────────────────────────────────────────────────
 
+data class ProjectAssignmentItem(
+    val id: UUID,
+    val userId: UUID,
+    val assignmentRole: String,
+    val assignedAt: java.time.Instant,
+    val isActive: Boolean,
+)
+
 data class ProjectDetailResponse(
     val id: UUID,
     val name: String,
@@ -134,6 +142,28 @@ class ProjectService(
         if (zones.isEmpty()) throw ResponseStatusException(HttpStatus.NOT_FOUND)
         return projectRepository.findByIdInZones(id, zones)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+    }
+
+    /**
+     * Returns all active assignments for a project visible to [principal].
+     * Zone access is enforced by [getForPrincipal] before returning.
+     */
+    fun listAssignments(
+        projectId: UUID,
+        principal: PiaPrincipal,
+    ): List<ProjectAssignmentItem> {
+        getForPrincipal(projectId, principal) // zone-check; throws 404 if inaccessible
+        return assignmentRepository
+            .findAllByProjectIdAndIsActiveTrue(projectId)
+            .map {
+                ProjectAssignmentItem(
+                    id = it.id,
+                    userId = it.userId,
+                    assignmentRole = it.assignmentRole,
+                    assignedAt = it.assignedAt,
+                    isActive = it.isActive,
+                )
+            }
     }
 
     // ── Write ─────────────────────────────────────────────────────────────────
