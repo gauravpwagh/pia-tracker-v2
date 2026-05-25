@@ -34,8 +34,12 @@ export const useAuthStore = create<AuthState>()((set) => ({
   },
 
   selectUser: async (userId: string) => {
-    const principal = await apiSelectUser(userId);
-    set({ currentUser: principal });
+    // select-user sets the session but returns permissions: [] because the
+    // DummyAuthFilter hasn't run yet for that request. Call /me immediately
+    // after to get the fully resolved principal (roles + permissions).
+    await apiSelectUser(userId);
+    const resolved = await fetchMe();
+    set({ currentUser: resolved });
   },
 
   logout: async () => {
