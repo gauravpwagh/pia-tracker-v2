@@ -104,7 +104,7 @@ class ProjectService(
      */
     fun listForPrincipal(principal: PiaPrincipal): List<Project> =
         if (principal.isSuperAdmin || principal.permissions.contains("PROJECT.READ.ALL")) {
-            projectRepository.findAllByIsDeletedFalse()
+            projectRepository.findAllByIsDeletedFalseOrderByCreatedAtDesc()
         } else {
             val zones = principal.accessibleZoneIds
             if (zones.isEmpty()) {

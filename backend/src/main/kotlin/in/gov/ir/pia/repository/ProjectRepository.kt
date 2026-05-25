@@ -26,14 +26,14 @@ interface ProjectRepository : JpaRepository<Project, UUID> {
      * filtering in the service layer and call [findAllByIsDeletedFalse].
      */
     @Query(
-        "SELECT p FROM Project p WHERE p.zoneId IN :zoneIds AND p.isDeleted = false",
+        "SELECT p FROM Project p WHERE p.zoneId IN :zoneIds AND p.isDeleted = false ORDER BY p.createdAt DESC",
     )
     fun findAllByZoneIdInAndIsDeletedFalse(
         @Param("zoneIds") zoneIds: Set<UUID>,
     ): List<Project>
 
     /** Returns all non-deleted projects regardless of zone (used for ALL-scope reads). */
-    fun findAllByIsDeletedFalse(): List<Project>
+    fun findAllByIsDeletedFalseOrderByCreatedAtDesc(): List<Project>
 
     /**
      * Returns the project only if it is non-deleted AND its zone is in [zoneIds].
