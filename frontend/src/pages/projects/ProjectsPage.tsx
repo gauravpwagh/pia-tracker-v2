@@ -487,16 +487,17 @@ export default function ProjectsPage() {
         currentUser={currentUser!}
         onClose={handleClosePane}
         onActivityCreated={() => {
-          // Re-fetch activities for this project and update the tree immediately
+          // Re-fetch activities and expand the project + all type groups so
+          // the new activity is immediately visible regardless of whether the
+          // project was already expanded before the modal was opened.
           const projectId = projectIdFromKey(selectedKey);
           void fetchActivities(projectId).then((activities) => {
             setActivityMap((prev) => ({ ...prev, [projectId]: activities }));
-            // Auto-expand any newly added type groups
             const typeCodes = [...new Set(activities.map((a) => a.activityTypeCode))];
             const groupKeys = typeCodes.map((tc) => actGroupNodeKey(projectId, tc));
-            if (groupKeys.length > 0) {
-              setExpandedKeys((prev) => [...new Set([...prev, ...groupKeys])]);
-            }
+            setExpandedKeys((prev) =>
+              [...new Set([...prev, projectNodeKey(projectId), ...groupKeys])]
+            );
           });
         }}
       />
