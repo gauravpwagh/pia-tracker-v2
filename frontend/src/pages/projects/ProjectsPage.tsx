@@ -414,25 +414,29 @@ export default function ProjectsPage() {
 
   // ── Tree handlers ─────────────────────────────────────────────────────────────
 
-  // Lazy-load activities when a project node is expanded for the first time.
-  // We do this manually in onExpand (not via Tree's loadData prop) so we retain
-  // full control of treeData and avoid AntD's internal loaded-state cache, which
-  // was preventing the group nodes from appearing.
-  const loadProjectActivities = (projectId: string) => {
+  // loadData is required so that unloaded project nodes show an expand arrow.
+  // Without it, rc-tree treats children:undefined nodes as leaves regardless of
+  // isLeaf:false (see rc-tree TreeNode.js: `!context.loadData && !hasChildren`).
+  //
+  // Non-project nodes (group / activity) return immediately so rc-tree marks
+  // them as loaded without doing anything — their children come from treeData.
+  const loadActivityData = async (node: DataNode): Promise<void> => {
+    const key = String(node.key);
+    if (!isProjectKey(key)) return; // group/activity nodes: instant resolve
+    const projectId = projectIdFromKey(key);
     if (activityMap[projectId] !== undefined) return; // already loaded
-    fetchActivities(projectId)
-      .then((activities) => {
-        setActivityMap((prev) => ({ ...prev, [projectId]: activities }));
-        // Auto-expand all type groups so activities are immediately visible
-        const typeCodes = [...new Set(activities.map((a) => a.activityTypeCode))];
-        const groupKeys = typeCodes.map((tc) => actGroupNodeKey(projectId, tc));
-        if (groupKeys.length > 0) {
-          setExpandedKeys((prev) => [...new Set([...prev, ...groupKeys])]);
-        }
-      })
-      .catch(() => {
-        setActivityMap((prev) => ({ ...prev, [projectId]: [] }));
-      });
+    try {
+      const activities = await fetchActivities(projectId);
+      const typeCodes = [...new Set(activities.map((a) => a.activityTypeCode))];
+      const groupKeys = typeCodes.map((tc) => actGroupNodeKey(projectId, tc));
+      // Batch both state writes so a single re-render shows groups expanded
+      setActivityMap((prev) => ({ ...prev, [projectId]: activities }));
+      if (groupKeys.length > 0) {
+        setExpandedKeys((prev) => [...new Set([...prev, ...groupKeys])]);
+      }
+    } catch {
+      setActivityMap((prev) => ({ ...prev, [projectId]: [] }));
+    }
   };
 
   const handleTreeSelect = (keys: React.Key[]) => {
@@ -470,14 +474,7 @@ export default function ProjectsPage() {
   };
 
   const handleTreeExpand = (keys: React.Key[]) => {
-    const next = keys.map(String);
-    setExpandedKeys(next);
-    // If a project node was just expanded and its activities aren't loaded yet, fetch them
-    for (const key of next) {
-      if (isProjectKey(key) && activityMap[projectIdFromKey(key)] === undefined) {
-        loadProjectActivities(projectIdFromKey(key));
-      }
-    }
+    setExpandedKeys(keys.map(String));
   };
 
   const handleClosePane = () => {
@@ -646,6 +643,7 @@ export default function ProjectsPage() {
                 <Tree
                   showIcon
                   blockNode
+                  loadData={loadActivityData}
                   treeData={treeData}
                   selectedKeys={selectedKey ? [selectedKey] : []}
                   expandedKeys={expandedKeys}
