@@ -10,7 +10,7 @@
  */
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import {
@@ -124,6 +124,7 @@ function recordStateLabel(state: string): string {
 
 export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDetailPanelProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [form] = Form.useForm<EditValues>();
@@ -162,7 +163,9 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
     mutationFn: () => createRecord(activityId),
     onSuccess: (record) => {
       void queryClient.invalidateQueries({ queryKey: ['records', activityId] });
-      navigate(`/records/${record.id}/edit`);
+      navigate(`/records/${record.id}/edit`, {
+        state: { returnPath: location.pathname },
+      });
     },
   });
 
@@ -393,7 +396,7 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
                     <List.Item
                       key={record.id}
                       style={{ cursor: 'pointer', padding: '6px 10px' }}
-                      onClick={() => navigate(`/records/${record.id}/edit`)}
+                      onClick={() => navigate(`/records/${record.id}/edit`, { state: { returnPath: location.pathname } })}
                       actions={[
                         <Tag
                           key="state"

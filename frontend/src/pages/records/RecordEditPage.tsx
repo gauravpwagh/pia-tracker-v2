@@ -41,7 +41,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
@@ -368,6 +368,8 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
 export default function RecordEditPage() {
   const { recordId } = useParams<{ recordId: string }>();
   const navigate = useNavigate();
+  const { state: routeState } = useLocation();
+  const returnPath: string = (routeState as { returnPath?: string } | null)?.returnPath ?? '/projects';
   const { t } = useTranslation(['forms', 'common']);
   const queryClient = useQueryClient();
 
@@ -586,7 +588,13 @@ export default function RecordEditPage() {
                 </a>
               ),
             },
-            { title: activity?.name ?? t('forms:record.breadcrumb.activity') },
+            {
+              title: (
+                <a onClick={() => navigate(returnPath)}>
+                  {activity?.name ?? t('forms:record.breadcrumb.activity')}
+                </a>
+              ),
+            },
             { title: record.recordSubtype ?? t('forms:record.breadcrumb.record') },
           ]}
         />
