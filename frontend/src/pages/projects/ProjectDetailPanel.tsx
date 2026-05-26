@@ -17,11 +17,8 @@ import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Button,
-  DatePicker,
   Descriptions,
-  Divider,
   Form,
-  Input,
   Modal,
   Select,
   Skeleton,
@@ -29,8 +26,6 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { ActivityMetadataForm } from './ActivityMetadataForm';
-import dayjs from 'dayjs';
 import {
   CloseOutlined,
   PlusOutlined,
@@ -46,14 +41,13 @@ import {
   allocateProject,
   assignDyceUsers,
   designateNodalUser,
-  createActivity,
-  type CreateActivityRequest,
+  type ActivityDetailResponse,
 } from '@api/projects';
 import { fetchUsersByDesignation, type UserSummary } from '@api/auth';
 import type { PrincipalInfo } from '@api/auth';
+import ActivityCreateWizard from './ActivityCreateWizard';
 
 const { Text, Title } = Typography;
-const { TextArea } = Input;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -73,24 +67,6 @@ const LIFECYCLE_LABELS: Record<string, string> = {
   DRAFT:                   'Draft',
   CLOSED:                  'Closed',
   CANCELLED:               'Cancelled',
-};
-
-const ACTIVITY_TYPES = [
-  { code: 'LAND_ACQUISITION',       label: 'Land Acquisition' },
-  { code: 'FOREST_CLEARANCE',       label: 'Forest Clearance' },
-  { code: 'UTILITY_SHIFTING',       label: 'Utility Shifting' },
-  { code: 'DRAWING_APPROVAL',       label: 'Drawing Approval' },
-  { code: 'TENDER_PACKAGING',       label: 'Tender Packaging' },
-  { code: 'TEMPORARY_OFFICE_SPACE', label: 'Temporary Office Space' },
-];
-
-const SCOPE_NOTE_PLACEHOLDERS: Record<string, string> = {
-  LAND_ACQUISITION:       'Villages, survey numbers, district, total area (ha), acquisition stage (Section 11 / Award / Possession)…',
-  FOREST_CLEARANCE:       'Forest division, area (ha), FC-I / FC-II stage, wildlife zone considerations, compensatory afforestation details…',
-  UTILITY_SHIFTING:       'Utility type (OHE / signalling / water / telecom), chainage range, executing agency, estimated cost…',
-  DRAWING_APPROVAL:       'Drawing type, DPR reference, design standard, approving authority, revision notes…',
-  TENDER_PACKAGING:       'Package scope, estimated cost range, tender type (open / limited), current stage…',
-  TEMPORARY_OFFICE_SPACE: 'Location, area required (sqm), type (rented / railway land), facilities needed, estimated rent…',
 };
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
@@ -252,118 +228,6 @@ function DesignateNodalModal({
             placeholder="Select Dy CE/C…"
             options={options.map((u: UserSummary) => ({ value: u.id, label: u.name }))} />
         </Form.Item>
-      </Form>
-    </Modal>
-  );
-}
-
-// ── Add Activity modal ────────────────────────────────────────────────────────
-
-interface AddActivityFormValues {
-  activityTypeCode: string;
-  name: string;
-  scopeNotes?: string;
-  targetCompletionDate?: dayjs.Dayjs | null;
-  metadata?: Record<string, unknown>;
-}
-
-function AddActivityModal({
-  projectId, open, onClose, onSuccess,
-}: { projectId: string; open: boolean; onClose: () => void; onSuccess: () => void }) {
-  const [form] = Form.useForm<AddActivityFormValues>();
-  // Track selected type in local state — Form.useWatch is unreliable inside
-  // destroyOnClose modals (can return undefined even after a selection is made).
-  const [selectedType, setSelectedType] = useState<string | undefined>();
-
-  const mutation = useMutation({
-    mutationFn: (values: CreateActivityRequest) => createActivity(projectId, values),
-    onSuccess: () => { form.resetFields(); setSelectedType(undefined); onSuccess(); onClose(); },
-  });
-
-  // When activity type changes, auto-fill name with the type label (user can edit)
-  // Also reset metadata fields so stale values from a previous type are discarded.
-  const handleTypeChange = (code: string) => {
-    setSelectedType(code);
-    const found = ACTIVITY_TYPES.find((t) => t.code === code);
-    if (found) form.setFieldValue('name', found.label);
-    form.setFieldValue('metadata', undefined);
-  };
-
-  // Reset local state when modal closes
-  const handleCancel = () => {
-    if (mutation.isPending) return;
-    form.resetFields();
-    setSelectedType(undefined);
-    onClose();
-  };
-
-  const handleOk = () => {
-    form.validateFields().then((raw) => {
-      // Strip null / empty values from metadata before sending
-      const cleanedMetadata = Object.fromEntries(
-        Object.entries(raw.metadata ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== ''),
-      );
-      mutation.mutate({
-        activityTypeCode: raw.activityTypeCode,
-        name: raw.name,
-        scopeNotes: raw.scopeNotes || undefined,
-        targetCompletionDate: raw.targetCompletionDate
-          ? (raw.targetCompletionDate as unknown as dayjs.Dayjs).format('YYYY-MM-DD')
-          : undefined,
-        metadataJson: Object.keys(cleanedMetadata).length > 0 ? cleanedMetadata : undefined,
-      });
-    });
-  };
-
-  const scopePlaceholder = selectedType
-    ? (SCOPE_NOTE_PLACEHOLDERS[selectedType] ?? 'Describe the scope of this activity…')
-    : 'Select an activity type first to see relevant hints…';
-
-  return (
-    <Modal
-      title={<Space><PlusOutlined />Add Activity</Space>}
-      open={open}
-      onOk={handleOk}
-      onCancel={handleCancel}
-      okText="Add Activity"
-      confirmLoading={mutation.isPending}
-      destroyOnClose
-      width={560}
-    >
-      {mutation.isError && (
-        <Alert type="error" message="Failed to add activity"
-          description={mutation.error instanceof Error ? mutation.error.message : undefined}
-          style={{ marginBottom: 12 }} showIcon />
-      )}
-      <Form form={form} layout="vertical" style={{ marginTop: 8 }}>
-        <Form.Item name="activityTypeCode" label="Activity type"
-          rules={[{ required: true, message: 'Select an activity type' }]}>
-          <Select
-            placeholder="Select type…"
-            onChange={handleTypeChange}
-            options={ACTIVITY_TYPES.map((t) => ({ value: t.code, label: t.label }))}
-          />
-        </Form.Item>
-        <Form.Item name="name" label="Name"
-          rules={[{ required: true, message: 'Enter a name for this activity' }]}>
-          <Input placeholder="e.g. Land Acquisition — Phase 1" />
-        </Form.Item>
-        <Form.Item name="scopeNotes" label="Scope notes">
-          <TextArea rows={3} placeholder={scopePlaceholder} />
-        </Form.Item>
-        <Form.Item name="targetCompletionDate" label="Target completion date">
-          <DatePicker style={{ width: '100%' }} format="D MMM YYYY" />
-        </Form.Item>
-
-        {/* Type-specific metadata fields — shown when a type with known fields is selected */}
-        {selectedType && (
-          <>
-            <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '8px 0 12px' }}>
-              {ACTIVITY_TYPES.find((t) => t.code === selectedType)?.label ?? selectedType} details
-            </Divider>
-            <ActivityMetadataForm activityTypeCode={selectedType} />
-          </>
-        )}
       </Form>
     </Modal>
   );
@@ -575,11 +439,11 @@ export function ProjectDetailPanel({
             onClose={() => setModal(null)}
             onSuccess={handleActionSuccess}
           />
-          <AddActivityModal
+          <ActivityCreateWizard
             projectId={project.id}
             open={modal === 'addActivity'}
             onClose={() => setModal(null)}
-            onSuccess={handleActivitySuccess}
+            onCreated={(activity: ActivityDetailResponse) => { handleActivitySuccess(); void activity; }}
           />
         </>
       )}
