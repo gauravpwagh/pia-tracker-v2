@@ -19,6 +19,7 @@ import validator from '@rjsf/validator-ajv8';
 import type { IChangeEvent, FormProps } from '@rjsf/core';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { customWidgets } from './widgets';
+import { PiaObjectFieldTemplate } from './PiaObjectFieldTemplate';
 
 export interface RjsfFormHandle {
   /** Programmatically trigger form validation + submit. */
@@ -71,6 +72,7 @@ export const RjsfForm = forwardRef<RjsfFormHandle, RjsfFormProps>(function RjsfF
       formData={formData}
       validator={validator}
       widgets={customWidgets}
+      templates={{ ObjectFieldTemplate: PiaObjectFieldTemplate }}
       onChange={handleChange}
       onSubmit={handleSubmit}
       liveValidate={false}
