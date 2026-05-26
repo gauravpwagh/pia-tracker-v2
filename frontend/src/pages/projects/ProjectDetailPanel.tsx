@@ -82,6 +82,15 @@ const ACTIVITY_TYPES = [
   { code: 'TEMPORARY_OFFICE_SPACE', label: 'Temporary Office Space' },
 ];
 
+const SCOPE_NOTE_PLACEHOLDERS: Record<string, string> = {
+  LAND_ACQUISITION:       'Villages, survey numbers, district, total area (ha), acquisition stage (Section 11 / Award / Possession)…',
+  FOREST_CLEARANCE:       'Forest division, area (ha), FC-I / FC-II stage, wildlife zone considerations, compensatory afforestation details…',
+  UTILITY_SHIFTING:       'Utility type (OHE / signalling / water / telecom), chainage range, executing agency, estimated cost…',
+  DRAWING_APPROVAL:       'Drawing type, DPR reference, design standard, approving authority, revision notes…',
+  TENDER_PACKAGING:       'Package scope, estimated cost range, tender type (open / limited), current stage…',
+  TEMPORARY_OFFICE_SPACE: 'Location, area required (sqm), type (rented / railway land), facilities needed, estimated rent…',
+};
+
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
 function StateBadge({ state }: { state: string }) {
@@ -252,6 +261,7 @@ function AddActivityModal({
   projectId, open, onClose, onSuccess,
 }: { projectId: string; open: boolean; onClose: () => void; onSuccess: () => void }) {
   const [form] = Form.useForm<CreateActivityRequest>();
+  const selectedType = Form.useWatch('activityTypeCode', form) as string | undefined;
 
   const mutation = useMutation({
     mutationFn: (values: CreateActivityRequest) => createActivity(projectId, values),
@@ -274,6 +284,10 @@ function AddActivityModal({
       });
     });
   };
+
+  const scopePlaceholder = selectedType
+    ? (SCOPE_NOTE_PLACEHOLDERS[selectedType] ?? 'Describe the scope of this activity…')
+    : 'Select an activity type first to see relevant hints…';
 
   return (
     <Modal
@@ -305,7 +319,7 @@ function AddActivityModal({
           <Input placeholder="e.g. Land Acquisition — Phase 1" />
         </Form.Item>
         <Form.Item name="scopeNotes" label="Scope notes">
-          <TextArea rows={3} placeholder="Villages, districts, chainage extents, utility types…" />
+          <TextArea rows={4} placeholder={scopePlaceholder} />
         </Form.Item>
         <Form.Item name="targetCompletionDate" label="Target completion date">
           <DatePicker style={{ width: '100%' }} format="D MMM YYYY" />

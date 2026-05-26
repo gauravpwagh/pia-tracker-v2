@@ -91,7 +91,7 @@ const ACTIVITY_STATUS_COLORS: Record<string, string> = {
   LAGGING:     'red',
 };
 
-// ── Activity type → icon ──────────────────────────────────────────────────────
+// ── Activity type → icon / label ─────────────────────────────────────────────
 
 const ACTIVITY_TYPE_ICONS: Record<string, React.ReactNode> = {
   LAND_ACQUISITION: <HomeOutlined />,
@@ -100,13 +100,24 @@ const ACTIVITY_TYPE_ICONS: Record<string, React.ReactNode> = {
   DRAWING_APPROVAL: <AuditOutlined />,
 };
 
+const ACTIVITY_TYPE_LABELS: Record<string, string> = {
+  LAND_ACQUISITION:       'Land Acquisition',
+  FOREST_CLEARANCE:       'Forest Clearance',
+  UTILITY_SHIFTING:       'Utility Shifting',
+  DRAWING_APPROVAL:       'Drawing Approval',
+  TENDER_PACKAGING:       'Tender Packaging',
+  TEMPORARY_OFFICE_SPACE: 'Temporary Office Space',
+};
+
 // ── Tree node key helpers ─────────────────────────────────────────────────────
 
 function projectNodeKey(projectId: string) { return `project:${projectId}`; }
 function activityNodeKey(activityId: string) { return `activity:${activityId}`; }
+function actGroupNodeKey(projectId: string, typeCode: string) { return `actgroup:${projectId}:${typeCode}`; }
 
 function isProjectKey(key: string) { return key.startsWith('project:'); }
 function isActivityKey(key: string) { return key.startsWith('activity:'); }
+function isActGroupKey(key: string) { return key.startsWith('actgroup:'); }
 
 function projectIdFromKey(key: string) { return key.replace('project:', ''); }
 function activityIdFromKey(key: string) { return key.replace('activity:', ''); }
@@ -207,6 +218,18 @@ function ActivityNodeTitle({ activity }: { activity: ActivityDetailResponse }) {
           />
         </Dropdown>
       </Space>
+    </div>
+  );
+}
+
+// ── Activity group node title ─────────────────────────────────────────────────
+
+function ActivityGroupTitle({ typeCode, count }: { typeCode: string; count: number }) {
+  const label = ACTIVITY_TYPE_LABELS[typeCode] ?? typeCode.replace(/_/g, ' ');
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 8 }}>
+      <Text style={{ fontSize: 12, fontWeight: 600 }}>{label}</Text>
+      <Tag style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 5px' }}>{count}</Tag>
     </div>
   );
 }
@@ -349,6 +372,27 @@ export default function ProjectsPage() {
   const treeData: DataNode[] = filteredProjects.map((project) => {
     const activities = activityMap[project.id] ?? [];
     const isExpanded = expandedKeys.includes(projectNodeKey(project.id));
+
+    // Group activities by type code
+    const byType: Record<string, ActivityDetailResponse[]> = {};
+    for (const act of activities) {
+      if (!byType[act.activityTypeCode]) byType[act.activityTypeCode] = [];
+      byType[act.activityTypeCode].push(act);
+    }
+
+    const groupChildren: DataNode[] = Object.entries(byType).map(([typeCode, typeActivities]) => ({
+      key: actGroupNodeKey(project.id, typeCode),
+      icon: ACTIVITY_TYPE_ICONS[typeCode] ?? <BranchesOutlined />,
+      title: <ActivityGroupTitle typeCode={typeCode} count={typeActivities.length} />,
+      isLeaf: false,
+      children: typeActivities.map((activity) => ({
+        key: activityNodeKey(activity.id),
+        icon: null,
+        title: <ActivityNodeTitle activity={activity} />,
+        isLeaf: true,
+      })),
+    }));
+
     return {
       key: projectNodeKey(project.id),
       icon: <FolderOutlined />,
@@ -359,14 +403,7 @@ export default function ProjectsPage() {
         />
       ),
       isLeaf: isExpanded && activities.length === 0,
-      children: isExpanded
-        ? activities.map((activity) => ({
-            key: activityNodeKey(activity.id),
-            icon: ACTIVITY_TYPE_ICONS[activity.activityTypeCode] ?? <BranchesOutlined />,
-            title: <ActivityNodeTitle activity={activity} />,
-            isLeaf: true,
-          }))
-        : undefined,
+      children: isExpanded ? groupChildren : undefined,
     };
   });
 
@@ -380,6 +417,12 @@ export default function ProjectsPage() {
     try {
       const activities = await fetchActivities(projectId);
       setActivityMap((prev) => ({ ...prev, [projectId]: activities }));
+      // Auto-expand all type groups so activities are immediately visible
+      const typeCodes = [...new Set(activities.map((a) => a.activityTypeCode))];
+      const groupKeys = typeCodes.map((tc) => actGroupNodeKey(projectId, tc));
+      if (groupKeys.length > 0) {
+        setExpandedKeys((prev) => [...new Set([...prev, ...groupKeys])]);
+      }
     } catch {
       setActivityMap((prev) => ({ ...prev, [projectId]: [] }));
     }
@@ -388,6 +431,9 @@ export default function ProjectsPage() {
   const handleTreeSelect = (keys: React.Key[]) => {
     const key = String(keys[0] ?? '');
     if (!key) return;
+
+    // Group nodes are expand/collapse only — leave existing selection intact
+    if (isActGroupKey(key)) return;
 
     if (isProjectKey(key)) {
       const projectId = projectIdFromKey(key);
@@ -441,13 +487,16 @@ export default function ProjectsPage() {
         currentUser={currentUser!}
         onClose={handleClosePane}
         onActivityCreated={() => {
-          // Clear the cached activity list for this project so the tree
-          // re-fetches when the user expands it again.
+          // Re-fetch activities for this project and update the tree immediately
           const projectId = projectIdFromKey(selectedKey);
-          setActivityMap((prev) => {
-            const next = { ...prev };
-            delete next[projectId];
-            return next;
+          void fetchActivities(projectId).then((activities) => {
+            setActivityMap((prev) => ({ ...prev, [projectId]: activities }));
+            // Auto-expand any newly added type groups
+            const typeCodes = [...new Set(activities.map((a) => a.activityTypeCode))];
+            const groupKeys = typeCodes.map((tc) => actGroupNodeKey(projectId, tc));
+            if (groupKeys.length > 0) {
+              setExpandedKeys((prev) => [...new Set([...prev, ...groupKeys])]);
+            }
           });
         }}
       />
