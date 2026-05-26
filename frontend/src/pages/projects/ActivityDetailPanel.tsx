@@ -86,6 +86,9 @@ interface EditValues {
   name: string;
   scopeNotes?: string;
   targetCompletionDate?: dayjs.Dayjs | null;
+}
+
+interface MetaValues {
   metadata?: Record<string, unknown>;
 }
 
@@ -101,6 +104,10 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [form] = Form.useForm<EditValues>();
+  // Separate form for type-specific metadata — mirrors ActivityCreateWizard's form2 pattern.
+  // Keeping metadata in its own form instance avoids Ant Design nested-path resolution issues
+  // that occur when ['metadata', *] fields share a form with top-level fields.
+  const [metaForm] = Form.useForm<MetaValues>();
 
   const activityQuery = useQuery<ActivityDetailResponse>({
     queryKey: ['activity', activityId],
@@ -131,7 +138,9 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
       targetCompletionDate: activity.targetCompletionDate
         ? dayjs(activity.targetCompletionDate)
         : null,
-      // Pre-populate type-specific metadata; cast is safe — backend always returns an object
+    });
+    // Pre-populate metadata in its own form so nested ['metadata', *] paths resolve correctly.
+    metaForm.setFieldsValue({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       metadata: (activity.metadataJson ?? {}) as any,
     });
@@ -140,8 +149,11 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
 
   const handleSave = () => {
     form.validateFields().then((values) => {
+      // Read metadata from its dedicated form instance — same pattern as ActivityCreateWizard.
+      const metaValues = metaForm.getFieldsValue();
+      const metadataRaw = (metaValues.metadata ?? {}) as Record<string, unknown>;
       const cleanedMetadata = Object.fromEntries(
-        Object.entries(values.metadata ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+        Object.entries(metadataRaw).filter(([, v]) => v !== undefined && v !== null && v !== ''),
       );
       updateMutation.mutate({
         name: values.name,
@@ -156,6 +168,7 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
 
   const handleCancel = () => {
     form.resetFields();
+    metaForm.resetFields();
     setEditing(false);
   };
 
@@ -308,35 +321,40 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
         )}
 
         {activity && editing && (
-          <Form form={form} layout="vertical">
-            <Form.Item
-              name="name"
-              label="Activity name"
-              rules={[{ required: true, message: 'Name is required' }]}
-            >
-              <Input />
-            </Form.Item>
+          <>
+            {/* Common fields */}
+            <Form form={form} layout="vertical">
+              <Form.Item
+                name="name"
+                label="Activity name"
+                rules={[{ required: true, message: 'Name is required' }]}
+              >
+                <Input />
+              </Form.Item>
 
-            <Form.Item name="scopeNotes" label="Scope notes">
-              <TextArea
-                rows={4}
-                placeholder={
-                  SCOPE_NOTE_PLACEHOLDERS[activity.activityTypeCode]
-                  ?? 'Describe the scope of this activity…'
-                }
-              />
-            </Form.Item>
+              <Form.Item name="scopeNotes" label="Scope notes">
+                <TextArea
+                  rows={4}
+                  placeholder={
+                    SCOPE_NOTE_PLACEHOLDERS[activity.activityTypeCode]
+                    ?? 'Describe the scope of this activity…'
+                  }
+                />
+              </Form.Item>
 
-            <Form.Item name="targetCompletionDate" label="Target completion date">
-              <DatePicker style={{ width: '100%' }} format="D MMM YYYY" />
-            </Form.Item>
+              <Form.Item name="targetCompletionDate" label="Target completion date">
+                <DatePicker style={{ width: '100%' }} format="D MMM YYYY" />
+              </Form.Item>
+            </Form>
 
-            {/* Type-specific metadata fields */}
+            {/* Type-specific metadata — separate sibling form, never nested inside form above */}
             <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '8px 0 12px' }}>
               {typeLabel} details
             </Divider>
-            <ActivityMetadataForm activityTypeCode={activity.activityTypeCode} />
-          </Form>
+            <Form form={metaForm} layout="vertical">
+              <ActivityMetadataForm activityTypeCode={activity.activityTypeCode} />
+            </Form>
+          </>
         )}
       </div>
     </div>
