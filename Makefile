@@ -153,6 +153,16 @@ psql: ## Open psql shell on dev DB
 build-images: ## Build all Docker images
 	@$(COMPOSE) build
 
+.PHONY: deploy-frontend
+deploy-frontend: ## Rebuild frontend image, push new dist to volume, restart nginx
+	@echo "$(GREEN)Building frontend image…$(NC)"
+	@$(COMPOSE) build frontend
+	@echo "$(GREEN)Copying dist into nginx volume…$(NC)"
+	@$(COMPOSE) up frontend --force-recreate
+	@echo "$(GREEN)Restarting nginx…$(NC)"
+	@$(COMPOSE) restart nginx
+	@echo "$(GREEN)✓ Frontend deployed. Hard-refresh the browser (Ctrl+Shift+R).$(NC)"
+
 .PHONY: build-prod-image
 build-prod-image: ## Build production-tagged images
 	@cd backend && ./gradlew bootBuildImage --imageName=pia-tracker/backend:$$(git describe --tags --abbrev=0)
