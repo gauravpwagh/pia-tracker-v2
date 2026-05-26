@@ -556,38 +556,37 @@ export default function RecordEditPage() {
     ? activeSectionResolved.replace(/_/g, ' ')
     : 'Record';
 
-  return (
-    // Use plain divs here — App.tsx's Layout.Content already renders a <main>
-    // landmark; adding another <Layout><Content> would create a duplicate main,
-    // which violates landmark-no-duplicate-main / landmark-main-is-top-level.
-    <div style={{ height: '100%' }}>
-      <div style={{ padding: '0 0 80px 0' }}>
-        {/* ── Breadcrumb + header ── */}
-        <div style={{ marginBottom: 16 }}>
-          <Breadcrumb
-            items={[
-              {
-                title: (
-                  <a onClick={() => navigate('/projects')}>
-                    {t('forms:record.breadcrumb.project')}
-                  </a>
-                ),
-              },
-              { title: activity?.name ?? t('forms:record.breadcrumb.activity') },
-              { title: record.recordSubtype ?? t('forms:record.breadcrumb.record') },
-            ]}
-          />
-          <Flex justify="space-between" align="center" style={{ marginTop: 8 }}>
-            {/* level={1} satisfies the page-has-heading-one a11y rule;
-                fontSize override keeps it visually consistent with other page headers. */}
-            <Title level={1} style={{ margin: 0, fontSize: 16, fontWeight: 600, lineHeight: '1.5' }}>
-              {activity?.name ?? '—'}
-            </Title>
-            <RecordStateBadge state={record.recordState} />
-          </Flex>
-        </div>
+  // ── Bottom bar height (used for scroll padding) ──────────────────────────
+  const BOTTOM_BAR_H = 56;
 
-        {/* ── Conflict alert ── */}
+  return (
+    // Outer shell: full viewport height, flex column so header + body + bar
+    // stack without overflow.  No padding — each zone controls its own.
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+
+      {/* ── Header (fixed height, never scrolls) ── */}
+      <div style={{ flexShrink: 0, padding: '12px 24px 0', borderBottom: '1px solid var(--colorBorder)', background: 'var(--colorBgContainer)' }}>
+        <Breadcrumb
+          items={[
+            {
+              title: (
+                <a onClick={() => navigate('/projects')}>
+                  {t('forms:record.breadcrumb.project')}
+                </a>
+              ),
+            },
+            { title: activity?.name ?? t('forms:record.breadcrumb.activity') },
+            { title: record.recordSubtype ?? t('forms:record.breadcrumb.record') },
+          ]}
+        />
+        <Flex justify="space-between" align="center" style={{ margin: '6px 0 10px' }}>
+          <Title level={1} style={{ margin: 0, fontSize: 16, fontWeight: 600, lineHeight: '1.5' }}>
+            {activity?.name ?? '—'}
+          </Title>
+          <RecordStateBadge state={record.recordState} />
+        </Flex>
+
+        {/* Alerts live here so they push content down rather than overlapping */}
         {autosaveStatus === 'conflict' && (
           <Alert
             type="warning"
@@ -599,11 +598,9 @@ export default function RecordEditPage() {
                 {t('common:actions.reload')}
               </Button>
             }
-            style={{ marginBottom: 16 }}
+            style={{ marginBottom: 8 }}
           />
         )}
-
-        {/* ── Workflow action error ── */}
         {workflowMutation.isError && (
           <Alert
             type="error"
@@ -611,14 +608,26 @@ export default function RecordEditPage() {
             closable
             message="Workflow action failed"
             description={String(workflowMutation.error)}
-            style={{ marginBottom: 16 }}
+            style={{ marginBottom: 8 }}
           />
         )}
+      </div>
 
-        {/* ── Three-column body ── */}
-        <Row gutter={16}>
+      {/* ── Scrollable body ── */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+        <Row gutter={0} style={{ flex: 1, overflow: 'hidden', margin: 0, width: '100%' }}>
+
+          {/* Left: section nav — scrolls independently */}
           {hasSections && (
-            <Col span={leftColSpan} style={{ borderRight: '1px solid var(--colorBorder)' }}>
+            <Col
+              span={leftColSpan}
+              style={{
+                height: '100%',
+                overflowY: 'auto',
+                borderRight: '1px solid var(--colorBorder)',
+                padding: '8px 0',
+              }}
+            >
               <SectionTabs
                 sectionCodes={sectionCodes}
                 activeSection={activeSectionResolved}
@@ -628,7 +637,11 @@ export default function RecordEditPage() {
             </Col>
           )}
 
-          <Col span={centreColSpan}>
+          {/* Centre: form — scrolls independently */}
+          <Col
+            span={centreColSpan}
+            style={{ height: '100%', overflowY: 'auto', padding: '16px 20px' }}
+          >
             <RjsfForm
               ref={formRef}
               schema={sectionSchema}
@@ -646,29 +659,32 @@ export default function RecordEditPage() {
             />
           </Col>
 
+          {/* Right: comments / history / workflow — scrolls independently */}
           <Col
             span={rightColSpan}
-            style={{ borderLeft: '1px solid var(--colorBorder)', paddingLeft: 16 }}
+            style={{
+              height: '100%',
+              overflowY: 'auto',
+              borderLeft: '1px solid var(--colorBorder)',
+              padding: '8px 12px',
+            }}
           >
             <RightPanel activeSectionState={activeSectionState} recordId={recordId!} />
           </Col>
         </Row>
       </div>
 
-      {/* ── Sticky bottom action bar ── */}
+      {/* ── Bottom action bar (always visible, never overlaps content) ── */}
       <div
         style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 240,
-          right: 0,
-          padding: '12px 24px',
-          background: 'var(--colorBgContainer)',
-          borderTop: '1px solid var(--colorBorder)',
-          zIndex: 100,
+          flexShrink: 0,
+          height: BOTTOM_BAR_H,
+          padding: '0 24px',
           display: 'flex',
           alignItems: 'center',
           gap: 12,
+          background: 'var(--colorBgContainer)',
+          borderTop: '1px solid var(--colorBorder)',
         }}
       >
         <Button
