@@ -104,10 +104,11 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [form] = Form.useForm<EditValues>();
-  // Separate form for type-specific metadata — mirrors ActivityCreateWizard's form2 pattern.
-  // Keeping metadata in its own form instance avoids Ant Design nested-path resolution issues
-  // that occur when ['metadata', *] fields share a form with top-level fields.
   const [metaForm] = Form.useForm<MetaValues>();
+  // Authoritative metadata state — populated by onValuesChange, read on save.
+  // Using React state instead of form.getFieldsValue() sidesteps Ant Design's
+  // nested-path store issues that caused metadata to always read as {}.
+  const [metadataState, setMetadataState] = useState<Record<string, unknown>>({});
 
   const activityQuery = useQuery<ActivityDetailResponse>({
     queryKey: ['activity', activityId],
@@ -124,6 +125,8 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
     onSuccess: (updated) => {
       queryClient.setQueryData(['activity', activityId], updated);
       void queryClient.invalidateQueries({ queryKey: ['activities'] });
+      metaForm.resetFields();
+      setMetadataState({});
       setEditing(false);
     },
   });
@@ -132,6 +135,13 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
 
   const startEditing = () => {
     if (!activity) return;
+    // Reset metaForm first to clear any stale values from a previous edit
+    // session on a different activity. initialValues only seeds once per Form
+    // instance lifetime, so an explicit resetFields() + setFieldsValue() is
+    // required each time editing starts.
+    metaForm.resetFields();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    metaForm.setFieldsValue({ metadata: (activity.metadataJson ?? {}) as any });
     form.setFieldsValue({
       name: activity.name,
       scopeNotes: activity.scopeNotes ?? undefined,
@@ -139,21 +149,17 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
         ? dayjs(activity.targetCompletionDate)
         : null,
     });
-    // Pre-populate metadata in its own form so nested ['metadata', *] paths resolve correctly.
-    metaForm.setFieldsValue({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      metadata: (activity.metadataJson ?? {}) as any,
-    });
+    // Seed state from saved values — this is the authoritative source read on save.
+    setMetadataState((activity.metadataJson ?? {}) as Record<string, unknown>);
     setEditing(true);
   };
 
   const handleSave = () => {
     form.validateFields().then((values) => {
-      // Read metadata from its dedicated form instance — same pattern as ActivityCreateWizard.
-      const metaValues = metaForm.getFieldsValue();
-      const metadataRaw = (metaValues.metadata ?? {}) as Record<string, unknown>;
+      // metadataState is kept current by onValuesChange on the metaForm below —
+      // no form.getFieldsValue() call needed; state is the reliable source of truth.
       const cleanedMetadata = Object.fromEntries(
-        Object.entries(metadataRaw).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+        Object.entries(metadataState).filter(([, v]) => v !== undefined && v !== null && v !== ''),
       );
       updateMutation.mutate({
         name: values.name,
@@ -169,6 +175,7 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
   const handleCancel = () => {
     form.resetFields();
     metaForm.resetFields();
+    setMetadataState({});
     setEditing(false);
   };
 
@@ -347,11 +354,21 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
               </Form.Item>
             </Form>
 
-            {/* Type-specific metadata — separate sibling form, never nested inside form above */}
+            {/* Type-specific metadata — separate sibling form, never nested inside form above.
+                initialValues populates fields at mount time (when editing becomes true). */}
             <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '8px 0 12px' }}>
               {typeLabel} details
             </Divider>
-            <Form form={metaForm} layout="vertical">
+            <Form
+              form={metaForm}
+              layout="vertical"
+              onValuesChange={(_changed: MetaValues, allValues: MetaValues) => {
+                // Use allValues (second arg) — complete form state, not just the delta.
+                // This is the authoritative source read by handleSave.
+                const meta = (allValues.metadata ?? {}) as Record<string, unknown>;
+                setMetadataState(meta);
+              }}
+            >
               <ActivityMetadataForm activityTypeCode={activity.activityTypeCode} />
             </Form>
           </>

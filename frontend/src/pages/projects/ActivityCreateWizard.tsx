@@ -95,6 +95,8 @@ export default function ActivityCreateWizard({
   const [step1Values, setStep1Values] = useState<Step1Values | null>(null);
   const [form1] = Form.useForm<Step1Values>();
   const [form2] = Form.useForm<Step2Values>();
+  // Authoritative metadata collected via onValuesChange — same pattern as ActivityDetailPanel.
+  const [metadataState, setMetadataState] = useState<Record<string, unknown>>({});
 
   // Track selected type via local state so the step-2 form and summary update instantly
   const [selectedType, setSelectedType] = useState<string | undefined>();
@@ -116,6 +118,7 @@ export default function ActivityCreateWizard({
     setCurrentStep(0);
     setStep1Values(null);
     setSelectedType(undefined);
+    setMetadataState({});
     form1.resetFields();
     form2.resetFields();
   };
@@ -145,10 +148,10 @@ export default function ActivityCreateWizard({
 
   const handleSubmit = async () => {
     if (!step1Values) return;
-    const step2 = form2.getFieldsValue();
 
+    // metadataState is kept current by onValuesChange on form2 below.
     const cleanedMetadata = Object.fromEntries(
-      Object.entries(step2.metadata ?? {}).filter(
+      Object.entries(metadataState).filter(
         ([, v]) => v !== undefined && v !== null && v !== '',
       ),
     );
@@ -296,7 +299,15 @@ export default function ActivityCreateWizard({
           All fields are optional and can be updated later.
         </Text>
 
-        <Form form={form2} layout="vertical">
+        <Form
+          form={form2}
+          layout="vertical"
+          onValuesChange={(_changed: Step2Values, allValues: Step2Values) => {
+            // Use allValues (second arg) — complete form state, not just the delta.
+            const meta = (allValues.metadata ?? {}) as Record<string, unknown>;
+            setMetadataState(meta);
+          }}
+        >
           {step1Values?.activityTypeCode && (
             <ActivityMetadataForm activityTypeCode={step1Values.activityTypeCode} />
           )}
