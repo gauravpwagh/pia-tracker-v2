@@ -277,10 +277,21 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
             </Descriptions>
 
             {/* Type-specific metadata (read-only) */}
-            <ActivityMetadataView
-              activityTypeCode={activity.activityTypeCode}
-              metadataJson={(activity.metadataJson ?? {}) as Record<string, unknown>}
-            />
+            <div>
+              <Divider orientation="left" orientationMargin={0}
+                style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
+                {typeLabel} details
+              </Divider>
+              <ActivityMetadataView
+                activityTypeCode={activity.activityTypeCode}
+                metadataJson={(activity.metadataJson ?? {}) as Record<string, unknown>}
+              />
+              {Object.keys(activity.metadataJson ?? {}).length === 0 && (
+                <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                  No details recorded yet. Click Edit to add them.
+                </Text>
+              )}
+            </div>
 
             {/* Placeholder for records list (Phase 1.9+) */}
             <div style={{
