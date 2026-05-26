@@ -1,15 +1,13 @@
 /**
- * ActivityMetadataForm — type-specific form fields rendered inside an
- * Ant Design <Form> context.  Each activity type gets its own section.
+ * ActivityMetadataForm — type-specific fields rendered as controlled React
+ * components.  No Ant Design Form field registration (no `name` props) —
+ * the parent supplies `values` and an `onChange(key, value)` callback so
+ * that metadata is captured in plain React state with zero form-store magic.
  *
- * Fields are registered as ['metadata', fieldKey] so the parent form
- * collects them under form.getFieldsValue().metadata.
- *
- * ActivityMetadataView — read-only Descriptions block for the same data,
- * used in the ActivityDetailPanel view mode.
+ * ActivityMetadataView — read-only Descriptions block for the same data.
  */
 
-import { Form, Input, InputNumber, Select, Descriptions } from 'antd';
+import { Descriptions, Form, Input, InputNumber, Select } from 'antd';
 
 // ── Option lists ────────────────────────────────────────────────────────────
 
@@ -104,10 +102,7 @@ const LABEL_MAP: Record<string, Record<string, string>> = {
 };
 
 /** Map enum code → human label for display. */
-function enumLabel(
-  key: string,
-  value: unknown,
-): string {
+function enumLabel(key: string, value: unknown): string {
   const v = String(value ?? '');
   if (key === 'utility_type')     return UTILITY_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
   if (key === 'executing_agency') return EXECUTING_AGENCY_OPTIONS.find((o) => o.value === v)?.label ?? v;
@@ -118,49 +113,69 @@ function enumLabel(
   return v;
 }
 
-// ── Shared sub-components ──────────────────────────────────────────────────
+// ── Controlled form component (edit mode) ─────────────────────────────────
 
-function ChainageField({ name, label }: { name: string[]; label: string }) {
-  return (
-    <Form.Item
-      name={name}
-      label={label}
-      rules={[{ pattern: /^\d+\+\d{3}$/, message: 'Use KM+M format, e.g. 132+450' }]}
-    >
-      <Input placeholder="e.g. 132+450" />
-    </Form.Item>
-  );
-}
-
-// ── Form component (edit mode) ─────────────────────────────────────────────
-
-interface ActivityMetadataFormProps {
+export interface ActivityMetadataFormProps {
   activityTypeCode: string;
+  /** Current field values — plain React state owned by the parent. */
+  values: Record<string, unknown>;
+  /** Called whenever any field changes; parent merges into its state. */
+  onChange: (key: string, value: unknown) => void;
 }
 
-export function ActivityMetadataForm({ activityTypeCode }: ActivityMetadataFormProps) {
+/**
+ * Renders type-specific inputs as controlled components.
+ *
+ * No Ant Design Form field registration is used — `name` is deliberately
+ * omitted from all Form.Item elements.  The parent drives values via `values`
+ * and receives updates via `onChange(key, value)`.
+ */
+export function ActivityMetadataForm({
+  activityTypeCode,
+  values,
+  onChange,
+}: ActivityMetadataFormProps) {
+  const str = (key: string) => (values[key] as string | undefined) ?? undefined;
+  const num = (key: string) => (values[key] as number | undefined) ?? undefined;
+
   switch (activityTypeCode) {
     // ── Land Acquisition ─────────────────────────────────────────────────
     case 'LAND_ACQUISITION':
       return (
         <>
-          <Form.Item name={['metadata', 'district']} label="District">
-            <Input placeholder="e.g. Ambala" />
+          <Form.Item label="District">
+            <Input
+              placeholder="e.g. Ambala"
+              value={str('district')}
+              onChange={(e) => onChange('district', e.target.value)}
+            />
           </Form.Item>
-          <Form.Item name={['metadata', 'sub_division_taluka']} label="Sub-Division / Taluka">
-            <Input placeholder="e.g. Ambala (Urban)" />
+          <Form.Item label="Sub-Division / Taluka">
+            <Input
+              placeholder="e.g. Ambala (Urban)"
+              value={str('sub_division_taluka')}
+              onChange={(e) => onChange('sub_division_taluka', e.target.value)}
+            />
           </Form.Item>
-          <Form.Item name={['metadata', 'area_hectares_total']} label="Total Area (ha)">
+          <Form.Item label="Total Area (ha)">
             <InputNumber
               min={0}
               step={0.0001}
               precision={4}
               style={{ width: '100%' }}
               placeholder="e.g. 12.5000"
+              value={num('area_hectares_total')}
+              onChange={(v) => onChange('area_hectares_total', v ?? undefined)}
             />
           </Form.Item>
-          <Form.Item name={['metadata', 'villages_estimated_count']} label="Est. No. of Villages">
-            <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+          <Form.Item label="Est. No. of Villages">
+            <InputNumber
+              min={1}
+              precision={0}
+              style={{ width: '100%' }}
+              value={num('villages_estimated_count')}
+              onChange={(v) => onChange('villages_estimated_count', v ?? undefined)}
+            />
           </Form.Item>
         </>
       );
@@ -169,19 +184,43 @@ export function ActivityMetadataForm({ activityTypeCode }: ActivityMetadataFormP
     case 'FOREST_CLEARANCE':
       return (
         <>
-          <Form.Item name={['metadata', 'forest_division_name']} label="Forest Division">
-            <Input placeholder="e.g. North Ambala Forest Division" />
+          <Form.Item label="Forest Division">
+            <Input
+              placeholder="e.g. North Ambala Forest Division"
+              value={str('forest_division_name')}
+              onChange={(e) => onChange('forest_division_name', e.target.value)}
+            />
           </Form.Item>
-          <Form.Item name={['metadata', 'forest_area_hectares']} label="Forest Area (ha)">
+          <Form.Item label="Forest Area (ha)">
             <InputNumber
               min={0}
               step={0.0001}
               precision={4}
               style={{ width: '100%' }}
+              value={num('forest_area_hectares')}
+              onChange={(v) => onChange('forest_area_hectares', v ?? undefined)}
             />
           </Form.Item>
-          <ChainageField name={['metadata', 'project_chainage_from']} label="Chainage From" />
-          <ChainageField name={['metadata', 'project_chainage_to']} label="Chainage To" />
+          <Form.Item
+            label="Chainage From"
+            help="Use KM+M format, e.g. 132+450"
+          >
+            <Input
+              placeholder="e.g. 132+450"
+              value={str('project_chainage_from')}
+              onChange={(e) => onChange('project_chainage_from', e.target.value)}
+            />
+          </Form.Item>
+          <Form.Item
+            label="Chainage To"
+            help="Use KM+M format, e.g. 132+450"
+          >
+            <Input
+              placeholder="e.g. 145+200"
+              value={str('project_chainage_to')}
+              onChange={(e) => onChange('project_chainage_to', e.target.value)}
+            />
+          </Form.Item>
         </>
       );
 
@@ -189,21 +228,28 @@ export function ActivityMetadataForm({ activityTypeCode }: ActivityMetadataFormP
     case 'UTILITY_SHIFTING':
       return (
         <>
-          <Form.Item
-            name={['metadata', 'utility_type']}
-            label="Utility Type"
-            rules={[{ required: true, message: 'Select utility type' }]}
-          >
-            <Select placeholder="Select utility type…" options={UTILITY_TYPE_OPTIONS} />
+          <Form.Item label="Utility Type" required>
+            <Select
+              placeholder="Select utility type…"
+              options={UTILITY_TYPE_OPTIONS}
+              value={str('utility_type')}
+              onChange={(v) => onChange('utility_type', v)}
+            />
           </Form.Item>
-          <Form.Item name={['metadata', 'owner_agency']} label="Owner Agency">
-            <Input placeholder="e.g. DHBVN, PWD (Water), BSNL" />
+          <Form.Item label="Owner Agency">
+            <Input
+              placeholder="e.g. DHBVN, PWD (Water), BSNL"
+              value={str('owner_agency')}
+              onChange={(e) => onChange('owner_agency', e.target.value)}
+            />
           </Form.Item>
-          <Form.Item name={['metadata', 'executing_agency']} label="Executing Agency">
+          <Form.Item label="Executing Agency">
             <Select
               placeholder="Select…"
               options={EXECUTING_AGENCY_OPTIONS}
               allowClear
+              value={str('executing_agency')}
+              onChange={(v) => onChange('executing_agency', v ?? undefined)}
             />
           </Form.Item>
         </>
@@ -213,20 +259,22 @@ export function ActivityMetadataForm({ activityTypeCode }: ActivityMetadataFormP
     case 'DRAWING_APPROVAL':
       return (
         <>
-          <Form.Item
-            name={['metadata', 'drawing_type']}
-            label="Drawing Type"
-            rules={[{ required: true, message: 'Select drawing type' }]}
-          >
+          <Form.Item label="Drawing Type" required>
             <Select
               placeholder="Select drawing type…"
               options={DRAWING_TYPE_OPTIONS}
               showSearch
               optionFilterProp="label"
+              value={str('drawing_type')}
+              onChange={(v) => onChange('drawing_type', v)}
             />
           </Form.Item>
-          <Form.Item name={['metadata', 'drawing_number']} label="Drawing Number">
-            <Input placeholder="e.g. CONST/NR/ABL-LDH/ESP/001" />
+          <Form.Item label="Drawing Number">
+            <Input
+              placeholder="e.g. CONST/NR/ABL-LDH/ESP/001"
+              value={str('drawing_number')}
+              onChange={(e) => onChange('drawing_number', e.target.value)}
+            />
           </Form.Item>
         </>
       );
@@ -235,10 +283,14 @@ export function ActivityMetadataForm({ activityTypeCode }: ActivityMetadataFormP
     case 'TENDER_PACKAGING':
       return (
         <>
-          <Form.Item name={['metadata', 'package_name']} label="Package Name">
-            <Input placeholder="e.g. Civil Works Package 1 — Ambala–Ludhiana" />
+          <Form.Item label="Package Name">
+            <Input
+              placeholder="e.g. Civil Works Package 1 — Ambala–Ludhiana"
+              value={str('package_name')}
+              onChange={(e) => onChange('package_name', e.target.value)}
+            />
           </Form.Item>
-          <Form.Item name={['metadata', 'estimated_value']} label="Estimated Value (₹)">
+          <Form.Item label="Estimated Value (₹)">
             <InputNumber
               min={0}
               step={100000}
@@ -252,13 +304,17 @@ export function ActivityMetadataForm({ activityTypeCode }: ActivityMetadataFormP
               parser={(v) =>
                 (v ? parseFloat(v.replace(/₹\s?|,/g, '')) : 0) as unknown as 0
               }
+              value={num('estimated_value')}
+              onChange={(v) => onChange('estimated_value', v ?? undefined)}
             />
           </Form.Item>
-          <Form.Item name={['metadata', 'tender_type']} label="Tender Type">
+          <Form.Item label="Tender Type">
             <Select
               placeholder="Select…"
               options={TENDER_TYPE_OPTIONS}
               allowClear
+              value={str('tender_type')}
+              onChange={(v) => onChange('tender_type', v ?? undefined)}
             />
           </Form.Item>
         </>
@@ -268,20 +324,40 @@ export function ActivityMetadataForm({ activityTypeCode }: ActivityMetadataFormP
     case 'TEMPORARY_OFFICE_SPACE':
       return (
         <>
+          <Form.Item label="Structure Type" required>
+            <Select
+              placeholder="Select…"
+              options={STRUCTURE_TYPE_OPTIONS}
+              value={str('structure_type')}
+              onChange={(v) => onChange('structure_type', v)}
+            />
+          </Form.Item>
+          <Form.Item label="No. of Office Spaces">
+            <InputNumber
+              min={1}
+              precision={0}
+              style={{ width: '100%' }}
+              value={num('count')}
+              onChange={(v) => onChange('count', v ?? undefined)}
+            />
+          </Form.Item>
+          <Form.Item label="Location Name">
+            <Input
+              placeholder="e.g. Near Ambala Cantt station"
+              value={str('location_name')}
+              onChange={(e) => onChange('location_name', e.target.value)}
+            />
+          </Form.Item>
           <Form.Item
-            name={['metadata', 'structure_type']}
-            label="Structure Type"
-            rules={[{ required: true, message: 'Select structure type' }]}
+            label="Location Chainage"
+            help="Use KM+M format, e.g. 132+450"
           >
-            <Select placeholder="Select…" options={STRUCTURE_TYPE_OPTIONS} />
+            <Input
+              placeholder="e.g. 132+450"
+              value={str('location_chainage')}
+              onChange={(e) => onChange('location_chainage', e.target.value)}
+            />
           </Form.Item>
-          <Form.Item name={['metadata', 'count']} label="No. of Office Spaces">
-            <InputNumber min={1} precision={0} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name={['metadata', 'location_name']} label="Location Name">
-            <Input placeholder="e.g. Near Ambala Cantt station" />
-          </Form.Item>
-          <ChainageField name={['metadata', 'location_chainage']} label="Location Chainage" />
         </>
       );
 

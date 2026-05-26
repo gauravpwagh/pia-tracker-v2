@@ -278,13 +278,15 @@ class ActivityService(
                 name = request.name,
                 scopeNotes = request.scopeNotes,
                 targetCompletionDate = request.targetCompletionDate,
-                metadataJson = request.metadataJson ?: JsonNodeFactory.instance.objectNode(),
                 primaryDyceUserId = principal.userId,
                 defaultFormDefinitionId = formDef?.id,
                 createdByUserId = principal.userId,
                 updatedByUserId = principal.userId,
             )
         activityRepository.save(activity)
+
+        // Write type-specific fields to the dedicated detail table.
+        upsertDetails(activity.id, request.activityTypeCode, request.metadataJson)
 
         auditLogWriter.write(
             actorUserId = principal.userId,
@@ -293,7 +295,7 @@ class ActivityService(
             entityId = activity.id,
         )
 
-        return activity.toDetailResponse()
+        return activity.toDetailResponse(readDetails(activity.id, request.activityTypeCode))
     }
 
     /**
@@ -317,16 +319,12 @@ class ActivityService(
         val activity = getForPrincipal(activityId, principal)
         requireDyceAssignment(activity.projectId, principal)
 
-        val metaJson = objectMapper.writeValueAsString(
-            request.metadataJson ?: JsonNodeFactory.instance.objectNode(),
-        )
         jdbc.update(
             """
             UPDATE project_activities
                SET name                   = ?,
                    scope_notes            = ?,
                    target_completion_date = ?,
-                   metadata_json          = ?::jsonb,
                    updated_by_user_id     = ?,
                    updated_at             = now(),
                    version                = version + 1
@@ -335,10 +333,12 @@ class ActivityService(
             request.name,
             request.scopeNotes,
             request.targetCompletionDate,
-            metaJson,
             principal.userId,
             activityId,
         )
+
+        // Write type-specific fields to the dedicated detail table.
+        upsertDetails(activityId, activity.activityTypeCode, request.metadataJson)
 
         entityManager.clear()
 
@@ -353,7 +353,7 @@ class ActivityService(
             entityId = activityId,
         )
 
-        return updated.toDetailResponse()
+        return updated.toDetailResponse(readDetails(activityId, activity.activityTypeCode))
     }
 
     /**
@@ -686,6 +686,175 @@ class ActivityService(
         )
     }
 
+    // ── Detail-table helpers ──────────────────────────────────────────────────
+
+    /**
+     * Reads type-specific fields for [activityId] from the dedicated detail table
+     * and returns them as a [JsonNode] object.  Returns an empty object node if
+     * no detail row exists yet or the type is unknown.
+     *
+     * Exposed publicly so [ActivityController.getActivity] can call it without
+     * duplicating the type-dispatch logic.
+     */
+    fun readMetadata(activityId: UUID, typeCode: String): JsonNode =
+        readDetails(activityId, typeCode)
+
+    /** Dispatch to the correct dedicated table for reads. */
+    private fun readDetails(activityId: UUID, typeCode: String): JsonNode {
+        val (table, cols) = when (typeCode) {
+            "LAND_ACQUISITION" ->
+                "land_acquisition_details" to
+                    listOf("district", "sub_division_taluka", "area_hectares_total", "villages_estimated_count")
+            "FOREST_CLEARANCE" ->
+                "forest_clearance_details" to
+                    listOf("forest_division_name", "forest_area_hectares", "project_chainage_from", "project_chainage_to")
+            "UTILITY_SHIFTING" ->
+                "utility_shifting_details" to
+                    listOf("utility_type", "owner_agency", "executing_agency")
+            "DRAWING_APPROVAL" ->
+                "drawing_approval_details" to
+                    listOf("drawing_type", "drawing_number")
+            "TENDER_PACKAGING" ->
+                "tender_packaging_details" to
+                    listOf("package_name", "estimated_value", "tender_type")
+            "TEMPORARY_OFFICE_SPACE" ->
+                "temporary_office_space_details" to
+                    listOf("structure_type", "count", "location_name", "location_chainage")
+            else -> return JsonNodeFactory.instance.objectNode()
+        }
+
+        val rows = jdbc.queryForList(
+            "SELECT ${cols.joinToString()} FROM $table WHERE activity_id = ?",
+            activityId,
+        )
+        if (rows.isEmpty()) return JsonNodeFactory.instance.objectNode()
+
+        val node = JsonNodeFactory.instance.objectNode()
+        val row = rows[0]
+        cols.forEach { col ->
+            when (val v = row[col]) {
+                null -> {} // omit nulls — frontend treats missing keys as empty
+                is String -> if (v.isNotBlank()) node.put(col, v)
+                is java.math.BigDecimal -> node.put(col, v)
+                is Int -> node.put(col, v)
+                is Long -> node.put(col, v)
+                else -> if (v.toString().isNotBlank()) node.put(col, v.toString())
+            }
+        }
+        return node
+    }
+
+    /** Upsert type-specific fields into the dedicated detail table. */
+    private fun upsertDetails(activityId: UUID, typeCode: String, metadata: JsonNode?) {
+        if (metadata == null) return
+
+        fun str(key: String): String? =
+            metadata.get(key)?.takeIf { !it.isNull && it.isTextual }?.asText()?.ifBlank { null }
+
+        fun dec(key: String): java.math.BigDecimal? =
+            metadata.get(key)?.takeIf { !it.isNull && it.isNumber }?.decimalValue()
+
+        fun int(key: String): Int? =
+            metadata.get(key)?.takeIf { !it.isNull && it.isNumber }?.intValue()
+
+        when (typeCode) {
+            "LAND_ACQUISITION" -> jdbc.update(
+                """
+                INSERT INTO land_acquisition_details
+                    (activity_id, district, sub_division_taluka, area_hectares_total, villages_estimated_count)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (activity_id) DO UPDATE SET
+                    district                 = EXCLUDED.district,
+                    sub_division_taluka      = EXCLUDED.sub_division_taluka,
+                    area_hectares_total      = EXCLUDED.area_hectares_total,
+                    villages_estimated_count = EXCLUDED.villages_estimated_count
+                """.trimIndent(),
+                activityId,
+                str("district"),
+                str("sub_division_taluka"),
+                dec("area_hectares_total"),
+                int("villages_estimated_count"),
+            )
+            "FOREST_CLEARANCE" -> jdbc.update(
+                """
+                INSERT INTO forest_clearance_details
+                    (activity_id, forest_division_name, forest_area_hectares, project_chainage_from, project_chainage_to)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (activity_id) DO UPDATE SET
+                    forest_division_name  = EXCLUDED.forest_division_name,
+                    forest_area_hectares  = EXCLUDED.forest_area_hectares,
+                    project_chainage_from = EXCLUDED.project_chainage_from,
+                    project_chainage_to   = EXCLUDED.project_chainage_to
+                """.trimIndent(),
+                activityId,
+                str("forest_division_name"),
+                dec("forest_area_hectares"),
+                str("project_chainage_from"),
+                str("project_chainage_to"),
+            )
+            "UTILITY_SHIFTING" -> jdbc.update(
+                """
+                INSERT INTO utility_shifting_details
+                    (activity_id, utility_type, owner_agency, executing_agency)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (activity_id) DO UPDATE SET
+                    utility_type     = EXCLUDED.utility_type,
+                    owner_agency     = EXCLUDED.owner_agency,
+                    executing_agency = EXCLUDED.executing_agency
+                """.trimIndent(),
+                activityId,
+                str("utility_type"),
+                str("owner_agency"),
+                str("executing_agency"),
+            )
+            "DRAWING_APPROVAL" -> jdbc.update(
+                """
+                INSERT INTO drawing_approval_details
+                    (activity_id, drawing_type, drawing_number)
+                VALUES (?, ?, ?)
+                ON CONFLICT (activity_id) DO UPDATE SET
+                    drawing_type   = EXCLUDED.drawing_type,
+                    drawing_number = EXCLUDED.drawing_number
+                """.trimIndent(),
+                activityId,
+                str("drawing_type"),
+                str("drawing_number"),
+            )
+            "TENDER_PACKAGING" -> jdbc.update(
+                """
+                INSERT INTO tender_packaging_details
+                    (activity_id, package_name, estimated_value, tender_type)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (activity_id) DO UPDATE SET
+                    package_name    = EXCLUDED.package_name,
+                    estimated_value = EXCLUDED.estimated_value,
+                    tender_type     = EXCLUDED.tender_type
+                """.trimIndent(),
+                activityId,
+                str("package_name"),
+                dec("estimated_value"),
+                str("tender_type"),
+            )
+            "TEMPORARY_OFFICE_SPACE" -> jdbc.update(
+                """
+                INSERT INTO temporary_office_space_details
+                    (activity_id, structure_type, count, location_name, location_chainage)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (activity_id) DO UPDATE SET
+                    structure_type    = EXCLUDED.structure_type,
+                    count             = EXCLUDED.count,
+                    location_name     = EXCLUDED.location_name,
+                    location_chainage = EXCLUDED.location_chainage
+                """.trimIndent(),
+                activityId,
+                str("structure_type"),
+                int("count"),
+                str("location_name"),
+                str("location_chainage"),
+            )
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
@@ -735,7 +904,14 @@ class ActivityService(
         }
     }
 
-    private fun ProjectActivity.toDetailResponse(): ActivityDetailResponse =
+    /**
+     * Maps [ProjectActivity] to [ActivityDetailResponse].
+     *
+     * [metaOverride] lets callers supply type-specific metadata read from the
+     * dedicated detail table.  When null, falls back to the entity's [metadataJson]
+     * JSONB column (kept for backwards compatibility with list endpoints).
+     */
+    private fun ProjectActivity.toDetailResponse(metaOverride: JsonNode? = null): ActivityDetailResponse =
         ActivityDetailResponse(
             id = id,
             projectId = projectId,
@@ -746,7 +922,7 @@ class ActivityService(
             primaryDyceUserId = primaryDyceUserId,
             status = status,
             defaultFormDefinitionId = defaultFormDefinitionId,
-            metadataJson = metadataJson,
+            metadataJson = metaOverride ?: metadataJson,
             createdByUserId = createdByUserId,
             createdAt = createdAt,
             updatedAt = updatedAt,

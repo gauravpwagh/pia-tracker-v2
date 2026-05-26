@@ -106,6 +106,9 @@ class ActivityController(
 
     /**
      * Returns a single activity by its own ID.
+     *
+     * Metadata is read from the dedicated detail table (not the legacy JSONB column)
+     * so that type-specific fields are always current.
      */
     @GetMapping("/api/v1/activities/{activityId}")
     @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY.READ.OWN')")
@@ -114,6 +117,7 @@ class ActivityController(
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): ActivityDetailResponse {
         val a = activityService.getForPrincipal(activityId, principal)
+        val metadata = activityService.readMetadata(a.id, a.activityTypeCode)
         return ActivityDetailResponse(
             id = a.id,
             projectId = a.projectId,
@@ -124,7 +128,7 @@ class ActivityController(
             primaryDyceUserId = a.primaryDyceUserId,
             status = a.status,
             defaultFormDefinitionId = a.defaultFormDefinitionId,
-            metadataJson = a.metadataJson,
+            metadataJson = metadata,
             createdByUserId = a.createdByUserId,
             createdAt = a.createdAt,
             updatedAt = a.updatedAt,
