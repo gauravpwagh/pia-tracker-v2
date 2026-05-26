@@ -10,6 +10,7 @@
  */
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import {
@@ -20,6 +21,7 @@ import {
   Divider,
   Form,
   Input,
+  List,
   Skeleton,
   Space,
   Tag,
@@ -32,7 +34,9 @@ import {
   CloseOutlined,
   ClusterOutlined,
   EditOutlined,
+  FileTextOutlined,
   HomeOutlined,
+  PlusOutlined,
   SaveOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
@@ -41,6 +45,11 @@ import {
   type ActivityDetailResponse,
   type UpdateActivityRequest,
 } from '@api/projects';
+import {
+  listRecords,
+  createRecord,
+  type ActivityRecordDetail,
+} from '@api/activityRecords';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -96,7 +105,25 @@ interface ActivityDetailPanelProps {
   onClose: () => void;
 }
 
+// ── Record state → badge colour ───────────────────────────────────────────────
+
+const RECORD_STATE_COLORS: Record<string, string> = {
+  DRAFT:                        'default',
+  SUBMITTED_FOR_VERIFICATION:   'blue',
+  VERIFIED:                     'cyan',
+  AUTHENTICATED:                'green',
+  SENT_BACK_TO_DYCE:            'orange',
+  SENT_BACK_TO_NODAL:           'orange',
+};
+
+function recordStateLabel(state: string): string {
+  return state.replace(/_/g, ' ');
+}
+
+// ── Panel ─────────────────────────────────────────────────────────────────────
+
 export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDetailPanelProps) {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [form] = Form.useForm<EditValues>();
@@ -120,6 +147,22 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
       void queryClient.invalidateQueries({ queryKey: ['activities'] });
       setMetadataState({});
       setEditing(false);
+    },
+  });
+
+  // ── Records ──────────────────────────────────────────────────────────────────
+
+  const recordsQuery = useQuery<ActivityRecordDetail[]>({
+    queryKey: ['records', activityId],
+    queryFn: () => listRecords(activityId),
+    staleTime: 30_000,
+  });
+
+  const createRecordMutation = useMutation({
+    mutationFn: () => createRecord(activityId),
+    onSuccess: (record) => {
+      void queryClient.invalidateQueries({ queryKey: ['records', activityId] });
+      navigate(`/records/${record.id}/edit`);
     },
   });
 
@@ -297,16 +340,85 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
               )}
             </div>
 
-            {/* Placeholder for records list (Phase 1.9+) */}
-            <div style={{
-              border: '1px dashed var(--ant-color-border)',
-              borderRadius: 6,
-              padding: '16px 12px',
-              textAlign: 'center',
-            }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Records for this activity will appear here once created.
-              </Text>
+            {/* ── Records ──────────────────────────────────────────────── */}
+            <div>
+              <Divider orientation="left" orientationMargin={0}
+                style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
+                Records
+              </Divider>
+
+              <Button
+                block
+                type="primary"
+                icon={<PlusOutlined />}
+                loading={createRecordMutation.isPending}
+                onClick={() => createRecordMutation.mutate()}
+                style={{ marginBottom: 10 }}
+              >
+                New Record
+              </Button>
+
+              {createRecordMutation.isError && (
+                <Alert
+                  type="error"
+                  message="Failed to create record"
+                  description={
+                    createRecordMutation.error instanceof Error
+                      ? createRecordMutation.error.message
+                      : undefined
+                  }
+                  showIcon
+                  style={{ marginBottom: 8 }}
+                />
+              )}
+
+              {recordsQuery.isLoading && <Skeleton active paragraph={{ rows: 2 }} />}
+
+              {recordsQuery.isError && (
+                <Alert type="error" message="Failed to load records" showIcon />
+              )}
+
+              {recordsQuery.data && recordsQuery.data.length === 0 && (
+                <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                  No records yet.
+                </Text>
+              )}
+
+              {recordsQuery.data && recordsQuery.data.length > 0 && (
+                <List
+                  size="small"
+                  bordered
+                  dataSource={recordsQuery.data}
+                  renderItem={(record, index) => (
+                    <List.Item
+                      key={record.id}
+                      style={{ cursor: 'pointer', padding: '6px 10px' }}
+                      onClick={() => navigate(`/records/${record.id}/edit`)}
+                      actions={[
+                        <Tag
+                          key="state"
+                          color={RECORD_STATE_COLORS[record.recordState] ?? 'default'}
+                          style={{ fontSize: 11, margin: 0 }}
+                        >
+                          {recordStateLabel(record.recordState)}
+                        </Tag>,
+                      ]}
+                    >
+                      <Space size={6}>
+                        <FileTextOutlined style={{ color: 'var(--ant-color-text-secondary)', fontSize: 12 }} />
+                        <Text style={{ fontSize: 12 }}>
+                          {record.recordSubtype
+                            ? record.recordSubtype
+                            : `Record ${index + 1}`}
+                        </Text>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {dayjs(record.updatedAt).format('D MMM YYYY')}
+                        </Text>
+                      </Space>
+                    </List.Item>
+                  )}
+                />
+              )}
             </div>
           </Space>
         )}
