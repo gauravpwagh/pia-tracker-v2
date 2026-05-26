@@ -284,6 +284,9 @@ class ActivityService(
                 updatedByUserId = principal.userId,
             )
         activityRepository.save(activity)
+        // Flush JPA writes to the DB before the JDBC detail-table INSERT so the
+        // FK constraint (activity_id → project_activities.id) is satisfied.
+        entityManager.flush()
 
         // Write type-specific fields to the dedicated detail table.
         upsertDetails(activity.id, request.activityTypeCode, request.metadataJson)
