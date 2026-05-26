@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Button,
+  DatePicker,
   Descriptions,
   Form,
   Input,
@@ -27,6 +28,7 @@ import {
   Tag,
   Typography,
 } from 'antd';
+import dayjs from 'dayjs';
 import {
   CloseOutlined,
   PlusOutlined,
@@ -262,16 +264,27 @@ function AddActivityModal({
     if (found) form.setFieldValue('name', found.label);
   };
 
+  const handleOk = () => {
+    form.validateFields().then((raw) => {
+      mutation.mutate({
+        ...raw,
+        targetCompletionDate: raw.targetCompletionDate
+          ? (raw.targetCompletionDate as unknown as dayjs.Dayjs).format('YYYY-MM-DD')
+          : undefined,
+      });
+    });
+  };
+
   return (
     <Modal
       title={<Space><PlusOutlined />Add Activity</Space>}
       open={open}
-      onOk={() => form.validateFields().then((values) => mutation.mutate(values))}
+      onOk={handleOk}
       onCancel={() => { if (!mutation.isPending) { form.resetFields(); onClose(); } }}
       okText="Add Activity"
       confirmLoading={mutation.isPending}
       destroyOnClose
-      width={480}
+      width={520}
     >
       {mutation.isError && (
         <Alert type="error" message="Failed to add activity"
@@ -291,8 +304,11 @@ function AddActivityModal({
           rules={[{ required: true, message: 'Enter a name for this activity' }]}>
           <Input placeholder="e.g. Land Acquisition — Phase 1" />
         </Form.Item>
-        <Form.Item name="scopeNotes" label="Scope notes (optional)">
-          <TextArea rows={3} placeholder="Villages, districts, chainage extents…" />
+        <Form.Item name="scopeNotes" label="Scope notes">
+          <TextArea rows={3} placeholder="Villages, districts, chainage extents, utility types…" />
+        </Form.Item>
+        <Form.Item name="targetCompletionDate" label="Target completion date">
+          <DatePicker style={{ width: '100%' }} format="D MMM YYYY" />
         </Form.Item>
       </Form>
     </Modal>

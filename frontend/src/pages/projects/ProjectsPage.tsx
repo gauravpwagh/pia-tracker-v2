@@ -23,13 +23,11 @@ import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Button,
-  Descriptions,
   Dropdown,
   Empty,
   Input,
   Segmented,
   Select,
-  Skeleton,
   Space,
   Spin,
   Table,
@@ -44,7 +42,6 @@ import {
   AppstoreOutlined,
   AuditOutlined,
   BranchesOutlined,
-  CloseOutlined,
   ClusterOutlined,
   ExportOutlined,
   FolderOutlined,
@@ -64,6 +61,7 @@ import {
 import { useAuthStore } from '@stores/authStore';
 import ProjectCreateWizard from './ProjectCreateWizard';
 import { ProjectDetailPanel } from './ProjectDetailPanel';
+import { ActivityDetailPanel } from './ActivityDetailPanel';
 
 const { Title, Text } = Typography;
 const { Search } = Input;
@@ -213,75 +211,7 @@ function ActivityNodeTitle({ activity }: { activity: ActivityDetailResponse }) {
   );
 }
 
-// ProjectDetailPanel is imported from ./ProjectDetailPanel
-
-// ── Activity Detail Panel ─────────────────────────────────────────────────────
-
-function ActivityDetailPanel({
-  activityId,
-  onClose,
-}: {
-  activityId: string;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const { data, isLoading } = useQuery({
-    queryKey: ['activity', activityId],
-    queryFn: async () => {
-      const res = await fetch(`/api/v1/activities/${activityId}`, { credentials: 'include' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json() as Promise<ActivityDetailResponse>;
-    },
-    staleTime: 60_000,
-  });
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 16px',
-        borderBottom: '1px solid var(--ant-color-border)',
-      }}>
-        <Space>
-          <BranchesOutlined />
-          <Text strong>{t('activities.detail.heading', 'Activity')}</Text>
-        </Space>
-        <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} />
-      </div>
-
-      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        {isLoading && <Skeleton active paragraph={{ rows: 4 }} />}
-        {data && (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Space style={{ justifyContent: 'space-between', width: '100%' }}>
-              <Title level={5} style={{ margin: 0 }}>{data.name || data.activityTypeCode}</Title>
-              <Tag color={ACTIVITY_STATUS_COLORS[data.status] ?? 'default'}>
-                {data.status.replace(/_/g, ' ')}
-              </Tag>
-            </Space>
-            <Descriptions size="small" column={1} bordered>
-              <Descriptions.Item label={t('activities.detail.type', 'Type')}>
-                {data.activityTypeCode}
-              </Descriptions.Item>
-              {data.scopeNotes && (
-                <Descriptions.Item label={t('activities.detail.scope', 'Scope notes')}>
-                  {data.scopeNotes}
-                </Descriptions.Item>
-              )}
-              {data.targetCompletionDate && (
-                <Descriptions.Item label={t('activities.detail.targetDate', 'Target date')}>
-                  {data.targetCompletionDate}
-                </Descriptions.Item>
-              )}
-            </Descriptions>
-          </Space>
-        )}
-      </div>
-    </div>
-  );
-}
+// ProjectDetailPanel and ActivityDetailPanel are imported from their own files.
 
 // ── Table view ────────────────────────────────────────────────────────────────
 
@@ -524,6 +454,7 @@ export default function ProjectsPage() {
     ) : isActivityKey(selectedKey) ? (
       <ActivityDetailPanel
         activityId={activityIdFromKey(selectedKey)}
+        canEdit={currentUser?.permissions.includes('ACTIVITY.UPDATE.OWN') ?? false}
         onClose={handleClosePane}
       />
     ) : null

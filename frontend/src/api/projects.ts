@@ -174,6 +174,25 @@ export interface CreateActivityRequest {
   targetCompletionDate?: string; // ISO date "YYYY-MM-DD"
 }
 
+export interface UpdateActivityRequest {
+  name: string;
+  scopeNotes?: string;
+  targetCompletionDate?: string; // ISO date "YYYY-MM-DD"
+}
+
+export async function updateActivity(
+  activityId: string,
+  request: UpdateActivityRequest,
+): Promise<ActivityDetailResponse> {
+  const res = await fetch(`${BASE}/activities/${activityId}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  return handleResponse<ActivityDetailResponse>(res);
+}
+
 export async function createActivity(
   projectId: string,
   request: CreateActivityRequest,

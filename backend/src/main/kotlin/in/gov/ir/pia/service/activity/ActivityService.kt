@@ -35,6 +35,12 @@ data class CreateActivityRequest(
     val targetCompletionDate: LocalDate? = null,
 )
 
+data class UpdateActivityRequest(
+    val name: String,
+    val scopeNotes: String? = null,
+    val targetCompletionDate: LocalDate? = null,
+)
+
 data class CreateActivityRecordRequest(
     val recordSubtype: String? = null,
 )
@@ -281,6 +287,61 @@ class ActivityService(
         )
 
         return activity.toDetailResponse()
+    }
+
+    /**
+     * Updates mutable metadata on an existing [ProjectActivity].
+     *
+     * Updatable fields: [name], [scopeNotes], [targetCompletionDate].
+     * Immutable: [activityTypeCode], [projectId], [status], [primaryDyceUserId].
+     *
+     * Uses [JdbcTemplate] because the entity has all-`val` fields; Hibernate
+     * cannot update it in place.  The version increment is done atomically in SQL.
+     *
+     * Access control: caller must be able to read the parent project (zone filter)
+     * and be an active DY_CE_C or NODAL_DY_CE_C on that project.
+     */
+    @Transactional
+    fun update(
+        activityId: UUID,
+        request: UpdateActivityRequest,
+        principal: PiaPrincipal,
+    ): ActivityDetailResponse {
+        val activity = getForPrincipal(activityId, principal)
+        requireDyceAssignment(activity.projectId, principal)
+
+        jdbc.update(
+            """
+            UPDATE project_activities
+               SET name                   = ?,
+                   scope_notes            = ?,
+                   target_completion_date = ?,
+                   updated_by_user_id     = ?,
+                   updated_at             = now(),
+                   version                = version + 1
+             WHERE id = ? AND is_deleted = false
+            """.trimIndent(),
+            request.name,
+            request.scopeNotes,
+            request.targetCompletionDate,
+            principal.userId,
+            activityId,
+        )
+
+        entityManager.clear()
+
+        val updated =
+            activityRepository.findByIdAndIsDeletedFalse(activityId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+        auditLogWriter.write(
+            actorUserId = principal.userId,
+            action = "ACTIVITY.UPDATE",
+            entityType = "ACTIVITY",
+            entityId = activityId,
+        )
+
+        return updated.toDetailResponse()
     }
 
     /**

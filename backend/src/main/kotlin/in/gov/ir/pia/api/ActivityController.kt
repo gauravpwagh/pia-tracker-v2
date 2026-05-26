@@ -6,6 +6,7 @@ import `in`.gov.ir.pia.service.activity.ActivityRecordDetailResponse
 import `in`.gov.ir.pia.service.activity.ActivityService
 import `in`.gov.ir.pia.service.activity.CreateActivityRecordRequest
 import `in`.gov.ir.pia.service.activity.CreateActivityRequest
+import `in`.gov.ir.pia.service.activity.UpdateActivityRequest
 import `in`.gov.ir.pia.service.activity.PatchActivityRecordRequest
 import `in`.gov.ir.pia.service.activity.RecordHistoryEntry
 import `in`.gov.ir.pia.service.activity.RecordWorkflowStateResponse
@@ -17,6 +18,7 @@ import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -127,6 +129,20 @@ class ActivityController(
             version = a.version,
         )
     }
+
+    /**
+     * Updates mutable metadata on an activity (name, scope notes, target date).
+     *
+     * Caller must hold an active DY_CE_C or NODAL_DY_CE_C assignment on the
+     * parent project; [ActivityService.update] enforces this.
+     */
+    @PutMapping("/api/v1/activities/{activityId}")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY.UPDATE.OWN')")
+    fun updateActivity(
+        @PathVariable activityId: UUID,
+        @RequestBody request: UpdateActivityRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): ActivityDetailResponse = activityService.update(activityId, request, principal)
 
     // ── Activity Records ──────────────────────────────────────────────────────
 
