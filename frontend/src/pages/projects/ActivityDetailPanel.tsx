@@ -343,8 +343,8 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
               )}
             </div>
 
-            {/* ── Records ──────────────────────────────────────────────── */}
-            <div>
+            {/* ── Records (hidden for Utility Shifting — data lives on the activity itself) */}
+            {activity.activityTypeCode !== 'UTILITY_SHIFTING' && <div>
               <Divider orientation="left" orientationMargin={0}
                 style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
                 Records
@@ -422,7 +422,7 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
                   )}
                 />
               )}
-            </div>
+            </div>}
           </Space>
         )}
 

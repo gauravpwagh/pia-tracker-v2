@@ -717,7 +717,27 @@ class ActivityService(
                     listOf("forest_division_name", "forest_area_hectares", "project_chainage_from", "project_chainage_to")
             "UTILITY_SHIFTING" ->
                 "utility_shifting_details" to
-                    listOf("utility_type", "owner_agency", "executing_agency")
+                    listOf(
+                        "utility_type", "owner_agency", "executing_agency",
+                        "chainage_from", "chainage_to",
+                        "estimated_cost", "sanctioned_cost",
+                        "work_start_date", "expected_completion_date", "actual_completion_date",
+                        "current_status", "remarks",
+                        // LT/HT/EHV
+                        "voltage_level", "length_km", "no_of_poles",
+                        // Pipeline
+                        "diameter_mm", "pipeline_length_m", "fluid_type",
+                        // S&T
+                        "cable_type", "cable_length_km", "no_of_circuits",
+                        // Quarter/Station
+                        "no_of_units", "area_sqm",
+                        // TSS/SS/OHE
+                        "capacity_mva", "no_of_bays",
+                        // Other
+                        "utility_description",
+                        // Agency-conditional
+                        "contractor_name", "work_order_no", "work_order_date",
+                    )
             "DRAWING_APPROVAL" ->
                 "drawing_approval_details" to
                     listOf("drawing_type", "drawing_number")
@@ -809,18 +829,77 @@ class ActivityService(
             )
             "UTILITY_SHIFTING" -> jdbc.update(
                 """
-                INSERT INTO utility_shifting_details
-                    (activity_id, utility_type, owner_agency, executing_agency)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO utility_shifting_details (
+                    activity_id, utility_type, owner_agency, executing_agency,
+                    chainage_from, chainage_to,
+                    estimated_cost, sanctioned_cost,
+                    work_start_date, expected_completion_date, actual_completion_date,
+                    current_status, remarks,
+                    voltage_level, length_km, no_of_poles,
+                    diameter_mm, pipeline_length_m, fluid_type,
+                    cable_type, cable_length_km, no_of_circuits,
+                    no_of_units, area_sqm,
+                    capacity_mva, no_of_bays,
+                    utility_description,
+                    contractor_name, work_order_no, work_order_date
+                ) VALUES (
+                    ?, ?, ?, ?,
+                    ?, ?,
+                    ?, ?,
+                    ?, ?, ?,
+                    ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?,
+                    ?, ?,
+                    ?,
+                    ?, ?, ?
+                )
                 ON CONFLICT (activity_id) DO UPDATE SET
-                    utility_type     = EXCLUDED.utility_type,
-                    owner_agency     = EXCLUDED.owner_agency,
-                    executing_agency = EXCLUDED.executing_agency
+                    utility_type              = EXCLUDED.utility_type,
+                    owner_agency              = EXCLUDED.owner_agency,
+                    executing_agency          = EXCLUDED.executing_agency,
+                    chainage_from             = EXCLUDED.chainage_from,
+                    chainage_to               = EXCLUDED.chainage_to,
+                    estimated_cost            = EXCLUDED.estimated_cost,
+                    sanctioned_cost           = EXCLUDED.sanctioned_cost,
+                    work_start_date           = EXCLUDED.work_start_date,
+                    expected_completion_date  = EXCLUDED.expected_completion_date,
+                    actual_completion_date    = EXCLUDED.actual_completion_date,
+                    current_status            = EXCLUDED.current_status,
+                    remarks                   = EXCLUDED.remarks,
+                    voltage_level             = EXCLUDED.voltage_level,
+                    length_km                 = EXCLUDED.length_km,
+                    no_of_poles               = EXCLUDED.no_of_poles,
+                    diameter_mm               = EXCLUDED.diameter_mm,
+                    pipeline_length_m         = EXCLUDED.pipeline_length_m,
+                    fluid_type                = EXCLUDED.fluid_type,
+                    cable_type                = EXCLUDED.cable_type,
+                    cable_length_km           = EXCLUDED.cable_length_km,
+                    no_of_circuits            = EXCLUDED.no_of_circuits,
+                    no_of_units               = EXCLUDED.no_of_units,
+                    area_sqm                  = EXCLUDED.area_sqm,
+                    capacity_mva              = EXCLUDED.capacity_mva,
+                    no_of_bays                = EXCLUDED.no_of_bays,
+                    utility_description       = EXCLUDED.utility_description,
+                    contractor_name           = EXCLUDED.contractor_name,
+                    work_order_no             = EXCLUDED.work_order_no,
+                    work_order_date           = EXCLUDED.work_order_date
                 """.trimIndent(),
                 activityId,
-                str("utility_type"),
-                str("owner_agency"),
-                str("executing_agency"),
+                str("utility_type"), str("owner_agency"), str("executing_agency"),
+                str("chainage_from"), str("chainage_to"),
+                dec("estimated_cost"), dec("sanctioned_cost"),
+                str("work_start_date"), str("expected_completion_date"), str("actual_completion_date"),
+                str("current_status"), str("remarks"),
+                str("voltage_level"), dec("length_km"), int("no_of_poles"),
+                int("diameter_mm"), dec("pipeline_length_m"), str("fluid_type"),
+                str("cable_type"), dec("cable_length_km"), int("no_of_circuits"),
+                int("no_of_units"), dec("area_sqm"),
+                dec("capacity_mva"), int("no_of_bays"),
+                str("utility_description"),
+                str("contractor_name"), str("work_order_no"), str("work_order_date"),
             )
             "DRAWING_APPROVAL" -> jdbc.update(
                 """
