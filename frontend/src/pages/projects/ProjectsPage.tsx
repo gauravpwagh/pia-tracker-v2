@@ -370,12 +370,15 @@ export default function ProjectsPage() {
   });
 
   const treeData: DataNode[] = filteredProjects.map((project) => {
-    const activities = activityMap[project.id] ?? [];
-    const isExpanded = expandedKeys.includes(projectNodeKey(project.id));
+    // undefined  → not yet loaded  (show expand arrow, trigger load on click)
+    // []         → loaded, no activities (leaf)
+    // [...]      → loaded with activities (show groups)
+    const activities = activityMap[project.id];
+    const loaded = activities !== undefined;
 
-    // Group activities by type code
+    // Group loaded activities by type code
     const byType: Record<string, ActivityDetailResponse[]> = {};
-    for (const act of activities) {
+    for (const act of activities ?? []) {
       if (!byType[act.activityTypeCode]) byType[act.activityTypeCode] = [];
       byType[act.activityTypeCode].push(act);
     }
@@ -402,30 +405,34 @@ export default function ProjectsPage() {
           zoneShortName={zoneShortMap[project.zoneId] ?? ''}
         />
       ),
-      isLeaf: isExpanded && activities.length === 0,
-      children: isExpanded ? groupChildren : undefined,
+      // leaf only when we know there are zero activities
+      isLeaf: loaded && (activities ?? []).length === 0,
+      // provide children only when loaded; undefined keeps the expand arrow visible
+      children: loaded && groupChildren.length > 0 ? groupChildren : undefined,
     };
   });
 
   // ── Tree handlers ─────────────────────────────────────────────────────────────
 
-  const loadActivityData = async (node: DataNode): Promise<void> => {
-    const key = String(node.key);
-    if (!isProjectKey(key)) return;
-    const projectId = projectIdFromKey(key);
-    if (activityMap[projectId]) return; // already loaded
-    try {
-      const activities = await fetchActivities(projectId);
-      setActivityMap((prev) => ({ ...prev, [projectId]: activities }));
-      // Auto-expand all type groups so activities are immediately visible
-      const typeCodes = [...new Set(activities.map((a) => a.activityTypeCode))];
-      const groupKeys = typeCodes.map((tc) => actGroupNodeKey(projectId, tc));
-      if (groupKeys.length > 0) {
-        setExpandedKeys((prev) => [...new Set([...prev, ...groupKeys])]);
-      }
-    } catch {
-      setActivityMap((prev) => ({ ...prev, [projectId]: [] }));
-    }
+  // Lazy-load activities when a project node is expanded for the first time.
+  // We do this manually in onExpand (not via Tree's loadData prop) so we retain
+  // full control of treeData and avoid AntD's internal loaded-state cache, which
+  // was preventing the group nodes from appearing.
+  const loadProjectActivities = (projectId: string) => {
+    if (activityMap[projectId] !== undefined) return; // already loaded
+    fetchActivities(projectId)
+      .then((activities) => {
+        setActivityMap((prev) => ({ ...prev, [projectId]: activities }));
+        // Auto-expand all type groups so activities are immediately visible
+        const typeCodes = [...new Set(activities.map((a) => a.activityTypeCode))];
+        const groupKeys = typeCodes.map((tc) => actGroupNodeKey(projectId, tc));
+        if (groupKeys.length > 0) {
+          setExpandedKeys((prev) => [...new Set([...prev, ...groupKeys])]);
+        }
+      })
+      .catch(() => {
+        setActivityMap((prev) => ({ ...prev, [projectId]: [] }));
+      });
   };
 
   const handleTreeSelect = (keys: React.Key[]) => {
@@ -463,7 +470,14 @@ export default function ProjectsPage() {
   };
 
   const handleTreeExpand = (keys: React.Key[]) => {
-    setExpandedKeys(keys.map(String));
+    const next = keys.map(String);
+    setExpandedKeys(next);
+    // If a project node was just expanded and its activities aren't loaded yet, fetch them
+    for (const key of next) {
+      if (isProjectKey(key) && activityMap[projectIdFromKey(key)] === undefined) {
+        loadProjectActivities(projectIdFromKey(key));
+      }
+    }
   };
 
   const handleClosePane = () => {
@@ -632,7 +646,6 @@ export default function ProjectsPage() {
                 <Tree
                   showIcon
                   blockNode
-                  loadData={loadActivityData}
                   treeData={treeData}
                   selectedKeys={selectedKey ? [selectedKey] : []}
                   expandedKeys={expandedKeys}
