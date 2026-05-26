@@ -71,6 +71,9 @@ const LABEL_MAP: Record<string, Record<string, string>> = {
     district:                'District',
     sub_division_taluka:     'Sub-Division / Taluka',
     area_hectares_total:     'Total Area (ha)',
+    area_hectares_private:   'Private Land (ha)',
+    area_hectares_govt:      'Govt. Land (ha)',
+    area_hectares_forest:    'Forest Land (ha)',
     villages_estimated_count:'Est. Villages',
   },
   FOREST_CLEARANCE: {
@@ -166,6 +169,39 @@ export function ActivityMetadataForm({
               placeholder="e.g. 12.5000"
               value={num('area_hectares_total')}
               onChange={(v) => onChange('area_hectares_total', v ?? undefined)}
+            />
+          </Form.Item>
+          <Form.Item label="Private Land (ha)">
+            <InputNumber
+              min={0}
+              step={0.0001}
+              precision={4}
+              style={{ width: '100%' }}
+              placeholder="e.g. 8.2500"
+              value={num('area_hectares_private')}
+              onChange={(v) => onChange('area_hectares_private', v ?? undefined)}
+            />
+          </Form.Item>
+          <Form.Item label="Govt. Land (ha)">
+            <InputNumber
+              min={0}
+              step={0.0001}
+              precision={4}
+              style={{ width: '100%' }}
+              placeholder="e.g. 3.5000"
+              value={num('area_hectares_govt')}
+              onChange={(v) => onChange('area_hectares_govt', v ?? undefined)}
+            />
+          </Form.Item>
+          <Form.Item label="Forest Land (ha)">
+            <InputNumber
+              min={0}
+              step={0.0001}
+              precision={4}
+              style={{ width: '100%' }}
+              placeholder="e.g. 0.7500"
+              value={num('area_hectares_forest')}
+              onChange={(v) => onChange('area_hectares_forest', v ?? undefined)}
             />
           </Form.Item>
           <Form.Item label="Est. No. of Villages">

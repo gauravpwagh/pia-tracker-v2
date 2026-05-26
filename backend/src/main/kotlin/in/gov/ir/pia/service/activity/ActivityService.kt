@@ -707,7 +707,11 @@ class ActivityService(
         val (table, cols) = when (typeCode) {
             "LAND_ACQUISITION" ->
                 "land_acquisition_details" to
-                    listOf("district", "sub_division_taluka", "area_hectares_total", "villages_estimated_count")
+                    listOf(
+                        "district", "sub_division_taluka",
+                        "area_hectares_total", "area_hectares_private", "area_hectares_govt", "area_hectares_forest",
+                        "villages_estimated_count",
+                    )
             "FOREST_CLEARANCE" ->
                 "forest_clearance_details" to
                     listOf("forest_division_name", "forest_area_hectares", "project_chainage_from", "project_chainage_to")
@@ -764,18 +768,26 @@ class ActivityService(
             "LAND_ACQUISITION" -> jdbc.update(
                 """
                 INSERT INTO land_acquisition_details
-                    (activity_id, district, sub_division_taluka, area_hectares_total, villages_estimated_count)
-                VALUES (?, ?, ?, ?, ?)
+                    (activity_id, district, sub_division_taluka,
+                     area_hectares_total, area_hectares_private, area_hectares_govt, area_hectares_forest,
+                     villages_estimated_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (activity_id) DO UPDATE SET
                     district                 = EXCLUDED.district,
                     sub_division_taluka      = EXCLUDED.sub_division_taluka,
                     area_hectares_total      = EXCLUDED.area_hectares_total,
+                    area_hectares_private    = EXCLUDED.area_hectares_private,
+                    area_hectares_govt       = EXCLUDED.area_hectares_govt,
+                    area_hectares_forest     = EXCLUDED.area_hectares_forest,
                     villages_estimated_count = EXCLUDED.villages_estimated_count
                 """.trimIndent(),
                 activityId,
                 str("district"),
                 str("sub_division_taluka"),
                 dec("area_hectares_total"),
+                dec("area_hectares_private"),
+                dec("area_hectares_govt"),
+                dec("area_hectares_forest"),
                 int("villages_estimated_count"),
             )
             "FOREST_CLEARANCE" -> jdbc.update(
