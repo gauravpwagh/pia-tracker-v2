@@ -167,6 +167,26 @@ export async function fetchActivities(projectId: string): Promise<ActivityDetail
   return handleResponse<ActivityDetailResponse[]>(res);
 }
 
+export interface CreateActivityRequest {
+  activityTypeCode: string;
+  name: string;
+  scopeNotes?: string;
+  targetCompletionDate?: string; // ISO date "YYYY-MM-DD"
+}
+
+export async function createActivity(
+  projectId: string,
+  request: CreateActivityRequest,
+): Promise<ActivityDetailResponse> {
+  const res = await fetch(`${BASE}/projects/${projectId}/activities`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  return handleResponse<ActivityDetailResponse>(res);
+}
+
 // ── Project lifecycle actions ─────────────────────────────────────────────────
 
 export async function allocateProject(

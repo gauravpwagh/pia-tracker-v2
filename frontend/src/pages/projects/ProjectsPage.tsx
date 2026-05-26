@@ -510,6 +510,16 @@ export default function ProjectsPage() {
         projectId={projectIdFromKey(selectedKey)}
         currentUser={currentUser!}
         onClose={handleClosePane}
+        onActivityCreated={() => {
+          // Clear the cached activity list for this project so the tree
+          // re-fetches when the user expands it again.
+          const projectId = projectIdFromKey(selectedKey);
+          setActivityMap((prev) => {
+            const next = { ...prev };
+            delete next[projectId];
+            return next;
+          });
+        }}
       />
     ) : isActivityKey(selectedKey) ? (
       <ActivityDetailPanel
