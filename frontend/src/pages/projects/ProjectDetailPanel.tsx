@@ -271,19 +271,30 @@ function AddActivityModal({
   projectId, open, onClose, onSuccess,
 }: { projectId: string; open: boolean; onClose: () => void; onSuccess: () => void }) {
   const [form] = Form.useForm<AddActivityFormValues>();
-  const selectedType = Form.useWatch('activityTypeCode', form) as string | undefined;
+  // Track selected type in local state — Form.useWatch is unreliable inside
+  // destroyOnClose modals (can return undefined even after a selection is made).
+  const [selectedType, setSelectedType] = useState<string | undefined>();
 
   const mutation = useMutation({
     mutationFn: (values: CreateActivityRequest) => createActivity(projectId, values),
-    onSuccess: () => { form.resetFields(); onSuccess(); onClose(); },
+    onSuccess: () => { form.resetFields(); setSelectedType(undefined); onSuccess(); onClose(); },
   });
 
   // When activity type changes, auto-fill name with the type label (user can edit)
   // Also reset metadata fields so stale values from a previous type are discarded.
   const handleTypeChange = (code: string) => {
+    setSelectedType(code);
     const found = ACTIVITY_TYPES.find((t) => t.code === code);
     if (found) form.setFieldValue('name', found.label);
     form.setFieldValue('metadata', undefined);
+  };
+
+  // Reset local state when modal closes
+  const handleCancel = () => {
+    if (mutation.isPending) return;
+    form.resetFields();
+    setSelectedType(undefined);
+    onClose();
   };
 
   const handleOk = () => {
@@ -313,7 +324,7 @@ function AddActivityModal({
       title={<Space><PlusOutlined />Add Activity</Space>}
       open={open}
       onOk={handleOk}
-      onCancel={() => { if (!mutation.isPending) { form.resetFields(); onClose(); } }}
+      onCancel={handleCancel}
       okText="Add Activity"
       confirmLoading={mutation.isPending}
       destroyOnClose
