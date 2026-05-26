@@ -505,8 +505,11 @@ export default function RecordEditPage() {
       : (formDef.schemaJson as RJSFSchema)
     : undefined;
 
-  const sectionUiSchema: UiSchema | undefined =
-    formDef?.uiSchemaJson as UiSchema | undefined;
+  const sectionUiSchema: UiSchema | undefined = formDef
+    ? activeSectionResolved
+      ? ((formDef.uiSchemaJson as UiSchema)?.[activeSectionResolved] as UiSchema | undefined)
+      : (formDef.uiSchemaJson as UiSchema | undefined)
+    : undefined;
 
   // ── Loading / error states ─────────────────────────────────────────────────
 
