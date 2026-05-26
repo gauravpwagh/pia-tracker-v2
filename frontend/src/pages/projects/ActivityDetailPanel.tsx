@@ -17,6 +17,7 @@ import {
   Button,
   DatePicker,
   Descriptions,
+  Divider,
   Form,
   Input,
   Skeleton,
@@ -24,6 +25,7 @@ import {
   Tag,
   Typography,
 } from 'antd';
+import { ActivityMetadataForm, ActivityMetadataView } from './ActivityMetadataForm';
 import {
   AuditOutlined,
   BranchesOutlined,
@@ -84,6 +86,7 @@ interface EditValues {
   name: string;
   scopeNotes?: string;
   targetCompletionDate?: dayjs.Dayjs | null;
+  metadata?: Record<string, unknown>;
 }
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
@@ -128,18 +131,25 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
       targetCompletionDate: activity.targetCompletionDate
         ? dayjs(activity.targetCompletionDate)
         : null,
+      // Pre-populate type-specific metadata; cast is safe — backend always returns an object
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      metadata: (activity.metadataJson ?? {}) as any,
     });
     setEditing(true);
   };
 
   const handleSave = () => {
     form.validateFields().then((values) => {
+      const cleanedMetadata = Object.fromEntries(
+        Object.entries(values.metadata ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+      );
       updateMutation.mutate({
         name: values.name,
         scopeNotes: values.scopeNotes || undefined,
         targetCompletionDate: values.targetCompletionDate
           ? values.targetCompletionDate.format('YYYY-MM-DD')
           : undefined,
+        metadataJson: Object.keys(cleanedMetadata).length > 0 ? cleanedMetadata : {},
       });
     });
   };
@@ -266,6 +276,12 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
               </Descriptions.Item>
             </Descriptions>
 
+            {/* Type-specific metadata (read-only) */}
+            <ActivityMetadataView
+              activityTypeCode={activity.activityTypeCode}
+              metadataJson={(activity.metadataJson ?? {}) as Record<string, unknown>}
+            />
+
             {/* Placeholder for records list (Phase 1.9+) */}
             <div style={{
               border: '1px dashed var(--ant-color-border)',
@@ -303,6 +319,12 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
             <Form.Item name="targetCompletionDate" label="Target completion date">
               <DatePicker style={{ width: '100%' }} format="D MMM YYYY" />
             </Form.Item>
+
+            {/* Type-specific metadata fields */}
+            <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '8px 0 12px' }}>
+              {typeLabel} details
+            </Divider>
+            <ActivityMetadataForm activityTypeCode={activity.activityTypeCode} />
           </Form>
         )}
       </div>

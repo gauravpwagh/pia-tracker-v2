@@ -19,6 +19,7 @@ import {
   Button,
   DatePicker,
   Descriptions,
+  Divider,
   Form,
   Input,
   Modal,
@@ -28,6 +29,7 @@ import {
   Tag,
   Typography,
 } from 'antd';
+import { ActivityMetadataForm } from './ActivityMetadataForm';
 import dayjs from 'dayjs';
 import {
   CloseOutlined,
@@ -257,10 +259,18 @@ function DesignateNodalModal({
 
 // ── Add Activity modal ────────────────────────────────────────────────────────
 
+interface AddActivityFormValues {
+  activityTypeCode: string;
+  name: string;
+  scopeNotes?: string;
+  targetCompletionDate?: dayjs.Dayjs | null;
+  metadata?: Record<string, unknown>;
+}
+
 function AddActivityModal({
   projectId, open, onClose, onSuccess,
 }: { projectId: string; open: boolean; onClose: () => void; onSuccess: () => void }) {
-  const [form] = Form.useForm<CreateActivityRequest>();
+  const [form] = Form.useForm<AddActivityFormValues>();
   const selectedType = Form.useWatch('activityTypeCode', form) as string | undefined;
 
   const mutation = useMutation({
@@ -269,18 +279,27 @@ function AddActivityModal({
   });
 
   // When activity type changes, auto-fill name with the type label (user can edit)
+  // Also reset metadata fields so stale values from a previous type are discarded.
   const handleTypeChange = (code: string) => {
     const found = ACTIVITY_TYPES.find((t) => t.code === code);
     if (found) form.setFieldValue('name', found.label);
+    form.setFieldValue('metadata', undefined);
   };
 
   const handleOk = () => {
     form.validateFields().then((raw) => {
+      // Strip null / empty values from metadata before sending
+      const cleanedMetadata = Object.fromEntries(
+        Object.entries(raw.metadata ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+      );
       mutation.mutate({
-        ...raw,
+        activityTypeCode: raw.activityTypeCode,
+        name: raw.name,
+        scopeNotes: raw.scopeNotes || undefined,
         targetCompletionDate: raw.targetCompletionDate
           ? (raw.targetCompletionDate as unknown as dayjs.Dayjs).format('YYYY-MM-DD')
           : undefined,
+        metadataJson: Object.keys(cleanedMetadata).length > 0 ? cleanedMetadata : undefined,
       });
     });
   };
@@ -298,7 +317,7 @@ function AddActivityModal({
       okText="Add Activity"
       confirmLoading={mutation.isPending}
       destroyOnClose
-      width={520}
+      width={560}
     >
       {mutation.isError && (
         <Alert type="error" message="Failed to add activity"
@@ -319,11 +338,21 @@ function AddActivityModal({
           <Input placeholder="e.g. Land Acquisition — Phase 1" />
         </Form.Item>
         <Form.Item name="scopeNotes" label="Scope notes">
-          <TextArea rows={4} placeholder={scopePlaceholder} />
+          <TextArea rows={3} placeholder={scopePlaceholder} />
         </Form.Item>
         <Form.Item name="targetCompletionDate" label="Target completion date">
           <DatePicker style={{ width: '100%' }} format="D MMM YYYY" />
         </Form.Item>
+
+        {/* Type-specific metadata fields — shown when a type with known fields is selected */}
+        {selectedType && (
+          <>
+            <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '8px 0 12px' }}>
+              {ACTIVITY_TYPES.find((t) => t.code === selectedType)?.label ?? selectedType} details
+            </Divider>
+            <ActivityMetadataForm activityTypeCode={selectedType} />
+          </>
+        )}
       </Form>
     </Modal>
   );

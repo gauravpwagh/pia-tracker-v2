@@ -1,10 +1,14 @@
 package `in`.gov.ir.pia.domain.activity
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.Version
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -46,6 +50,13 @@ class ProjectActivity(
     /** NOT_STARTED / IN_PROGRESS / COMPLETED / ON_HOLD / CANCELLED */
     @Column(name = "status", nullable = false, length = 32)
     val status: String = "NOT_STARTED",
+    /**
+     * Structured type-specific metadata (district, area, utility type, drawing type, etc.).
+     * Stored as JSONB; column created by V006. Always non-null — defaults to empty object.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "metadata_json", nullable = false, columnDefinition = "jsonb")
+    val metadataJson: JsonNode = JsonNodeFactory.instance.objectNode(),
     /** FK to the active form definition for this activity type. Null until Phase 1.10. */
     @Column(name = "default_form_definition_id")
     val defaultFormDefinitionId: UUID? = null,

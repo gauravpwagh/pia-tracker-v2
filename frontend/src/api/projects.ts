@@ -90,6 +90,8 @@ export interface ActivityDetailResponse {
   primaryDyceUserId: string | null;
   status: string;
   defaultFormDefinitionId: string | null;
+  /** Type-specific metadata (district, utility type, drawing type, etc.). Always an object. */
+  metadataJson: Record<string, unknown>;
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -172,12 +174,14 @@ export interface CreateActivityRequest {
   name: string;
   scopeNotes?: string;
   targetCompletionDate?: string; // ISO date "YYYY-MM-DD"
+  metadataJson?: Record<string, unknown>;
 }
 
 export interface UpdateActivityRequest {
   name: string;
   scopeNotes?: string;
   targetCompletionDate?: string; // ISO date "YYYY-MM-DD"
+  metadataJson?: Record<string, unknown>;
 }
 
 export async function updateActivity(

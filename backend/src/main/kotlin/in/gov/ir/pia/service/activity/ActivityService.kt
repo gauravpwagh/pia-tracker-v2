@@ -33,12 +33,16 @@ data class CreateActivityRequest(
     val name: String,
     val scopeNotes: String? = null,
     val targetCompletionDate: LocalDate? = null,
+    /** Type-specific metadata (district, utility type, drawing type, etc.). */
+    val metadataJson: JsonNode? = null,
 )
 
 data class UpdateActivityRequest(
     val name: String,
     val scopeNotes: String? = null,
     val targetCompletionDate: LocalDate? = null,
+    /** Type-specific metadata (district, utility type, drawing type, etc.). */
+    val metadataJson: JsonNode? = null,
 )
 
 data class CreateActivityRecordRequest(
@@ -111,6 +115,8 @@ data class ActivityDetailResponse(
     val primaryDyceUserId: UUID,
     val status: String,
     val defaultFormDefinitionId: UUID?,
+    /** Type-specific metadata; always a JSON object (never null — defaults to {}). */
+    val metadataJson: JsonNode,
     val createdByUserId: UUID,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -272,6 +278,7 @@ class ActivityService(
                 name = request.name,
                 scopeNotes = request.scopeNotes,
                 targetCompletionDate = request.targetCompletionDate,
+                metadataJson = request.metadataJson ?: JsonNodeFactory.instance.objectNode(),
                 primaryDyceUserId = principal.userId,
                 defaultFormDefinitionId = formDef?.id,
                 createdByUserId = principal.userId,
@@ -310,12 +317,16 @@ class ActivityService(
         val activity = getForPrincipal(activityId, principal)
         requireDyceAssignment(activity.projectId, principal)
 
+        val metaJson = objectMapper.writeValueAsString(
+            request.metadataJson ?: JsonNodeFactory.instance.objectNode(),
+        )
         jdbc.update(
             """
             UPDATE project_activities
                SET name                   = ?,
                    scope_notes            = ?,
                    target_completion_date = ?,
+                   metadata_json          = ?::jsonb,
                    updated_by_user_id     = ?,
                    updated_at             = now(),
                    version                = version + 1
@@ -324,6 +335,7 @@ class ActivityService(
             request.name,
             request.scopeNotes,
             request.targetCompletionDate,
+            metaJson,
             principal.userId,
             activityId,
         )
@@ -734,6 +746,7 @@ class ActivityService(
             primaryDyceUserId = primaryDyceUserId,
             status = status,
             defaultFormDefinitionId = defaultFormDefinitionId,
+            metadataJson = metadataJson,
             createdByUserId = createdByUserId,
             createdAt = createdAt,
             updatedAt = updatedAt,
