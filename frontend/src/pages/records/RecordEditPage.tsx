@@ -144,7 +144,7 @@ function SectionTabs({
           label: (
             <Flex align="center" gap={6}>
               <Badge color={dotColor} />
-              <span style={{ textTransform: 'capitalize' }}>
+              <span style={{ textTransform: 'uppercase', fontSize: 11, letterSpacing: '0.04em' }}>
                 {code.replace(/_/g, ' ')}
               </span>
             </Flex>
