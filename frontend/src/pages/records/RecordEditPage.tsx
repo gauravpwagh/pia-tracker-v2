@@ -49,6 +49,7 @@ import {
   Breadcrumb,
   Button,
   Col,
+  Divider,
   Flex,
   Row,
   Space,
@@ -202,45 +203,55 @@ function RightPanel({ activeSectionState, recordId }: RightPanelProps) {
   const { t } = useTranslation('forms');
   const currentUser = useAuthStore((s) => s.currentUser);
 
+  const sectionStyle: React.CSSProperties = { marginBottom: 8 };
+  const dividerStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 600,
+    color: 'var(--ant-color-text-secondary)',
+    margin: '0 0 10px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  };
+
   return (
-    <Tabs
-      defaultActiveKey="comments"
-      items={[
-        {
-          key: 'comments',
-          label: t('record.panel.comments'),
-          children: (
-            <CommentPanel
-              entityType="ACTIVITY_RECORD"
-              entityId={recordId}
-              currentUserId={currentUser?.userId}
-            />
-          ),
-        },
-        {
-          key: 'history',
-          label: t('record.panel.history'),
-          children: <HistoryPanel recordId={recordId} />,
-        },
-        {
-          key: 'attachments',
-          label: t('record.panel.attachments'),
-          children: (
-            <AttachmentPanel
-              entityType="ACTIVITY_RECORD"
-              entityId={recordId}
-              canUpload={currentUser?.permissions.includes('ATTACHMENT.UPLOAD.OWN_RECORDS')}
-              currentUserId={currentUser?.userId}
-            />
-          ),
-        },
-        {
-          key: 'workflow',
-          label: t('record.panel.workflow'),
-          children: <WorkflowPanel activeSectionState={activeSectionState} />,
-        },
-      ]}
-    />
+    <Space direction="vertical" size={0} style={{ width: '100%' }}>
+      <div style={sectionStyle}>
+        <Divider orientation="left" orientationMargin={0} style={dividerStyle}>
+          {t('record.panel.workflow')}
+        </Divider>
+        <WorkflowPanel activeSectionState={activeSectionState} />
+      </div>
+
+      <div style={sectionStyle}>
+        <Divider orientation="left" orientationMargin={0} style={dividerStyle}>
+          {t('record.panel.comments')}
+        </Divider>
+        <CommentPanel
+          entityType="ACTIVITY_RECORD"
+          entityId={recordId}
+          currentUserId={currentUser?.userId}
+        />
+      </div>
+
+      <div style={sectionStyle}>
+        <Divider orientation="left" orientationMargin={0} style={dividerStyle}>
+          {t('record.panel.attachments')}
+        </Divider>
+        <AttachmentPanel
+          entityType="ACTIVITY_RECORD"
+          entityId={recordId}
+          canUpload={currentUser?.permissions.includes('ATTACHMENT.UPLOAD.OWN_RECORDS')}
+          currentUserId={currentUser?.userId}
+        />
+      </div>
+
+      <div style={sectionStyle}>
+        <Divider orientation="left" orientationMargin={0} style={dividerStyle}>
+          {t('record.panel.history')}
+        </Divider>
+        <HistoryPanel recordId={recordId} />
+      </div>
+    </Space>
   );
 }
 
