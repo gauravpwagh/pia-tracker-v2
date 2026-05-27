@@ -784,6 +784,9 @@ class ActivityService(
         fun int(key: String): Int? =
             metadata.get(key)?.takeIf { !it.isNull && it.isNumber }?.intValue()
 
+        fun dat(key: String): LocalDate? =
+            str(key)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
         when (typeCode) {
             "LAND_ACQUISITION" -> jdbc.update(
                 """
@@ -891,7 +894,7 @@ class ActivityService(
                 str("utility_type"), str("owner_agency"), str("executing_agency"),
                 str("chainage_from"), str("chainage_to"),
                 dec("estimated_cost"), dec("sanctioned_cost"),
-                str("work_start_date"), str("expected_completion_date"), str("actual_completion_date"),
+                dat("work_start_date"), dat("expected_completion_date"), dat("actual_completion_date"),
                 str("current_status"), str("remarks"),
                 str("voltage_level"), dec("length_km"), int("no_of_poles"),
                 int("diameter_mm"), dec("pipeline_length_m"), str("fluid_type"),
@@ -899,7 +902,7 @@ class ActivityService(
                 int("no_of_units"), dec("area_sqm"),
                 dec("capacity_mva"), int("no_of_bays"),
                 str("utility_description"),
-                str("contractor_name"), str("work_order_no"), str("work_order_date"),
+                str("contractor_name"), str("work_order_no"), dat("work_order_date"),
             )
             "DRAWING_APPROVAL" -> jdbc.update(
                 """
