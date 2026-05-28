@@ -39,6 +39,15 @@ function Root() {
           token: { ...tokens.shared, ...palette },
           cssVar: true,
           hashed: false,
+          components: {
+            Layout: {
+              // Make the Sider and its collapse trigger follow the active theme
+              // instead of hardcoding a dark background.
+              siderBg:     palette.colorBgContainer,
+              triggerBg:   palette.colorBgContainer,
+              triggerColor: palette.colorText,
+            },
+          },
         }}
       >
         <AntApp>
