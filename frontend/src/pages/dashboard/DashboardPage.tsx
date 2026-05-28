@@ -60,6 +60,7 @@ import {
   type UtilitySubtypeSummaryDto,
   type ForestStageSummaryDto,
 } from '@api/dashboard';
+import { fetchProjects, type ProjectSummaryResponse } from '@api/projects';
 import { useAuthStore } from '@stores/authStore';
 
 dayjs.extend(relativeTime);
@@ -744,7 +745,29 @@ function ProjectOverviewPanel({ overview }: { overview: ProjectOverviewDto }) {
 function ProjectScope({ zones }: { zones: ZoneSummaryDto[] }) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
-  const allProjects = useMemo(() => zones.flatMap((z) => z.projects), [zones]);
+  // Zone data is only available when the user has DASHBOARD.VIEW.ZONE+.
+  // For project-only users (CE/C, Dy CE/C, etc.) we fall back to the standard
+  // /api/v1/projects list which is always accessible to them.
+  const needsDirectFetch = zones.length === 0;
+  const { data: directProjects } = useQuery({
+    queryKey: ['projects', 'list'],
+    queryFn: fetchProjects,
+    staleTime: 120_000,
+    enabled: needsDirectFetch,
+  });
+
+  const projectOptions: Array<{ value: string; label: string }> = useMemo(() => {
+    if (!needsDirectFetch) {
+      return zones.flatMap((z) => z.projects).map((p) => ({
+        value: p.projectId,
+        label: p.projectCode ? `${p.projectCode} — ${p.name}` : p.name,
+      }));
+    }
+    return (directProjects ?? []).map((p: ProjectSummaryResponse) => ({
+      value: p.id,
+      label: p.projectCode ? `${p.projectCode} — ${p.name}` : p.name,
+    }));
+  }, [needsDirectFetch, zones, directProjects]);
 
   const { data: overview, isLoading } = useQuery({
     queryKey: ['dashboard', 'project-overview', selectedProjectId],
@@ -766,10 +789,7 @@ function ProjectScope({ zones }: { zones: ZoneSummaryDto[] }) {
           placeholder="Select a project…"
           value={selectedProjectId}
           onChange={(v) => setSelectedProjectId(v ?? null)}
-          options={allProjects.map((p) => ({
-            value: p.projectId,
-            label: p.projectCode ? `${p.projectCode} — ${p.name}` : p.name,
-          }))}
+          options={projectOptions}
         />
       </Flex>
 
@@ -819,7 +839,8 @@ export default function DashboardPage() {
     queryFn: fetchZoneDashboard,
     staleTime: 120_000,
     refetchInterval: 120_000,
-    enabled: !!currentUser && (scope === 'zone' || scope === 'project'),
+    enabled: !!currentUser && (scope === 'zone' || scope === 'project') &&
+             (isSuperAdmin || permissions.includes('DASHBOARD.VIEW.ZONE') || permissions.includes('DASHBOARD.VIEW.PAN_INDIA')),
   });
 
   const panIndiaQuery = useQuery({
