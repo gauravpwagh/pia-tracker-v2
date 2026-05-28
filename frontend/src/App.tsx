@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout, Spin } from 'antd';
 
@@ -22,6 +22,17 @@ const DashboardPage = lazy(() => import('@pages/dashboard/DashboardPage'));
 
 const { Sider, Content, Header } = Layout;
 
+/** Wraps pages that need vertical scroll (Dashboard, Inbox).
+ *  Pages that manage their own height (ProjectsPage, RecordEditPage)
+ *  do NOT use this wrapper. */
+function ScrollPage({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden' }}>
+      {children}
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -38,14 +49,14 @@ export default function App() {
         >
           <Sidebar />
         </Sider>
-        <Content style={{ padding: 24, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <Content style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <Suspense fallback={<Spin style={{ margin: 40 }} />}>
             <Routes>
               <Route path="/" element={<Navigate to="/projects" replace />} />
               <Route path="/projects/*" element={<ProjectsPage />} />
               <Route path="/records/:recordId/edit" element={<RecordEditPage />} />
-              <Route path="/inbox" element={<InboxPage />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/inbox" element={<ScrollPage><InboxPage /></ScrollPage>} />
+              <Route path="/dashboard" element={<ScrollPage><DashboardPage /></ScrollPage>} />
               <Route path="/admin/*" element={<HomePage />} />
               <Route path="*" element={<HomePage />} />
             </Routes>
