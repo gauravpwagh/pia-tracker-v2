@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Badge, Button, Dropdown, Select, Space, Typography } from 'antd';
-import { BellOutlined } from '@ant-design/icons';
+import { Badge, Button, Dropdown, Select, Space, Tooltip, Typography } from 'antd';
+import { BellOutlined, MoonOutlined, SunOutlined, LaptopOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useThemeStore } from '@stores/themeStore';
 import { useAuthStore } from '@stores/authStore';
@@ -32,8 +32,30 @@ const { Text } = Typography;
  * Clicking a notification marks it read and navigates to the link URL.
  */
 export function TopBar() {
-  const mode = useThemeStore((s) => s.effectiveMode());
+  const { mode: storedMode, setMode, effectiveMode } = useThemeStore();
+  const mode = effectiveMode();
   const logoSrc = mode === 'dark' ? '/logo-dark.svg' : '/logo.svg';
+
+  const themeMenuItems = [
+    {
+      key: 'light',
+      label: (
+        <Space><SunOutlined /> Light</Space>
+      ),
+    },
+    {
+      key: 'dark',
+      label: (
+        <Space><MoonOutlined /> Dark</Space>
+      ),
+    },
+    {
+      key: 'system',
+      label: (
+        <Space><LaptopOutlined /> System</Space>
+      ),
+    },
+  ];
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -161,6 +183,25 @@ export function TopBar() {
             size="small"
           />
         )}
+
+        {/* Theme toggle */}
+        <Tooltip title="Switch theme">
+          <Dropdown
+            menu={{
+              items: themeMenuItems,
+              selectedKeys: [storedMode],
+              onClick: ({ key }) => setMode(key as 'light' | 'dark' | 'system'),
+            }}
+            trigger={['click']}
+          >
+            <Button
+              icon={mode === 'dark' ? <MoonOutlined /> : <SunOutlined />}
+              type="text"
+              size="small"
+              aria-label="Switch theme"
+            />
+          </Dropdown>
+        </Tooltip>
 
         {/* Notification bell */}
         {currentUser && (
