@@ -1,6 +1,6 @@
 {
   "title": "Projects",
-  "newProject": "+ Add Project",
+  "newProject": "Add Project",
   "noProjects": "No projects yet.",
   "noProjectsMatch": "No projects match your filters. Try adjusting them or {{clearLink}}.",
   "filters": {
