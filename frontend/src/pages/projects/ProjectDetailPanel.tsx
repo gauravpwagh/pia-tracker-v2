@@ -11,26 +11,30 @@
  * Body: scrollable project metadata + state guide.
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Button,
   Descriptions,
+  Divider,
   Form,
   Modal,
   Select,
   Skeleton,
   Space,
+  Steps,
   Tag,
   Typography,
 } from 'antd';
 import {
+  CheckCircleOutlined,
   CloseOutlined,
   PlusOutlined,
   ProjectOutlined,
   StarOutlined,
+  TeamOutlined,
   UserAddOutlined,
   UsergroupAddOutlined,
 } from '@ant-design/icons';
@@ -43,7 +47,7 @@ import {
   designateNodalUser,
   type ActivityDetailResponse,
 } from '@api/projects';
-import { fetchUsersByDesignation, type UserSummary } from '@api/auth';
+import { fetchUsers, fetchUsersByDesignation, type UserSummary } from '@api/auth';
 import type { PrincipalInfo } from '@api/auth';
 import ActivityCreateWizard from './ActivityCreateWizard';
 
@@ -249,6 +253,100 @@ function StateGuide({ state }: { state: string }) {
   return <Alert type={guide.type} message={guide.text} showIcon style={{ fontSize: 12 }} />;
 }
 
+// ── Lifecycle step index ──────────────────────────────────────────────────────
+
+function lifecycleStepIndex(state: string): number {
+  switch (state) {
+    case 'DRAFT':
+    case 'AWAITING_CAO_ALLOCATION': return 1; // step 0 done, step 1 in-progress
+    case 'AWAITING_CEC_ASSIGNMENT': return 2; // steps 0–1 done, step 2 in-progress
+    case 'ACTIVE':
+    case 'CLOSED':
+    case 'CANCELLED':
+    default:                         return 3; // all steps finished (or error handled separately)
+  }
+}
+
+// ── Workflow + team section ───────────────────────────────────────────────────
+
+interface WorkflowSectionProps {
+  state: string;
+  ceName: string | null;
+  dyceNames: string[];
+  nodalName: string | null;
+}
+
+function WorkflowSection({ state, ceName, dyceNames, nodalName }: WorkflowSectionProps) {
+  const isCancelled = state === 'CANCELLED';
+
+  return (
+    <>
+      {/* Lifecycle stepper */}
+      <Divider orientation="left" orientationMargin={0}
+        style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
+        Lifecycle
+      </Divider>
+      <Steps
+        direction="vertical"
+        size="small"
+        current={lifecycleStepIndex(state)}
+        status={isCancelled ? 'error' : 'process'}
+        style={{ paddingLeft: 4 }}
+        items={[
+          {
+            title: 'Submitted',
+            description: 'Project created and submitted for allocation',
+          },
+          {
+            title: 'CE/C Allocated',
+            description: ceName
+              ? <span style={{ fontSize: 12 }}>{ceName}</span>
+              : <span style={{ fontSize: 12, color: 'var(--ant-color-text-tertiary)' }}>Pending</span>,
+          },
+          {
+            title: 'Dy CE/C Assigned',
+            description: dyceNames.length > 0
+              ? <span style={{ fontSize: 12 }}>{dyceNames.join(', ')}</span>
+              : <span style={{ fontSize: 12, color: 'var(--ant-color-text-tertiary)' }}>Pending</span>,
+          },
+        ]}
+      />
+
+      {/* Team assignments */}
+      {(ceName || dyceNames.length > 0 || nodalName) && (
+        <>
+          <Divider orientation="left" orientationMargin={0}
+            style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '12px 0 10px' }}>
+            <Space size={4}><TeamOutlined /> Team</Space>
+          </Divider>
+          <Descriptions size="small" column={1} bordered>
+            {ceName && (
+              <Descriptions.Item label="CE/C">{ceName}</Descriptions.Item>
+            )}
+            {dyceNames.length > 0 && (
+              <Descriptions.Item label="Dy CE/C">
+                <Space direction="vertical" size={2}>
+                  {dyceNames.map((n) => (
+                    <span key={n} style={{ fontSize: 12 }}>{n}</span>
+                  ))}
+                </Space>
+              </Descriptions.Item>
+            )}
+            {nodalName && (
+              <Descriptions.Item label={<Space size={4}><StarOutlined />Nodal</Space>}>
+                <Space size={4}>
+                  <CheckCircleOutlined style={{ color: 'var(--ant-color-success)' }} />
+                  {nodalName}
+                </Space>
+              </Descriptions.Item>
+            )}
+          </Descriptions>
+        </>
+      )}
+    </>
+  );
+}
+
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 type ModalKind = 'allocate' | 'assignDyce' | 'designateNodal' | 'addActivity' | null;
@@ -282,6 +380,33 @@ export function ProjectDetailPanel({
     staleTime: 10 * 60_000,
   });
 
+  const assignmentsQuery = useQuery({
+    queryKey: ['project-assignments', projectId],
+    queryFn: () => fetchProjectAssignments(projectId),
+    staleTime: 30_000,
+  });
+
+  const usersQuery = useQuery({
+    queryKey: ['users-all'],
+    queryFn: fetchUsers,
+    staleTime: 5 * 60_000,
+  });
+
+  const userById = useMemo(() => {
+    const map: Record<string, string> = {};
+    usersQuery.data?.forEach((u) => { map[u.id] = u.name; });
+    return map;
+  }, [usersQuery.data]);
+
+  const assignments = assignmentsQuery.data ?? [];
+  const ceAssignment    = assignments.find((a) => a.assignmentRole === 'CE_C' && a.isActive);
+  const dyceAssignments = assignments.filter((a) => a.assignmentRole === 'DY_CE_C' && a.isActive);
+  const nodalAssignment = assignments.find((a) => a.assignmentRole === 'NODAL_DY_CE_C' && a.isActive);
+
+  const ceName    = ceAssignment    ? (userById[ceAssignment.userId]    ?? '…') : null;
+  const dyceNames = dyceAssignments.map((a) => userById[a.userId] ?? '…');
+  const nodalName = nodalAssignment ? (userById[nodalAssignment.userId] ?? '…') : null;
+
   const zoneLabel: Record<string, string> = {};
   zonesQuery.data?.forEach((z) => { zoneLabel[z.id] = `${z.shortName} — ${z.name}`; });
 
@@ -289,6 +414,7 @@ export function ProjectDetailPanel({
     void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
     void queryClient.invalidateQueries({ queryKey: ['projects'] });
     void queryClient.invalidateQueries({ queryKey: ['project-assignments', projectId] });
+    void queryClient.invalidateQueries({ queryKey: ['users-all'] });
   };
 
   const handleActivitySuccess = () => {
@@ -414,6 +540,13 @@ export function ProjectDetailPanel({
             </Descriptions>
 
             <StateGuide state={project.lifecycleState} />
+
+            <WorkflowSection
+              state={project.lifecycleState}
+              ceName={ceName}
+              dyceNames={dyceNames}
+              nodalName={nodalName}
+            />
           </Space>
         )}
       </div>
