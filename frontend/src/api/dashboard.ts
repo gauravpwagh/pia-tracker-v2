@@ -1,8 +1,9 @@
 /**
  * dashboard.ts — API types and fetch helpers for the KPI dashboard.
  *
- * Endpoint:
- *   GET /api/v1/dashboard/projects/{projectId} — aggregated activity summary
+ * Endpoints:
+ *   GET /api/v1/dashboard/zone                         — zone summary + project list
+ *   GET /api/v1/dashboard/projects/{projectId}         — per-project activity summary
  */
 
 const BASE = '/api/v1';
@@ -25,6 +26,30 @@ export interface ProjectDashboardDto {
   summaries: ActivitySummaryDto[];
 }
 
+export interface ZoneProjectDto {
+  projectId: string;
+  projectCode: string | null;
+  name: string;
+  lifecycleState: string;
+  daysSinceRbRecommendation: number | null;
+  slaBreachCount: number;
+  drawingsInApproval: number;
+}
+
+export interface ZoneSummaryDto {
+  zoneId: string;
+  zoneCode: string;
+  zoneName: string;
+  projectsActive: number;
+  projectsWithSlaBreaches: number;
+  totalDrawingsInApproval: number;
+  projects: ZoneProjectDto[];
+}
+
+export interface ZoneDashboardResponse {
+  zones: ZoneSummaryDto[];
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -33,6 +58,11 @@ async function handleResponse<T>(res: Response): Promise<T> {
     throw new Error(text || `HTTP ${res.status}`);
   }
   return res.json() as Promise<T>;
+}
+
+export async function fetchZoneDashboard(): Promise<ZoneDashboardResponse> {
+  const res = await fetch(`${BASE}/dashboard/zone`, { credentials: 'include' });
+  return handleResponse<ZoneDashboardResponse>(res);
 }
 
 export async function fetchProjectDashboard(projectId: string): Promise<ProjectDashboardDto> {
