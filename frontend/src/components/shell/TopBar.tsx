@@ -34,7 +34,7 @@ const { Text } = Typography;
 export function TopBar() {
   const { mode: storedMode, setMode, effectiveMode } = useThemeStore();
   const mode = effectiveMode();
-  const logoSrc = mode === 'dark' ? '/logo-dark.svg' : '/logo.svg';
+  const logoSrc = mode === 'dark' ? '/logo-icon-dark.svg' : '/logo-icon.svg';
 
   const themeMenuItems = [
     {
@@ -168,14 +168,23 @@ export function TopBar() {
         background: 'var(--ant-color-bg-container)',
       }}
     >
-      {/* Brand — logo SVG already contains the PIA / TRACKER wordmark */}
-      <img
-        src={logoSrc}
-        alt="PIA Tracker"
-        height={40}
-        style={{ display: 'block', cursor: 'pointer' }}
+      {/* Brand block — icon + stacked wordmark, vertically centred in 56 px bar */}
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 6, height: 56, cursor: 'pointer' }}
         onClick={() => navigate('/')}
-      />
+        role="link"
+        aria-label="PIA Tracker home"
+      >
+        <img src={logoSrc} alt="" height={40} style={{ display: 'block' }} />
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1 }}>
+          <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--ant-color-text)', lineHeight: 1.1 }}>
+            PIA
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: '0.18em', color: 'var(--ant-color-text-secondary)', lineHeight: 1.4 }}>
+            TRACKER
+          </span>
+        </div>
+      </div>
 
       <Space align="center" size={12}>
         {/* Role picker — dev/beta dummy auth */}
