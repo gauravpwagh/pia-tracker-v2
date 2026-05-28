@@ -168,7 +168,41 @@ export function TopBar() {
         background: 'var(--ant-color-bg-container)',
       }}
     >
-      <img src={logoSrc} alt="PIA Tracker" height={32} />
+      {/* Brand block — logo + wordmark, vertically centred in the 56 px bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          height: 56,
+          cursor: 'pointer',
+        }}
+        onClick={() => navigate('/')}
+        role="link"
+        aria-label="PIA Tracker home"
+      >
+        <img src={logoSrc} alt="" height={40} style={{ display: 'block' }} />
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1 }}>
+          <span style={{
+            fontSize: 18,
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            color: 'var(--ant-color-text)',
+            lineHeight: 1.1,
+          }}>
+            PIA
+          </span>
+          <span style={{
+            fontSize: 10,
+            fontWeight: 500,
+            letterSpacing: '0.18em',
+            color: 'var(--ant-color-text-secondary)',
+            lineHeight: 1.4,
+          }}>
+            TRACKER
+          </span>
+        </div>
+      </div>
 
       <Space align="center" size={12}>
         {/* Role picker — dev/beta dummy auth */}
