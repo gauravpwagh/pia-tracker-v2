@@ -17,7 +17,7 @@ export const tokens = {
     colorBgLayout: '#f5f7fa',
     colorBgContainer: '#ffffff',
     colorBgElevated: '#ffffff',
-    colorBgSpotlight: '#eaeff5',
+    colorBgSpotlight: '#1a2733',   // Tooltip/popover bg — must be dark for white-text contrast
     colorBorder: '#e1e8f0',
     colorBorderSecondary: '#eef2f7',
     colorText: '#1a2733',
@@ -46,7 +46,7 @@ export const tokens = {
     colorBgLayout: '#1a2028',
     colorBgContainer: '#1f2731',
     colorBgElevated: '#26303c',
-    colorBgSpotlight: '#2d3a4a',
+    colorBgSpotlight: '#3d4f63',   // Tooltip/popover bg — elevated above dark container
     colorBorder: '#2d3a4a',
     colorBorderSecondary: '#222d3a',
     colorText: '#e8eef5',
