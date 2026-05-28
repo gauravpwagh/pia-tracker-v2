@@ -583,8 +583,8 @@ function PanIndiaScope({
 const RAG_COLORS = { GREEN: '#16a34a', AMBER: '#d97706', RED: '#dc2626' };
 
 function ActivityRagCard({
-  card, onClick,
-}: { card: ActivityCardDto; onClick?: () => void }) {
+  card, onClick, isExpanded,
+}: { card: ActivityCardDto; onClick?: () => void; isExpanded?: boolean }) {
   const rag = card.ragStatus as 'GREEN' | 'AMBER' | 'RED';
   const pct = card.totalRecords > 0
     ? Math.round((card.authenticatedCount / card.totalRecords) * 100)
@@ -599,6 +599,8 @@ function ActivityRagCard({
         borderLeft: `4px solid ${RAG_COLORS[rag] ?? '#8b9aab'}`,
         cursor: onClick ? 'pointer' : 'default',
         marginBottom: 8,
+        outline: isExpanded ? `2px solid ${RAG_COLORS[rag] ?? '#8b9aab'}` : undefined,
+        outlineOffset: -1,
       }}
     >
       <Flex align="flex-start" justify="space-between">
@@ -623,11 +625,17 @@ function ActivityRagCard({
             </Text>
           )}
         </Space>
-        <div style={{
-          width: 12, height: 12, borderRadius: '50%',
-          background: RAG_COLORS[rag] ?? '#8b9aab',
-          marginTop: 4, flexShrink: 0,
-        }} />
+        <Space direction="vertical" size={4} style={{ alignItems: 'flex-end', flexShrink: 0 }}>
+          <div style={{
+            width: 12, height: 12, borderRadius: '50%',
+            background: RAG_COLORS[rag] ?? '#8b9aab',
+          }} />
+          {onClick && (
+            <Text style={{ fontSize: 10, color: 'var(--ant-color-text-tertiary)' }}>
+              {isExpanded ? '▲' : '▼'}
+            </Text>
+          )}
+        </Space>
       </Flex>
     </Card>
   );
@@ -1403,6 +1411,12 @@ function ProjectOverviewPanel({
 }: { overview: ProjectOverviewDto; summaries: ActivitySummaryDto[] }) {
   const daysRb = overview.daysSinceRbRecommendation;
   const summaryMap = new Map(summaries.map((s) => [s.activityTypeCode, s]));
+  const [activeKeys, setActiveKeys] = useState<string[]>([]);
+
+  const togglePanel = (key: string) =>
+    setActiveKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
 
   // Build collapse items for each activity type that has records
   const activityPanels = overview.activityCards
@@ -1522,26 +1536,35 @@ function ProjectOverviewPanel({
         </Col>
       </Row>
 
-      {/* Activity RAG grid */}
+      {/* Activity RAG grid — each card toggles its detail panel */}
       <Divider orientation="left" orientationMargin={0}
         style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '0 0 12px' }}>
-        Activity Overview — click to expand
+        Activity Overview
       </Divider>
-      <Row gutter={[12, 0]} style={{ marginBottom: 16 }}>
-        {overview.activityCards.map((card) => (
-          <Col xs={24} sm={12} lg={8} key={card.activityTypeCode}>
-            <ActivityRagCard card={card} />
-          </Col>
-        ))}
+      <Row gutter={[12, 0]} style={{ marginBottom: 8 }}>
+        {overview.activityCards.map((card) => {
+          const hasPanel = card.totalRecords > 0;
+          const isOpen = activeKeys.includes(card.activityTypeCode);
+          return (
+            <Col xs={24} sm={12} lg={8} key={card.activityTypeCode}>
+              <ActivityRagCard
+                card={card}
+                onClick={hasPanel ? () => togglePanel(card.activityTypeCode) : undefined}
+                isExpanded={isOpen}
+              />
+            </Col>
+          );
+        })}
       </Row>
 
       {/* Per-activity expanded sections */}
       {activityPanels.length > 0 && (
         <Collapse
           items={activityPanels}
-          defaultActiveKey={[]}
+          activeKey={activeKeys}
+          onChange={(keys) => setActiveKeys(typeof keys === 'string' ? [keys] : keys)}
           size="small"
-          style={{ marginTop: 8 }}
+          style={{ marginTop: 4 }}
         />
       )}
     </>
