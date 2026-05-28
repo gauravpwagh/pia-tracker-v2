@@ -256,9 +256,13 @@ export default function DashboardPage() {
 
   const zones = zoneData?.zones ?? [];
 
-  // Multi-zone users (EDGS/C-I, super-admin) get an enabled zone picker;
-  // single-zone users get it locked to their only zone.
-  const canSwitchZone = zones.length > 1;
+  // Use the principal's own flags — don't wait for the API response.
+  // Super-admin sees all zones; EDGS/C-I typically has multiple accessible zones.
+  // Fall back to checking the returned zones list in case accessibleZoneIds is stale.
+  const canSwitchZone =
+    (currentUser?.isSuperAdmin ?? false) ||
+    (currentUser?.accessibleZoneIds?.length ?? 0) > 1 ||
+    zones.length > 1;
 
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
