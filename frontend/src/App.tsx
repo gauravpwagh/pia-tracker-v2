@@ -29,7 +29,13 @@ export default function App() {
         <TopBar />
       </Header>
       <Layout style={{ height: 'calc(100vh - 56px)', overflow: 'hidden' }}>
-        <Sider width={240} collapsible breakpoint="lg" collapsedWidth={64}>
+        <Sider
+          width={240}
+          collapsible
+          breakpoint="lg"
+          collapsedWidth={64}
+          style={{ background: 'var(--ant-color-bg-container)', borderRight: '1px solid var(--ant-color-border)' }}
+        >
           <Sidebar />
         </Sider>
         <Content style={{ padding: 24, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
