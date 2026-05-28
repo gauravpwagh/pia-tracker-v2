@@ -1,5 +1,7 @@
 package `in`.gov.ir.pia.dashboard
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -94,6 +96,42 @@ data class ProjectOverviewDto(
     val activityCards: List<ActivityCardDto>,
 )
 
+// ── Dashboard records DTOs ────────────────────────────────────────────────────
+
+/**
+ * Lightweight record row for the dashboard records tables (§4-8).
+ * Returns data_json as a parsed [JsonNode] so the frontend can extract
+ * activity-specific fields (village_name, forest_area_hectares, etc.).
+ * Gated by DASHBOARD.VIEW.PROJECT — a superset of the full record endpoint
+ * which requires ACTIVITY_RECORD.READ.OWN.
+ */
+data class DashboardRecordDto(
+    val id: UUID,
+    val recordState: String,
+    val recordSubtype: String?,
+    val dataJson: JsonNode,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
+// ── Drawing approver matrix DTOs ──────────────────────────────────────────────
+
+data class DrawingApproverCellDto(
+    val designationCode: String,
+    val drawingType: String,
+    val pendingCount: Int,
+    val approvedCount: Int,
+    val sentBackCount: Int,
+)
+
+data class DrawingApproverMatrixDto(
+    val cells: List<DrawingApproverCellDto>,
+    /** Unique designation codes, sorted alphabetically. */
+    val designations: List<String>,
+    /** Unique drawing types, sorted alphabetically. */
+    val drawingTypes: List<String>,
+)
+
 // ── Service ───────────────────────────────────────────────────────────────────
 
 /**
@@ -106,6 +144,7 @@ data class ProjectOverviewDto(
 @Transactional(readOnly = true)
 class DashboardService(
     private val jdbc: JdbcTemplate,
+    private val objectMapper: ObjectMapper,
 ) {
     fun getProjectDashboard(projectId: UUID): ProjectDashboardDto {
         val summaries =
@@ -278,5 +317,89 @@ class DashboardService(
                 projectId,
             )
         return ForestStageBreakdownDto(projectId = projectId, stages = stages)
+    }
+
+    // ── Dashboard records (§4-8) ──────────────────────────────────────────────
+
+    /**
+     * Returns all non-deleted records of [activityTypeCode] for [projectId],
+     * with their full [data_json] parsed.
+     *
+     * Used by the per-activity dashboard sections (§4 Land Acquisition,
+     * §5 Utility Shifting, §6 Forest Clearance, §7 Drawing Approval,
+     * §8 Tender / Office).  Reads raw [activity_records] — justified because
+     * this endpoint serves tabular record views, not KPI aggregations.
+     * KPI counters still come from summary tables via [getProjectDashboard].
+     */
+    fun getActivityRecordsForDashboard(projectId: UUID, activityTypeCode: String): List<DashboardRecordDto> =
+        jdbc.query(
+            """
+            SELECT ar.id, ar.record_state, ar.record_subtype,
+                   ar.data_json::text AS data_json, ar.created_at, ar.updated_at
+            FROM activity_records ar
+            JOIN project_activities pa ON pa.id = ar.project_activity_id
+            WHERE pa.project_id    = ?
+              AND pa.activity_type_code = ?
+              AND NOT ar.is_deleted
+              AND NOT pa.is_deleted
+            ORDER BY ar.created_at
+            """.trimIndent(),
+            { rs, _ ->
+                DashboardRecordDto(
+                    id            = rs.getObject("id", UUID::class.java),
+                    recordState   = rs.getString("record_state"),
+                    recordSubtype = rs.getString("record_subtype"),
+                    dataJson      = objectMapper.readTree(rs.getString("data_json") ?: "{}"),
+                    createdAt     = rs.getTimestamp("created_at").toInstant(),
+                    updatedAt     = rs.getTimestamp("updated_at").toInstant(),
+                )
+            },
+            projectId,
+            activityTypeCode,
+        )
+
+    // ── Drawing approver matrix (§7) ──────────────────────────────────────────
+
+    /**
+     * Returns a heatmap of pending/approved/sent-back counts per
+     * designation × drawing_type combination for the given project.
+     *
+     * Used by the Drawing Approval approver heatmap widget.
+     * Reads from [drawing_approvers] joined to [activity_records].
+     */
+    fun getDrawingApproverMatrix(projectId: UUID): DrawingApproverMatrixDto {
+        val cells = jdbc.query(
+            """
+            SELECT da.approval_designation_code                                        AS desig,
+                   COALESCE(ar.data_json->>'drawing_type', 'UNKNOWN')                 AS dtype,
+                   COUNT(*) FILTER (WHERE da.status = 'PENDING')                      AS pending,
+                   COUNT(*) FILTER (WHERE da.status = 'APPROVED')                     AS approved,
+                   COUNT(*) FILTER (WHERE da.status = 'SENT_BACK')                    AS sent_back
+            FROM drawing_approvers da
+            JOIN activity_records   ar ON ar.id = da.activity_record_id
+            JOIN project_activities pa ON pa.id = ar.project_activity_id
+            WHERE pa.project_id = ?
+              AND NOT da.is_deleted
+              AND NOT ar.is_deleted
+              AND NOT pa.is_deleted
+            GROUP BY da.approval_designation_code, ar.data_json->>'drawing_type'
+            ORDER BY da.approval_designation_code, ar.data_json->>'drawing_type'
+            """.trimIndent(),
+            { rs, _ ->
+                DrawingApproverCellDto(
+                    designationCode = rs.getString("desig"),
+                    drawingType     = rs.getString("dtype"),
+                    pendingCount    = rs.getInt("pending"),
+                    approvedCount   = rs.getInt("approved"),
+                    sentBackCount   = rs.getInt("sent_back"),
+                )
+            },
+            projectId,
+        )
+        return DrawingApproverMatrixDto(
+            cells        = cells,
+            designations = cells.map { it.designationCode }.distinct().sorted(),
+            drawingTypes = cells.map { it.drawingType }.distinct().sorted(),
+        )
     }
 }

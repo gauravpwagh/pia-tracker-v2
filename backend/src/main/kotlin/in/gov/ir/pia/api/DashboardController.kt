@@ -1,6 +1,8 @@
 package `in`.gov.ir.pia.api
 
+import `in`.gov.ir.pia.dashboard.DashboardRecordDto
 import `in`.gov.ir.pia.dashboard.DashboardService
+import `in`.gov.ir.pia.dashboard.DrawingApproverMatrixDto
 import `in`.gov.ir.pia.dashboard.ForestStageBreakdownDto
 import `in`.gov.ir.pia.dashboard.ProjectDashboardDto
 import `in`.gov.ir.pia.dashboard.ProjectOverviewDto
@@ -187,4 +189,54 @@ class DashboardController(
     )
     fun getPanIndiaDashboard(): PanIndiaDashboardResponse =
         panIndiaDashboardService.getPanIndiaDashboard()
+
+    // ── Activity records for dashboard tables (§4-8) ──────────────────────────
+
+    @GetMapping("/api/v1/dashboard/projects/{projectId}/activity-records/{activityTypeCode}")
+    @PreAuthorize(
+        "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PROJECT') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.ZONE') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PAN_INDIA')",
+    )
+    @Operation(
+        summary = "Dashboard records for an activity type",
+        description =
+            "Returns all non-deleted records of the given activity type for the project, " +
+                "including their full data_json. Used by per-activity dashboard tables " +
+                "(Land Acquisition villages table, Utility records table, etc.). " +
+                "KPI counters come from summary tables; this endpoint serves tabular views only.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Records returned"),
+        ApiResponse(responseCode = "403", description = "Insufficient permission"),
+    )
+    fun getActivityRecordsForDashboard(
+        @PathVariable projectId: UUID,
+        @PathVariable activityTypeCode: String,
+    ): List<DashboardRecordDto> =
+        dashboardService.getActivityRecordsForDashboard(projectId, activityTypeCode)
+
+    // ── Drawing approver heatmap (§7) ─────────────────────────────────────────
+
+    @GetMapping("/api/v1/dashboard/projects/{projectId}/drawing-approver-matrix")
+    @PreAuthorize(
+        "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PROJECT') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.ZONE') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PAN_INDIA')",
+    )
+    @Operation(
+        summary = "Drawing approval approver heatmap",
+        description =
+            "Returns pending/approved/sent-back counts per designation × drawing_type " +
+                "for the Drawing Approval approver heatmap widget (dashboards.md §7). " +
+                "Reads from drawing_approvers joined to activity_records.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Matrix returned"),
+        ApiResponse(responseCode = "403", description = "Insufficient permission"),
+    )
+    fun getDrawingApproverMatrix(
+        @PathVariable projectId: UUID,
+    ): DrawingApproverMatrixDto =
+        dashboardService.getDrawingApproverMatrix(projectId)
 }

@@ -91,6 +91,34 @@ export interface ForestStageBreakdownDto {
   stages: ForestStageSummaryDto[];
 }
 
+// ── Dashboard records (§4-8 records tables) ───────────────────────────────────
+
+export interface DashboardRecordDto {
+  id: string;
+  recordState: string;
+  recordSubtype: string | null;
+  /** Full form data_json — field names depend on the activity type. */
+  dataJson: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ── Drawing approver matrix (§7) ──────────────────────────────────────────────
+
+export interface DrawingApproverCellDto {
+  designationCode: string;
+  drawingType: string;
+  pendingCount: number;
+  approvedCount: number;
+  sentBackCount: number;
+}
+
+export interface DrawingApproverMatrixDto {
+  cells: DrawingApproverCellDto[];
+  designations: string[];
+  drawingTypes: string[];
+}
+
 // ── Zone scope ────────────────────────────────────────────────────────────────
 
 export interface ZoneProjectDto {
@@ -101,6 +129,7 @@ export interface ZoneProjectDto {
   daysSinceRbRecommendation: number | null;
   slaBreachCount: number;
   drawingsInApproval: number;
+  divisionName: string | null;
 }
 
 export interface ZoneSummaryDto {
@@ -164,4 +193,14 @@ export async function fetchUtilityBreakdown(projectId: string): Promise<UtilityS
 export async function fetchForestStageBreakdown(projectId: string): Promise<ForestStageBreakdownDto> {
   const res = await fetch(`${BASE}/dashboard/projects/${projectId}/forest-stage-breakdown`, { credentials: 'include' });
   return handleResponse<ForestStageBreakdownDto>(res);
+}
+
+export async function fetchDashboardRecords(projectId: string, activityTypeCode: string): Promise<DashboardRecordDto[]> {
+  const res = await fetch(`${BASE}/dashboard/projects/${projectId}/activity-records/${activityTypeCode}`, { credentials: 'include' });
+  return handleResponse<DashboardRecordDto[]>(res);
+}
+
+export async function fetchDrawingApproverMatrix(projectId: string): Promise<DrawingApproverMatrixDto> {
+  const res = await fetch(`${BASE}/dashboard/projects/${projectId}/drawing-approver-matrix`, { credentials: 'include' });
+  return handleResponse<DrawingApproverMatrixDto>(res);
 }

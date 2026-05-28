@@ -25,6 +25,8 @@ data class ZoneProjectDto(
     val daysSinceRbRecommendation: Long?,
     val slaBreachCount: Int,
     val drawingsInApproval: Int,
+    /** Division name (null when the project has no division assigned yet). */
+    val divisionName: String?,
 )
 
 /**
@@ -146,9 +148,11 @@ class ZoneDashboardService(
                        p.lifecycle_state,
                        p.recommended_by_board_on,
                        COALESCE(ps.sla_breach_count, 0)     AS sla_breach_count,
-                       COALESCE(ps.drawings_in_approval, 0) AS drawings_in_approval
+                       COALESCE(ps.drawings_in_approval, 0) AS drawings_in_approval,
+                       d.name                               AS division_name
                 FROM projects p
                 LEFT JOIN project_summary ps ON ps.project_id = p.id
+                LEFT JOIN divisions d         ON d.id = p.division_id
                 WHERE p.zone_id = ?
                   AND NOT p.is_deleted
                 ORDER BY p.name
@@ -166,6 +170,7 @@ class ZoneDashboardService(
                         daysSinceRbRecommendation = daysSinceRb,
                         slaBreachCount = rs.getInt("sla_breach_count"),
                         drawingsInApproval = rs.getInt("drawings_in_approval"),
+                        divisionName = rs.getString("division_name"),
                     )
                 },
                 zone.zoneId,
