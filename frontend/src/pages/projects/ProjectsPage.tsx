@@ -572,7 +572,7 @@ export default function ProjectsPage() {
                   disabled={!canCreate}
                   onClick={() => setWizardOpen(true)}
                 >
-                  {t('projects.newButton', '+ Add Project')}
+                  {t('projects.newButton', 'Add Project')}
                 </Button>
               </Tooltip>
             </Space>
