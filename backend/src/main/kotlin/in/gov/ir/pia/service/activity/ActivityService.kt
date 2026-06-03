@@ -11,12 +11,14 @@ import `in`.gov.ir.pia.repository.FormDefinitionRepository
 import `in`.gov.ir.pia.repository.ProjectActivityRepository
 import `in`.gov.ir.pia.repository.ProjectAssignmentRepository
 import `in`.gov.ir.pia.repository.ProjectRepository
+import `in`.gov.ir.pia.repository.WorkflowInstanceRepository
 import `in`.gov.ir.pia.security.PiaPrincipal
 import `in`.gov.ir.pia.service.comment.CommentService
 import `in`.gov.ir.pia.service.comment.CreateCommentRequest
 import `in`.gov.ir.pia.workflow.DrawingService
 import `in`.gov.ir.pia.workflow.WorkflowService
 import jakarta.persistence.EntityManager
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -105,6 +107,17 @@ data class RecordHistoryEntry(
     val occurredAt: java.time.Instant,
 )
 
+data class ActivityWorkflowActionResult(
+    /** Total records in the activity (deleted records excluded). */
+    val totalRecords: Int,
+    /** Workflow instances successfully transitioned. */
+    val succeeded: Int,
+    /** Instances that threw an exception during transition. */
+    val failed: Int,
+    /** Instances skipped (terminal state, already in target state, or role mismatch). */
+    val skipped: Int,
+)
+
 data class ActivityDetailResponse(
     val id: UUID,
     val projectId: UUID,
@@ -176,9 +189,12 @@ class ActivityService(
     private val objectMapper: ObjectMapper,
     private val entityManager: EntityManager,
     private val workflowService: WorkflowService,
+    private val instanceRepository: WorkflowInstanceRepository,
     private val commentService: CommentService,
     private val drawingService: DrawingService,
 ) {
+    private val log = LoggerFactory.getLogger(ActivityService::class.java)
+
     // ── Read ──────────────────────────────────────────────────────────────────
 
     /**
@@ -291,6 +307,27 @@ class ActivityService(
         // Write type-specific fields to the dedicated detail table.
         upsertDetails(activity.id, request.activityTypeCode, request.metadataJson)
 
+        // Start the activity-level workflow instance (ACTIVITY_STANDARD_V1).
+        // This lets DY_CE_C submit, Nodal verify, and CE/C authenticate the
+        // activity as a whole — independent of whether the activity has records.
+        workflowService.start(
+            definitionCode = "ACTIVITY_STANDARD_V1",
+            entityType     = "PROJECT_ACTIVITY",
+            entityId       = activity.id,
+        )
+
+        // For Drawing Approval: auto-create the single activity record so the user
+        // never has to manually "create a record" for a drawing.
+        // The drawing_type from metadataJson becomes the recordSubtype (e.g. "ESP", "GAD_MINOR").
+        // If drawing_type is absent, the record is not created now — it can be created later
+        // once the user edits the activity to set the type.
+        if (request.activityTypeCode == "DRAWING_APPROVAL") {
+            val drawingType = request.metadataJson?.get("drawing_type")?.asText()
+            if (!drawingType.isNullOrBlank()) {
+                autoCreateDrawingRecord(activity.id, drawingType, principal)
+            }
+        }
+
         auditLogWriter.write(
             actorUserId = principal.userId,
             action = "ACTIVITY.CREATE",
@@ -299,6 +336,47 @@ class ActivityService(
         )
 
         return activity.toDetailResponse(readDetails(activity.id, request.activityTypeCode))
+    }
+
+    /**
+     * Auto-creates a single [ActivityRecord] for a Drawing Approval activity.
+     *
+     * Called inside the same transaction as [create].  The form definition is
+     * looked up by `{drawingType}_DRAWING_V1`; if none exists the call is a
+     * no-op so that unknown / future drawing types don't break activity creation.
+     */
+    private fun autoCreateDrawingRecord(
+        activityId: UUID,
+        drawingType: String,
+        principal: PiaPrincipal,
+    ) {
+        val formCode = "${drawingType}_DRAWING_V1"
+        val formDef = formDefinitionRepository.findLatestActiveByCode(formCode) ?: return
+
+        val activity = activityRepository.findByIdAndIsDeletedFalse(activityId) ?: return
+        val project  = projectRepository.findByIdAndIsDeletedFalse(activity.projectId)
+
+        val record = ActivityRecord(
+            projectActivityId = activityId,
+            formDefinitionId  = formDef.id,
+            workflowDefinitionId = null, // drawings use the checklist model, not the workflow engine
+            dataJson          = JsonNodeFactory.instance.objectNode(),
+            schemaVersionAtSave = formDef.version,
+            recordSubtype     = drawingType,
+            createdByUserId   = principal.userId,
+            updatedByUserId   = principal.userId,
+        )
+        recordRepository.save(record)
+
+        // Seed default approvers from the form definition's default_approver_designations.
+        drawingService.seedDefaultApprovers(record.id, formDef, project?.zoneId)
+
+        auditLogWriter.write(
+            actorUserId = principal.userId,
+            action      = "ACTIVITY_RECORD.CREATE",
+            entityType  = "ACTIVITY_RECORD",
+            entityId    = record.id,
+        )
     }
 
     /**
@@ -321,6 +399,15 @@ class ActivityService(
     ): ActivityDetailResponse {
         val activity = getForPrincipal(activityId, principal)
         requireDyceAssignment(activity.projectId, principal)
+
+        // Block edits once the activity has been authenticated.
+        val wfState = workflowService.currentState("PROJECT_ACTIVITY", activityId)
+        if (wfState?.isTerminal == true) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "This activity has been authenticated and can no longer be edited.",
+            )
+        }
 
         jdbc.update(
             """
@@ -375,7 +462,15 @@ class ActivityService(
         principal: PiaPrincipal,
     ): ActivityRecordDetailResponse {
         val activity = getForPrincipal(activityId, principal)
-        requireDyceAssignment(activity.projectId, principal)
+        requireRecordWriteAccess(activity.projectId, principal)
+
+        val wfState = workflowService.currentState("PROJECT_ACTIVITY", activityId)
+        if (wfState?.isTerminal == true) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "This activity has been authenticated. Records cannot be added.",
+            )
+        }
 
         // ── Resolve form definition ───────────────────────────────────────────
         //
@@ -499,12 +594,20 @@ class ActivityService(
         expectedVersion: Int,
         principal: PiaPrincipal,
     ): ActivityRecordDetailResponse {
-        // Load to verify existence and access (zone + dyce assignment)
+        // Load to verify existence and access (zone + write access check)
         val existing =
             recordRepository.findByIdAndIsDeletedFalse(recordId)
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val activity = getForPrincipal(existing.projectActivityId, principal)
-        requireDyceAssignment(activity.projectId, principal)
+        requireRecordWriteAccess(activity.projectId, principal)
+
+        val wfState = workflowService.currentState("PROJECT_ACTIVITY", activity.id)
+        if (wfState?.isTerminal == true) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "This activity has been authenticated and records can no longer be edited.",
+            )
+        }
 
         val dataJsonString = objectMapper.writeValueAsString(request.dataJson)
 
@@ -545,6 +648,58 @@ class ActivityService(
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
         return updated.toDetailResponse()
+    }
+
+    /**
+     * Soft-deletes an [ActivityRecord] (sets is_deleted = true).
+     *
+     * Allowed for:
+     *   - DY_CE_C / NODAL_DY_CE_C assigned to the project (can delete records they created)
+     *   - CE/C (zone-level authority — can delete any non-authenticated record)
+     *   - Super admin
+     *
+     * Records in AUTHENTICATED state (is_terminal = true) cannot be deleted —
+     * an authenticated entry is part of the official record.
+     *
+     * Returns 404 if the record does not exist or is already deleted.
+     * Returns 409 if the record is AUTHENTICATED.
+     * Returns 403 if the principal has no write access on the parent project.
+     */
+    @Transactional
+    fun deleteRecord(
+        recordId: UUID,
+        principal: PiaPrincipal,
+    ) {
+        val record = recordRepository.findByIdAndIsDeletedFalse(recordId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val activity = getForPrincipal(record.projectActivityId, principal)
+        requireRecordWriteAccess(activity.projectId, principal)
+
+        // Block deletion once the activity is authenticated.
+        val wfState = workflowService.currentState("PROJECT_ACTIVITY", activity.id)
+        if (wfState?.isTerminal == true) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "This activity has been authenticated. Records cannot be deleted.",
+            )
+        }
+
+        jdbc.update(
+            """
+            UPDATE activity_records
+               SET is_deleted = true,
+                   updated_at = now()
+             WHERE id = ? AND is_deleted = false
+            """.trimIndent(),
+            recordId,
+        )
+
+        auditLogWriter.write(
+            actorUserId = principal.userId,
+            action      = "ACTIVITY_RECORD.DELETE",
+            entityType  = "ACTIVITY_RECORD",
+            entityId    = recordId,
+        )
     }
 
     // ── Workflow state + actions ───────────────────────────────────────────────
@@ -973,17 +1128,189 @@ class ActivityService(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
     }
 
+    // ── Activity-level workflow state & direct actions ────────────────────────
+
     /**
-     * Verifies [principal] is an active DY_CE_C or NODAL_DY_CE_C on [projectId].
+     * Returns the workflow state of the activity itself (entity_type = PROJECT_ACTIVITY).
      *
-     * Returns 403 (not 404) when the assignment is absent — the project's
-     * existence is already confirmed by [requireProjectAccess].
+     * If no instance exists yet (activity was created before V028), returns a
+     * synthetic DRAFT state so the UI can still show the Submit button.
+     * The instance is lazily started on the first [performActivityDirectWorkflowAction] call.
      */
-    private fun requireDyceAssignment(
+    @Transactional(readOnly = true)
+    fun getActivityWorkflowState(
+        activityId: UUID,
+        principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse {
+        val activity = getForPrincipal(activityId, principal)
+        val instance = instanceRepository.findByEntityTypeAndEntityIdNoSection(
+            "PROJECT_ACTIVITY", activity.id,
+        )
+        val syntheticDraft = SectionWorkflowStateResponse(
+            instanceId       = UUID.fromString("00000000-0000-0000-0000-000000000000"),
+            sectionCode      = null,
+            currentStateCode = "DRAFT",
+            currentStateLabel = "Draft",
+            isTerminal       = false,
+            isSlaBreached    = false,
+            enteredStateAt   = activity.createdAt,
+            availableActions = if (principal.roleCodes.contains("ROLE_DY_CE_C") || principal.isSuperAdmin)
+                listOf("submit") else emptyList(),
+        )
+        if (instance == null) return syntheticDraft
+
+        val available = workflowService.availableActions(instance, principal)
+        return SectionWorkflowStateResponse(
+            instanceId       = instance.id,
+            sectionCode      = null,
+            currentStateCode = instance.currentState.code,
+            currentStateLabel = instance.currentState.label,
+            isTerminal       = instance.currentState.isTerminal,
+            isSlaBreached    = workflowService.isSlaBreached(instance.id),
+            enteredStateAt   = instance.enteredStateAt,
+            availableActions = available,
+        )
+    }
+
+    /**
+     * Applies a workflow action directly to the activity's own workflow instance
+     * (entity_type = PROJECT_ACTIVITY).
+     *
+     * If no instance exists yet, it is lazily created in DRAFT state before
+     * the transition.  This handles activities created before V028.
+     */
+    @Transactional
+    fun performActivityDirectWorkflowAction(
+        activityId: UUID,
+        action: String,
+        comment: String?,
+        principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse {
+        val activity = getForPrincipal(activityId, principal)
+
+        var instance = instanceRepository.findByEntityTypeAndEntityIdNoSection(
+            "PROJECT_ACTIVITY", activity.id,
+        )
+        // Lazy bootstrap for activities created before V028 migration.
+        if (instance == null) {
+            instance = workflowService.start(
+                definitionCode = "ACTIVITY_STANDARD_V1",
+                entityType     = "PROJECT_ACTIVITY",
+                entityId       = activity.id,
+            )
+        }
+
+        val updated = workflowService.transition(
+            instanceId = instance.id,
+            actionCode = action,
+            actor      = principal,
+            comment    = comment,
+        )
+        val available = workflowService.availableActions(updated, principal)
+        return SectionWorkflowStateResponse(
+            instanceId        = updated.id,
+            sectionCode       = null,
+            currentStateCode  = updated.currentState.code,
+            currentStateLabel = updated.currentState.label,
+            isTerminal        = updated.currentState.isTerminal,
+            isSlaBreached     = false,
+            enteredStateAt    = updated.enteredStateAt,
+            availableActions  = available,
+        )
+    }
+
+    // ── Activity-level workflow action (bulk on records) ──────────────────────
+
+    /**
+     * Applies a workflow [action] to every eligible record (and section instance)
+     * in [activityId] in one call.
+     *
+     * For each record the service loads all workflow instances (both record-level
+     * and section-level).  It then attempts to transition each instance where:
+     *   1. The instance is not in a terminal state.
+     *   2. The action is in the list returned by [WorkflowService.availableActions]
+     *      for the calling [principal].
+     *
+     * Failures on individual instances are collected but do not roll back
+     * successful transitions (best-effort semantics, same as bulk-transition).
+     *
+     * A [comment] is forwarded to every transition that requires one.
+     */
+    @Transactional
+    fun performActivityWorkflowAction(
+        activityId: UUID,
+        action: String,
+        comment: String?,
+        principal: PiaPrincipal,
+    ): ActivityWorkflowActionResult {
+        val activity = activityRepository.findByIdAndIsDeletedFalse(activityId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        requireProjectAccess(activity.projectId, principal)
+
+        val records = recordRepository
+            .findAllByProjectActivityIdAndIsDeletedFalseOrderByCreatedAtAsc(activityId)
+
+        var succeeded = 0
+        var failed = 0
+        var skipped = 0
+
+        for (record in records) {
+            val instances = instanceRepository.findAllByEntityTypeAndEntityId(
+                "ACTIVITY_RECORD",
+                record.id,
+            )
+            if (instances.isEmpty()) { skipped++; continue }
+
+            for (instance in instances) {
+                if (instance.currentState.isTerminal) { skipped++; continue }
+
+                val available = workflowService.availableActions(instance, principal)
+                if (action !in available) { skipped++; continue }
+
+                try {
+                    workflowService.transition(
+                        instanceId = instance.id,
+                        actionCode = action,
+                        actor      = principal,
+                        comment    = comment,
+                    )
+                    succeeded++
+                } catch (ex: Exception) {
+                    log.debug(
+                        "Activity workflow action '{}' failed for instance {}: {}",
+                        action, instance.id, ex.message,
+                    )
+                    failed++
+                }
+            }
+        }
+
+        return ActivityWorkflowActionResult(
+            totalRecords = records.size,
+            succeeded    = succeeded,
+            failed       = failed,
+            skipped      = skipped,
+        )
+    }
+
+    /**
+     * Verifies [principal] has write access to records on [projectId].
+     *
+     * Allowed principals:
+     *   - Super admin (always)
+     *   - CE/C (`designation_code = CE_C`) — zone-level managerial authority;
+     *     CE/C may add, modify, and delete records before authentication.
+     *   - DY_CE_C or NODAL_DY_CE_C actively assigned to the project.
+     *
+     * Returns 403 (not 404) when none of the above conditions are met.
+     */
+    private fun requireRecordWriteAccess(
         projectId: UUID,
         principal: PiaPrincipal,
     ) {
         if (principal.isSuperAdmin) return
+        // CE/C has zone-level management authority — no per-project assignment needed.
+        if (principal.designationCode == "CE_C") return
 
         val assignedRoles =
             assignmentRepository
@@ -992,6 +1319,25 @@ class ActivityService(
                 .map { it.assignmentRole }
                 .toSet()
 
+        val isAssigned = assignedRoles.any { it == "DY_CE_C" || it == "NODAL_DY_CE_C" }
+        if (!isAssigned) {
+            throw ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                "User is not assigned as DY_CE_C, NODAL_DY_CE_C, or CE/C on this project",
+            )
+        }
+    }
+
+    /** Backward-compat alias used by activity-level create/update which still requires Dy CE assignment. */
+    private fun requireDyceAssignment(projectId: UUID, principal: PiaPrincipal) {
+        if (principal.isSuperAdmin) return
+        if (principal.designationCode == "CE_C") return   // CE/C can also manage activities
+        val assignedRoles =
+            assignmentRepository
+                .findAllByProjectIdAndIsActiveTrue(projectId)
+                .filter { it.userId == principal.userId }
+                .map { it.assignmentRole }
+                .toSet()
         val isAssigned = assignedRoles.any { it == "DY_CE_C" || it == "NODAL_DY_CE_C" }
         if (!isAssigned) {
             throw ResponseStatusException(

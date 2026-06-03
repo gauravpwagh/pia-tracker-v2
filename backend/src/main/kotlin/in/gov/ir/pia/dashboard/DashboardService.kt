@@ -2,6 +2,7 @@ package `in`.gov.ir.pia.dashboard
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import `in`.gov.ir.pia.security.PiaPrincipal
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -112,6 +113,53 @@ data class DashboardRecordDto(
     val dataJson: JsonNode,
     val createdAt: Instant,
     val updatedAt: Instant,
+)
+
+// ── Cumulative dashboard DTOs ─────────────────────────────────────────────────
+
+/**
+ * Aggregated activity counts across a set of projects.
+ * Returned by [DashboardService.getCumulativeSummary].
+ */
+data class CumulativeActivitySummaryDto(
+    val activityTypeCode: String,
+    val totalRecords: Int,
+    val draftCount: Int,
+    val submittedCount: Int,
+    val verifiedCount: Int,
+    val authenticatedCount: Int,
+    val sentBackCount: Int,
+    val slaBreachCount: Int,
+)
+
+data class CumulativeDashboardDto(
+    val summaries: List<CumulativeActivitySummaryDto>,
+    /** Number of projects included in this aggregation. */
+    val projectCount: Int,
+)
+
+data class ZoneOptionDto(
+    val id: UUID,
+    val code: String,
+    val name: String,
+)
+
+data class ProjectOptionDto(
+    val id: UUID,
+    val name: String,
+    val projectCode: String?,
+    val zoneId: UUID,
+)
+
+/**
+ * The set of zones and projects a principal can see, plus whether the
+ * zone filter is user-editable.  Used to populate dashboard filter dropdowns.
+ */
+data class AccessibleScopeDto(
+    val zones: List<ZoneOptionDto>,
+    val projects: List<ProjectOptionDto>,
+    /** False when the zone is fixed (non-PAN_INDIA users). */
+    val zoneFilterEnabled: Boolean,
 )
 
 // ── Drawing approver matrix DTOs ──────────────────────────────────────────────
@@ -357,6 +405,219 @@ class DashboardService(
             projectId,
             activityTypeCode,
         )
+
+    // ── Cumulative / scope endpoints ──────────────────────────────────────────
+
+    /**
+     * Returns the zones and projects accessible to [principal] for populating
+     * dashboard filter dropdowns.
+     *
+     * - PAN_INDIA users: all active zones, all projects, [zoneFilterEnabled]=true.
+     * - ZONE users:      their accessible zones, projects in those zones, filter disabled.
+     * - DY_CE_C:         their primary zone, projects where they are primary_dyce_user_id, filter disabled.
+     * - Others (CE_C):   their accessible zones, projects in those zones, filter disabled.
+     */
+    fun getAccessibleScope(principal: PiaPrincipal): AccessibleScopeDto =
+        when {
+            principal.isSuperAdmin || principal.hasPermission("DASHBOARD.VIEW.PAN_INDIA") -> {
+                val zones = jdbc.query(
+                    "SELECT id, code, name FROM zones WHERE is_active ORDER BY display_order, code",
+                ) { rs, _ ->
+                    ZoneOptionDto(
+                        id = rs.getObject("id", UUID::class.java),
+                        code = rs.getString("code"),
+                        name = rs.getString("name"),
+                    )
+                }
+                val projects = jdbc.query(
+                    "SELECT id, name, project_code, zone_id FROM projects WHERE NOT is_deleted ORDER BY name",
+                ) { rs, _ ->
+                    ProjectOptionDto(
+                        id = rs.getObject("id", UUID::class.java),
+                        name = rs.getString("name"),
+                        projectCode = rs.getString("project_code"),
+                        zoneId = rs.getObject("zone_id", UUID::class.java),
+                    )
+                }
+                AccessibleScopeDto(zones = zones, projects = projects, zoneFilterEnabled = true)
+            }
+
+            principal.hasPermission("DASHBOARD.VIEW.ZONE") -> {
+                val zoneIds = principal.accessibleZoneIds.toList()
+                AccessibleScopeDto(
+                    zones = loadZoneOptions(zoneIds),
+                    projects = loadProjectsInZones(zoneIds),
+                    zoneFilterEnabled = false,
+                )
+            }
+
+            principal.designationCode == "DY_CE_C" -> {
+                val zones = if (principal.primaryZoneId != null)
+                    loadZoneOptions(listOf(principal.primaryZoneId!!))
+                else emptyList()
+                AccessibleScopeDto(
+                    zones = zones,
+                    projects = loadAssignedProjects(principal.userId),
+                    zoneFilterEnabled = false,
+                )
+            }
+
+            else -> {
+                // CE_C, NODAL_DY_CE_C and other PROJECT-scope designations
+                val zoneIds = principal.accessibleZoneIds.toList()
+                AccessibleScopeDto(
+                    zones = loadZoneOptions(zoneIds),
+                    projects = loadProjectsInZones(zoneIds),
+                    zoneFilterEnabled = false,
+                )
+            }
+        }
+
+    /**
+     * Aggregates [project_activity_summary] across a filtered set of projects.
+     *
+     * Filter precedence:
+     * 1. Intersection with projects the [principal] is allowed to see.
+     * 2. If [filterProjectIds] is non-empty, restrict to those project IDs.
+     * 3. Else if [filterZoneIds] is non-empty, restrict to projects in those zones.
+     * 4. Otherwise aggregate across all allowed projects.
+     */
+    fun getCumulativeSummary(
+        principal: PiaPrincipal,
+        filterZoneIds: List<UUID>,
+        filterProjectIds: List<UUID>,
+    ): CumulativeDashboardDto {
+        val allowed = getAllowedProjectIds(principal)
+        if (allowed.isEmpty()) return CumulativeDashboardDto(summaries = emptyList(), projectCount = 0)
+
+        val filtered: List<UUID> = when {
+            filterProjectIds.isNotEmpty() -> {
+                val filterSet = filterProjectIds.toSet()
+                allowed.filter { it in filterSet }
+            }
+            filterZoneIds.isNotEmpty() -> {
+                val zoneSet = getProjectIdsInZones(filterZoneIds).toSet()
+                allowed.filter { it in zoneSet }
+            }
+            else -> allowed
+        }
+
+        if (filtered.isEmpty()) return CumulativeDashboardDto(summaries = emptyList(), projectCount = 0)
+
+        val placeholders = filtered.joinToString(",") { "?" }
+        val summaries = jdbc.query(
+            """
+            SELECT activity_type_code,
+                   COALESCE(SUM(total_records), 0)::int       AS total_records,
+                   COALESCE(SUM(draft_count), 0)::int         AS draft_count,
+                   COALESCE(SUM(submitted_count), 0)::int     AS submitted_count,
+                   COALESCE(SUM(verified_count), 0)::int      AS verified_count,
+                   COALESCE(SUM(authenticated_count), 0)::int AS authenticated_count,
+                   COALESCE(SUM(sent_back_count), 0)::int     AS sent_back_count,
+                   COALESCE(SUM(sla_breach_count), 0)::int    AS sla_breach_count
+            FROM project_activity_summary
+            WHERE project_id IN ($placeholders)
+            GROUP BY activity_type_code
+            ORDER BY activity_type_code
+            """.trimIndent(),
+            { rs, _ ->
+                CumulativeActivitySummaryDto(
+                    activityTypeCode = rs.getString("activity_type_code"),
+                    totalRecords = rs.getInt("total_records"),
+                    draftCount = rs.getInt("draft_count"),
+                    submittedCount = rs.getInt("submitted_count"),
+                    verifiedCount = rs.getInt("verified_count"),
+                    authenticatedCount = rs.getInt("authenticated_count"),
+                    sentBackCount = rs.getInt("sent_back_count"),
+                    slaBreachCount = rs.getInt("sla_breach_count"),
+                )
+            },
+            *filtered.toTypedArray(),
+        )
+        return CumulativeDashboardDto(summaries = summaries, projectCount = filtered.size)
+    }
+
+    private fun getAllowedProjectIds(principal: PiaPrincipal): List<UUID> =
+        when {
+            principal.isSuperAdmin || principal.hasPermission("DASHBOARD.VIEW.PAN_INDIA") ->
+                jdbc.query(
+                    "SELECT id FROM projects WHERE NOT is_deleted",
+                ) { rs, _ -> rs.getObject("id", UUID::class.java) }
+
+            principal.hasPermission("DASHBOARD.VIEW.ZONE") ->
+                getProjectIdsInZones(principal.accessibleZoneIds.toList())
+
+            principal.designationCode == "DY_CE_C" ->
+                loadAssignedProjects(principal.userId).map { it.id }
+
+            else ->
+                getProjectIdsInZones(principal.accessibleZoneIds.toList())
+        }
+
+    private fun loadZoneOptions(zoneIds: List<UUID>): List<ZoneOptionDto> {
+        if (zoneIds.isEmpty()) return emptyList()
+        val ph = zoneIds.joinToString(",") { "?" }
+        return jdbc.query(
+            "SELECT id, code, name FROM zones WHERE id IN ($ph) AND is_active ORDER BY display_order, code",
+            { rs, _ ->
+                ZoneOptionDto(
+                    id = rs.getObject("id", UUID::class.java),
+                    code = rs.getString("code"),
+                    name = rs.getString("name"),
+                )
+            },
+            *zoneIds.toTypedArray(),
+        )
+    }
+
+    private fun loadProjectsInZones(zoneIds: List<UUID>): List<ProjectOptionDto> {
+        if (zoneIds.isEmpty()) return emptyList()
+        val ph = zoneIds.joinToString(",") { "?" }
+        return jdbc.query(
+            "SELECT id, name, project_code, zone_id FROM projects WHERE zone_id IN ($ph) AND NOT is_deleted ORDER BY name",
+            { rs, _ ->
+                ProjectOptionDto(
+                    id = rs.getObject("id", UUID::class.java),
+                    name = rs.getString("name"),
+                    projectCode = rs.getString("project_code"),
+                    zoneId = rs.getObject("zone_id", UUID::class.java),
+                )
+            },
+            *zoneIds.toTypedArray(),
+        )
+    }
+
+    private fun loadAssignedProjects(userId: UUID): List<ProjectOptionDto> =
+        jdbc.query(
+            """
+            SELECT DISTINCT p.id, p.name, p.project_code, p.zone_id
+            FROM projects p
+            JOIN project_activities pa ON pa.project_id = p.id
+            WHERE pa.primary_dyce_user_id = ?
+              AND NOT pa.is_deleted
+              AND NOT p.is_deleted
+            ORDER BY p.name
+            """.trimIndent(),
+            { rs, _ ->
+                ProjectOptionDto(
+                    id = rs.getObject("id", UUID::class.java),
+                    name = rs.getString("name"),
+                    projectCode = rs.getString("project_code"),
+                    zoneId = rs.getObject("zone_id", UUID::class.java),
+                )
+            },
+            userId,
+        )
+
+    private fun getProjectIdsInZones(zoneIds: List<UUID>): List<UUID> {
+        if (zoneIds.isEmpty()) return emptyList()
+        val ph = zoneIds.joinToString(",") { "?" }
+        return jdbc.query(
+            "SELECT id FROM projects WHERE zone_id IN ($ph) AND NOT is_deleted",
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            *zoneIds.toTypedArray(),
+        )
+    }
 
     // ── Drawing approver matrix (§7) ──────────────────────────────────────────
 

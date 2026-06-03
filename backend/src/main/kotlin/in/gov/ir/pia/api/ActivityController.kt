@@ -4,6 +4,7 @@ import `in`.gov.ir.pia.security.PiaPrincipal
 import `in`.gov.ir.pia.service.activity.ActivityDetailResponse
 import `in`.gov.ir.pia.service.activity.ActivityRecordDetailResponse
 import `in`.gov.ir.pia.service.activity.ActivityService
+import `in`.gov.ir.pia.service.activity.ActivityWorkflowActionResult
 import `in`.gov.ir.pia.service.activity.CreateActivityRecordRequest
 import `in`.gov.ir.pia.service.activity.CreateActivityRequest
 import `in`.gov.ir.pia.service.activity.UpdateActivityRequest
@@ -16,6 +17,7 @@ import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PutMapping
@@ -53,6 +55,12 @@ import java.util.UUID
  *
  * All methods carry `@PreAuthorize`.
  */
+
+data class ActivityWorkflowActionControllerRequest(
+    val action: String,
+    val comment: String? = null,
+)
+
 @RestController
 class ActivityController(
     private val activityService: ActivityService,
@@ -233,6 +241,127 @@ class ActivityController(
         val updated = activityService.patchRecord(recordId, request, expectedVersion, principal)
         response.setHeader("ETag", "\"${updated.version}\"")
         return updated
+    }
+
+    // ── Activity-level workflow (submit / verify / authenticate) ─────────────
+
+    @GetMapping("/api/v1/activities/{activityId}/workflow")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY.READ.OWN')")
+    fun getActivityWorkflowState(
+        @PathVariable activityId: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.getActivityWorkflowState(activityId, principal)
+
+    @PostMapping("/api/v1/activities/{activityId}/submit")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.SUBMIT')")
+    fun submitActivity(
+        @PathVariable activityId: UUID,
+        @RequestBody(required = false) req: WorkflowActionRequest?,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performActivityDirectWorkflowAction(activityId, "submit", req?.comment, principal)
+
+    @PostMapping("/api/v1/activities/{activityId}/verify")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.VERIFY')")
+    fun verifyActivity(
+        @PathVariable activityId: UUID,
+        @RequestBody(required = false) req: WorkflowActionRequest?,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performActivityDirectWorkflowAction(activityId, "verify", req?.comment, principal)
+
+    @PostMapping("/api/v1/activities/{activityId}/authenticate")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.AUTHENTICATE')")
+    fun authenticateActivity(
+        @PathVariable activityId: UUID,
+        @RequestBody(required = false) req: WorkflowActionRequest?,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performActivityDirectWorkflowAction(activityId, "authenticate", req?.comment, principal)
+
+    @PostMapping("/api/v1/activities/{activityId}/send-back")
+    @PreAuthorize(
+        "@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.SEND_BACK') or " +
+            "@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.VERIFY')",
+    )
+    fun sendBackActivity(
+        @PathVariable activityId: UUID,
+        @RequestBody req: WorkflowActionRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performActivityDirectWorkflowAction(activityId, "send_back", req.comment, principal)
+
+    @PostMapping("/api/v1/activities/{activityId}/resubmit")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.SUBMIT')")
+    fun resubmitActivity(
+        @PathVariable activityId: UUID,
+        @RequestBody(required = false) req: WorkflowActionRequest?,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performActivityDirectWorkflowAction(activityId, "resubmit", req?.comment, principal)
+
+    @PostMapping("/api/v1/activities/{activityId}/re-verify")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.VERIFY')")
+    fun reverifyActivity(
+        @PathVariable activityId: UUID,
+        @RequestBody(required = false) req: WorkflowActionRequest?,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): SectionWorkflowStateResponse =
+        activityService.performActivityDirectWorkflowAction(activityId, "re_verify", req?.comment, principal)
+
+    /**
+     * Applies a workflow action to every eligible record (and section) in an
+     * activity in a single call.
+     *
+     * The engine transitions each workflow instance where:
+     *   1. The instance is not terminal.
+     *   2. The action is available for the calling principal's role.
+     *
+     * Per-instance failures are collected but do not roll back successes.
+     * The response counts succeeded / failed / skipped transitions.
+     *
+     * Action codes: "submit", "verify", "authenticate", "resubmit", "re_verify"
+     * (same codes as the individual record endpoints).
+     *
+     * Permission: ACTIVITY_RECORD.SUBMIT, ACTIVITY_RECORD.VERIFY, or
+     * ACTIVITY_RECORD.AUTHENTICATE — each action is further gated by the
+     * workflow engine's role check.
+     */
+    @PostMapping("/api/v1/activities/{activityId}/workflow-action")
+    @PreAuthorize(
+        "@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.SUBMIT') or " +
+            "@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.VERIFY') or " +
+            "@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.AUTHENTICATE')",
+    )
+    fun activityWorkflowAction(
+        @PathVariable activityId: UUID,
+        @RequestBody request: ActivityWorkflowActionControllerRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): ActivityWorkflowActionResult =
+        activityService.performActivityWorkflowAction(
+            activityId = activityId,
+            action     = request.action,
+            comment    = request.comment,
+            principal  = principal,
+        )
+
+    /**
+     * Soft-deletes an activity record.
+     *
+     * Allowed roles: DY_CE_C / NODAL_DY_CE_C (assigned to project) and CE/C
+     * (zone-level authority).  Authenticated records cannot be deleted (409).
+     *
+     * Requires permission: ACTIVITY_RECORD.DELETE.OWN
+     */
+    @DeleteMapping("/api/v1/activity-records/{recordId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.DELETE')")
+    fun deleteRecord(
+        @PathVariable recordId: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ) {
+        activityService.deleteRecord(recordId, principal)
     }
 
     // ── Workflow state + actions ──────────────────────────────────────────────

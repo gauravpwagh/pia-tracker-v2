@@ -12,6 +12,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuthStore } from '@stores/authStore';
 import dayjs from 'dayjs';
 import {
   Alert,
@@ -22,22 +23,29 @@ import {
   Form,
   Input,
   List,
+  notification,
+  Popconfirm,
   Skeleton,
   Space,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import { ActivityMetadataForm, ActivityMetadataView } from './ActivityMetadataForm';
 import {
   AuditOutlined,
   BranchesOutlined,
+  CheckCircleOutlined,
   CloseOutlined,
   ClusterOutlined,
+  DeleteOutlined,
   EditOutlined,
   FileTextOutlined,
   HomeOutlined,
   PlusOutlined,
+  SafetyOutlined,
   SaveOutlined,
+  SendOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import {
@@ -48,8 +56,14 @@ import {
 import {
   listRecords,
   createRecord,
+  deleteRecord,
   type ActivityRecordDetail,
 } from '@api/activityRecords';
+import {
+  fetchActivityWorkflowState,
+  performActivityAction,
+  type SectionWorkflowState,
+} from '@api/workflow';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -116,8 +130,17 @@ const RECORD_STATE_COLORS: Record<string, string> = {
   SENT_BACK_TO_NODAL:           'orange',
 };
 
+const RECORD_STATE_LABELS: Record<string, string> = {
+  DRAFT:                        'Draft',
+  SUBMITTED_FOR_VERIFICATION:   'Pending Nodal Verification',
+  VERIFIED:                     'Pending CE/C Authentication',
+  AUTHENTICATED:                'Authenticated',
+  SENT_BACK_TO_DYCE:            'Sent Back to Dy CE/C',
+  SENT_BACK_TO_NODAL:           'Sent Back to Nodal Dy CE/C',
+};
+
 function recordStateLabel(state: string): string {
-  return state.replace(/_/g, ' ');
+  return RECORD_STATE_LABELS[state] ?? state.replace(/_/g, ' ');
 }
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
@@ -127,6 +150,8 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
   const location = useLocation();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
+  useAuthStore(); // kept to trigger re-render on auth change
+  const [notifApi, notifCtx] = notification.useNotification();
   const [form] = Form.useForm<EditValues>();
   // Metadata is plain React state — no Ant Design form store involvement.
   const [metadataState, setMetadataState] = useState<Record<string, unknown>>({});
@@ -169,7 +194,38 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
     },
   });
 
+  const deleteRecordMutation = useMutation({
+    mutationFn: (recordId: string) => deleteRecord(recordId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['records', activityId] });
+    },
+  });
+
+  const activityWorkflowMutation = useMutation({
+    mutationFn: ({ action, comment }: { action: 'submit' | 'verify' | 'authenticate' | 'send-back' | 'resubmit' | 're-verify'; comment?: string }) =>
+      performActivityAction(activityId, action, comment),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['activityWorkflow', activityId], updated);
+      notifApi.success({ message: 'Activity updated', duration: 2 });
+    },
+    onError: (err: Error) => {
+      notifApi.error({ message: 'Action failed', description: err.message, duration: 5 });
+    },
+  });
+
+  const activityWorkflowQuery = useQuery<SectionWorkflowState>({
+    queryKey: ['activityWorkflow', activityId],
+    queryFn: () => fetchActivityWorkflowState(activityId),
+    staleTime: 30_000,
+  });
+
   const activity = activityQuery.data;
+  const activityWorkflow = activityWorkflowQuery.data;
+
+  // Available actions are determined by the activity's own workflow state
+  const availableActions = activityWorkflow?.availableActions ?? [];
+  const currentStateCode = activityWorkflow?.currentStateCode ?? 'DRAFT';
+  const isTerminal       = activityWorkflow?.isTerminal ?? false;
 
   const startEditing = () => {
     if (!activity) return;
@@ -219,6 +275,7 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {notifCtx}
 
       {/* ── Title bar ─────────────────────────────────────────────────────── */}
       <div style={{
@@ -240,8 +297,8 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
           {activity?.name ?? typeLabel}
         </Text>
 
-        {/* Action buttons */}
-        {activity && canEdit && !editing && (
+        {/* Action buttons — hidden once activity is authenticated */}
+        {activity && canEdit && !editing && !isTerminal && (
           <Button size="small" icon={<EditOutlined />} onClick={startEditing}>
             Edit
           </Button>
@@ -343,36 +400,124 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
               )}
             </div>
 
-            {/* ── Records (hidden for Utility Shifting — data lives on the activity itself) */}
+            {/* ── Activity-level workflow actions ────────────────────────── */}
+            {!isTerminal && availableActions.length > 0 && (
+              <div>
+                <Divider orientation="left" orientationMargin={0}
+                  style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
+                  Workflow
+                </Divider>
+                <Tag style={{ marginBottom: 10, fontSize: 12 }}
+                  color={
+                    currentStateCode === 'DRAFT' ? 'default' :
+                    currentStateCode === 'SUBMITTED_FOR_VERIFICATION' ? 'blue' :
+                    currentStateCode === 'VERIFIED' ? 'cyan' :
+                    currentStateCode === 'SENT_BACK_TO_DYCE' ? 'orange' :
+                    currentStateCode === 'SENT_BACK_TO_NODAL' ? 'orange' : 'default'
+                  }
+                >
+                  {RECORD_STATE_LABELS[currentStateCode] ?? currentStateCode.replace(/_/g, ' ')}
+                </Tag>
+                <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                  {availableActions.includes('submit') && (
+                    <Button type="primary" icon={<SendOutlined />} block
+                      loading={activityWorkflowMutation.isPending}
+                      onClick={() => activityWorkflowMutation.mutate({ action: 'submit' })}>
+                      Submit for Verification
+                    </Button>
+                  )}
+                  {availableActions.includes('resubmit') && (
+                    <Button icon={<SendOutlined />} block
+                      loading={activityWorkflowMutation.isPending}
+                      onClick={() => activityWorkflowMutation.mutate({ action: 'resubmit' })}>
+                      Resubmit
+                    </Button>
+                  )}
+                  {availableActions.includes('verify') && (
+                    <Button type="primary" icon={<CheckCircleOutlined />} block
+                      loading={activityWorkflowMutation.isPending}
+                      onClick={() => activityWorkflowMutation.mutate({ action: 'verify' })}>
+                      Submit for Authentication
+                    </Button>
+                  )}
+                  {availableActions.includes('re_verify') && (
+                    <Button icon={<CheckCircleOutlined />} block
+                      loading={activityWorkflowMutation.isPending}
+                      onClick={() => activityWorkflowMutation.mutate({ action: 're-verify' })}>
+                      Re-verify
+                    </Button>
+                  )}
+                  {availableActions.includes('authenticate') && (
+                    <Popconfirm
+                      title="Authenticate this activity?"
+                      description="Authentication is irreversible."
+                      okText="Authenticate" cancelText="Cancel"
+                      onConfirm={() => activityWorkflowMutation.mutate({ action: 'authenticate' })}>
+                      <Button type="primary" icon={<SafetyOutlined />} block
+                        loading={activityWorkflowMutation.isPending}>
+                        Authenticate
+                      </Button>
+                    </Popconfirm>
+                  )}
+                  {availableActions.includes('send_back') && (
+                    <Button danger icon={<SendOutlined />} block
+                      loading={activityWorkflowMutation.isPending}
+                      onClick={() => activityWorkflowMutation.mutate({ action: 'send-back' })}>
+                      Send Back
+                    </Button>
+                  )}
+                </Space>
+              </div>
+            )}
+            {isTerminal && (
+              <div>
+                <Divider orientation="left" orientationMargin={0}
+                  style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
+                  Workflow
+                </Divider>
+                <Tag color="purple" style={{ fontSize: 12 }}>Authenticated</Tag>
+              </div>
+            )}
+
+            {/* ── Records
+                  • UTILITY_SHIFTING: hidden (data lives on the activity itself)
+                  • DRAWING_APPROVAL: no "New Record" button — the record is auto-created
+                    at activity-creation time using drawing_type as recordSubtype.
+                  • All others: full create + list UI.
+            */}
             {activity.activityTypeCode !== 'UTILITY_SHIFTING' && <div>
               <Divider orientation="left" orientationMargin={0}
                 style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
-                Records
+                {activity.activityTypeCode === 'DRAWING_APPROVAL' ? 'Approval record' : 'Records'}
               </Divider>
 
-              <Button
-                block
-                type="primary"
-                icon={<PlusOutlined />}
-                loading={createRecordMutation.isPending}
-                onClick={() => createRecordMutation.mutate()}
-                style={{ marginBottom: 10 }}
-              >
-                New Record
-              </Button>
+              {activity.activityTypeCode !== 'DRAWING_APPROVAL' && (
+                <>
+                  <Button
+                    block
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    loading={createRecordMutation.isPending}
+                    onClick={() => createRecordMutation.mutate()}
+                    style={{ marginBottom: 10 }}
+                  >
+                    New Record
+                  </Button>
 
-              {createRecordMutation.isError && (
-                <Alert
-                  type="error"
-                  message="Failed to create record"
-                  description={
-                    createRecordMutation.error instanceof Error
-                      ? createRecordMutation.error.message
-                      : undefined
-                  }
-                  showIcon
-                  style={{ marginBottom: 8 }}
-                />
+                  {createRecordMutation.isError && (
+                    <Alert
+                      type="error"
+                      message="Failed to create record"
+                      description={
+                        createRecordMutation.error instanceof Error
+                          ? createRecordMutation.error.message
+                          : undefined
+                      }
+                      showIcon
+                      style={{ marginBottom: 8 }}
+                    />
+                  )}
+                </>
               )}
 
               {recordsQuery.isLoading && <Skeleton active paragraph={{ rows: 2 }} />}
@@ -387,39 +532,83 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
                 </Text>
               )}
 
+              {deleteRecordMutation.isError && (
+                <Alert
+                  type="error"
+                  message="Failed to delete record"
+                  description={
+                    deleteRecordMutation.error instanceof Error
+                      ? deleteRecordMutation.error.message
+                      : undefined
+                  }
+                  showIcon
+                  closable
+                  style={{ marginBottom: 8 }}
+                />
+              )}
+
               {recordsQuery.data && recordsQuery.data.length > 0 && (
                 <List
                   size="small"
                   bordered
                   dataSource={recordsQuery.data}
-                  renderItem={(record, index) => (
-                    <List.Item
-                      key={record.id}
-                      style={{ cursor: 'pointer', padding: '6px 10px' }}
-                      onClick={() => navigate(`/records/${record.id}/edit`, { state: { returnPath: location.pathname } })}
-                      actions={[
-                        <Tag
-                          key="state"
-                          color={RECORD_STATE_COLORS[record.recordState] ?? 'default'}
-                          style={{ fontSize: 11, margin: 0 }}
+                  renderItem={(record, index) => {
+                    const isAuthenticated = record.recordState === 'AUTHENTICATED';
+                    return (
+                      <List.Item
+                        key={record.id}
+                        style={{ padding: '6px 10px' }}
+                        actions={[
+                          <Tag
+                            key="state"
+                            color={RECORD_STATE_COLORS[record.recordState] ?? 'default'}
+                            style={{ fontSize: 11, margin: 0 }}
+                          >
+                            {recordStateLabel(record.recordState)}
+                          </Tag>,
+                          canEdit && !isAuthenticated ? (
+                            <Popconfirm
+                              key="delete"
+                              title="Delete this record?"
+                              description="This cannot be undone."
+                              okText="Delete"
+                              okButtonProps={{ danger: true }}
+                              cancelText="Cancel"
+                              onConfirm={() => deleteRecordMutation.mutate(record.id)}
+                            >
+                              <Tooltip title="Delete record">
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  danger
+                                  icon={<DeleteOutlined />}
+                                  loading={deleteRecordMutation.isPending}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </Tooltip>
+                            </Popconfirm>
+                          ) : null,
+                        ].filter(Boolean)}
+                      >
+                        <div
+                          style={{ cursor: 'pointer', flex: 1 }}
+                          onClick={() => navigate(`/records/${record.id}/edit`, { state: { returnPath: location.pathname } })}
                         >
-                          {recordStateLabel(record.recordState)}
-                        </Tag>,
-                      ]}
-                    >
-                      <Space size={6}>
-                        <FileTextOutlined style={{ color: 'var(--ant-color-text-secondary)', fontSize: 12 }} />
-                        <Text style={{ fontSize: 12 }}>
-                          {record.recordSubtype
-                            ? record.recordSubtype
-                            : `Record ${index + 1}`}
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: 11 }}>
-                          {dayjs(record.updatedAt).format('D MMM YYYY')}
-                        </Text>
-                      </Space>
-                    </List.Item>
-                  )}
+                          <Space size={6}>
+                            <FileTextOutlined style={{ color: 'var(--ant-color-text-secondary)', fontSize: 12 }} />
+                            <Text style={{ fontSize: 12 }}>
+                              {record.recordSubtype
+                                ? record.recordSubtype
+                                : `Record ${index + 1}`}
+                            </Text>
+                            <Text type="secondary" style={{ fontSize: 11 }}>
+                              {dayjs(record.updatedAt).format('D MMM YYYY')}
+                            </Text>
+                          </Space>
+                        </div>
+                      </List.Item>
+                    );
+                  }}
                 />
               )}
             </div>}

@@ -45,6 +45,13 @@ export type WorkflowActionCode =
   | 'resubmit'
   | 're-verify';
 
+export interface ActivityWorkflowActionResult {
+  totalRecords: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+}
+
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 export async function fetchWorkflowState(
@@ -55,6 +62,64 @@ export async function fetchWorkflowState(
   });
   if (!resp.ok) throw new Error(`Workflow state fetch failed: ${resp.status}`);
   return resp.json() as Promise<RecordWorkflowStateResponse>;
+}
+
+/**
+ * GET /api/v1/activities/{activityId}/workflow
+ * Returns the activity-level workflow state (independent of records).
+ */
+export async function fetchActivityWorkflowState(
+  activityId: string,
+): Promise<SectionWorkflowState> {
+  const resp = await fetch(`/api/v1/activities/${activityId}/workflow`, {
+    credentials: 'include',
+  });
+  if (!resp.ok) throw new Error(`Activity workflow state fetch failed: ${resp.status}`);
+  return resp.json() as Promise<SectionWorkflowState>;
+}
+
+/**
+ * POST /api/v1/activities/{activityId}/{action}
+ * Performs a workflow action on the activity itself (submit / verify / authenticate / …).
+ */
+export async function performActivityAction(
+  activityId: string,
+  action: 'submit' | 'verify' | 'authenticate' | 'send-back' | 'resubmit' | 're-verify',
+  comment?: string,
+): Promise<SectionWorkflowState> {
+  const resp = await fetch(`/api/v1/activities/${activityId}/${action}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ comment: comment ?? null }),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(text || `Activity action '${action}' failed: ${resp.status}`);
+  }
+  return resp.json() as Promise<SectionWorkflowState>;
+}
+
+/**
+ * POST /api/v1/activities/{activityId}/workflow-action
+ * Applies a workflow action to ALL eligible records (and sections) in the activity.
+ */
+export async function performActivityWorkflowAction(
+  activityId: string,
+  action: string,
+  comment?: string,
+): Promise<ActivityWorkflowActionResult> {
+  const resp = await fetch(`/api/v1/activities/${activityId}/workflow-action`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, comment: comment ?? null }),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(text || `Activity workflow action failed: ${resp.status}`);
+  }
+  return resp.json() as Promise<ActivityWorkflowActionResult>;
 }
 
 export async function performWorkflowAction(

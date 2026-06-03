@@ -155,6 +155,44 @@ export interface PanIndiaDashboardResponse {
   zones: ZoneSummaryDto[];
 }
 
+// ── Cumulative dashboard ──────────────────────────────────────────────────────
+
+export interface CumulativeActivitySummaryDto {
+  activityTypeCode: string;
+  totalRecords: number;
+  draftCount: number;
+  submittedCount: number;
+  verifiedCount: number;
+  authenticatedCount: number;
+  sentBackCount: number;
+  slaBreachCount: number;
+}
+
+export interface CumulativeDashboardDto {
+  summaries: CumulativeActivitySummaryDto[];
+  projectCount: number;
+}
+
+export interface ZoneOptionDto {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface ProjectOptionDto {
+  id: string;
+  name: string;
+  projectCode: string | null;
+  zoneId: string;
+}
+
+export interface AccessibleScopeDto {
+  zones: ZoneOptionDto[];
+  projects: ProjectOptionDto[];
+  /** True for PAN_INDIA users who can freely filter by zone. */
+  zoneFilterEnabled: boolean;
+}
+
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -203,4 +241,21 @@ export async function fetchDashboardRecords(projectId: string, activityTypeCode:
 export async function fetchDrawingApproverMatrix(projectId: string): Promise<DrawingApproverMatrixDto> {
   const res = await fetch(`${BASE}/dashboard/projects/${projectId}/drawing-approver-matrix`, { credentials: 'include' });
   return handleResponse<DrawingApproverMatrixDto>(res);
+}
+
+export async function fetchAccessibleScope(): Promise<AccessibleScopeDto> {
+  const res = await fetch(`${BASE}/dashboard/accessible-scope`, { credentials: 'include' });
+  return handleResponse<AccessibleScopeDto>(res);
+}
+
+export async function fetchCumulativeDashboard(
+  zoneIds: string[],
+  projectIds: string[],
+): Promise<CumulativeDashboardDto> {
+  const params = new URLSearchParams();
+  zoneIds.forEach((id) => params.append('zoneIds', id));
+  projectIds.forEach((id) => params.append('projectIds', id));
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/dashboard/cumulative${qs ? `?${qs}` : ''}`, { credentials: 'include' });
+  return handleResponse<CumulativeDashboardDto>(res);
 }

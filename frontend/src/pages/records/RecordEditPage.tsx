@@ -32,11 +32,11 @@
  * Each section has an independent workflow instance (SECTION_STANDARD_V1).
  * Workflow state is fetched from GET /api/v1/activity-records/{id}/workflow.
  * The bottom bar shows the primary action(s) for the active section:
- *   Dy CE/C in DRAFT → "Submit Section"
- *   Nodal in SUBMITTED_FOR_VERIFICATION → "Verify" + "Send Back"
- *   CE/C in VERIFIED → "Authenticate" + "Send Back"
- *   SENT_BACK_TO_DYCE → "Resubmit"
- *   SENT_BACK_TO_NODAL → "Re-verify"
+ *   Dy CE/C in DRAFT                    → "Submit for Verification"
+ *   Nodal in PENDING_NODAL_VERIFICATION → "Submit for Authentication" + "Send Back"
+ *   CE/C in PENDING_CE_C_AUTHENTICATION → "Authenticate" + "Send Back"
+ *   SENT_BACK_TO_DYCE                   → "Resubmit"
+ *   SENT_BACK_TO_NODAL                  → "Re-verify"
  * Send Back always opens a modal requiring a comment.
  */
 
@@ -104,11 +104,17 @@ const SECTION_DOT_COLORS: Record<string, string> = {
   SENT_BACK_TO_NODAL: '#fa8c16',
 };
 
+const STATE_LABELS: Record<string, string> = {
+  DRAFT:                        'Draft',
+  SUBMITTED_FOR_VERIFICATION:   'Pending Nodal Verification',
+  VERIFIED:                     'Pending CE/C Authentication',
+  AUTHENTICATED:                'Authenticated',
+  SENT_BACK_TO_DYCE:            'Sent Back to Dy CE/C',
+  SENT_BACK_TO_NODAL:           'Sent Back to Nodal Dy CE/C',
+};
+
 function RecordStateBadge({ state }: { state: string }) {
-  const label = state
-    .toLowerCase()
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  const label = STATE_LABELS[state] ?? state.replace(/_/g, ' ');
   const color = STATE_COLORS[state] ?? 'default';
   return <Tag color={color}>{label}</Tag>;
 }

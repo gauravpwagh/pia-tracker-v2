@@ -143,6 +143,23 @@ export async function listRecords(activityId: string): Promise<ActivityRecordDet
 }
 
 /**
+ * DELETE /api/v1/activity-records/{recordId}
+ * Soft-deletes a non-authenticated record.
+ * Requires ACTIVITY_RECORD.DELETE.OWN permission.
+ * Returns 409 if the record is AUTHENTICATED.
+ */
+export async function deleteRecord(recordId: string): Promise<void> {
+  const res = await fetch(`${BASE}/activity-records/${recordId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+}
+
+/**
  * GET /api/v1/activities/{activityId}
  */
 export async function fetchActivity(activityId: string): Promise<ActivityDetail> {

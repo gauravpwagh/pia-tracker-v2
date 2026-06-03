@@ -1,5 +1,7 @@
 package `in`.gov.ir.pia.api
 
+import `in`.gov.ir.pia.dashboard.AccessibleScopeDto
+import `in`.gov.ir.pia.dashboard.CumulativeDashboardDto
 import `in`.gov.ir.pia.dashboard.DashboardRecordDto
 import `in`.gov.ir.pia.dashboard.DashboardService
 import `in`.gov.ir.pia.dashboard.DrawingApproverMatrixDto
@@ -20,6 +22,7 @@ import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
@@ -189,6 +192,58 @@ class DashboardController(
     )
     fun getPanIndiaDashboard(): PanIndiaDashboardResponse =
         panIndiaDashboardService.getPanIndiaDashboard()
+
+    // ── Cumulative activity summary (new unified dashboard) ───────────────────
+
+    @GetMapping("/api/v1/dashboard/accessible-scope")
+    @PreAuthorize(
+        "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PROJECT') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.ZONE') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PAN_INDIA')",
+    )
+    @Operation(
+        summary = "Accessible zones and projects for dashboard filters",
+        description =
+            "Returns the zones and projects the calling principal can see, for populating " +
+                "the dashboard filter dropdowns. Also signals whether the zone filter is editable " +
+                "(true for PAN_INDIA users; false for zone/project-scoped users whose zone is fixed).",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Scope returned"),
+        ApiResponse(responseCode = "403", description = "Insufficient permission"),
+    )
+    fun getAccessibleScope(
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): AccessibleScopeDto = dashboardService.getAccessibleScope(principal)
+
+    @GetMapping("/api/v1/dashboard/cumulative")
+    @PreAuthorize(
+        "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PROJECT') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.ZONE') or " +
+            "@pe.hasPermission(authentication, null, 'DASHBOARD.VIEW.PAN_INDIA')",
+    )
+    @Operation(
+        summary = "Cumulative activity KPI summary across a filtered scope",
+        description =
+            "Aggregates project_activity_summary by activity_type_code across the projects " +
+                "the principal can access, optionally filtered by zoneIds and/or projectIds. " +
+                "Filter precedence: projectIds > zoneIds > all allowed. " +
+                "Results are always bounded by the principal's accessible project set.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Cumulative summary returned"),
+        ApiResponse(responseCode = "403", description = "Insufficient permission"),
+    )
+    fun getCumulativeDashboard(
+        @AuthenticationPrincipal principal: PiaPrincipal,
+        @RequestParam(required = false) zoneIds: List<UUID>?,
+        @RequestParam(required = false) projectIds: List<UUID>?,
+    ): CumulativeDashboardDto =
+        dashboardService.getCumulativeSummary(
+            principal,
+            zoneIds ?: emptyList(),
+            projectIds ?: emptyList(),
+        )
 
     // ── Activity records for dashboard tables (§4-8) ──────────────────────────
 

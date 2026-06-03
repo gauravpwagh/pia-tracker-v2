@@ -149,8 +149,14 @@ const LABEL_MAP: Record<string, Record<string, string>> = {
     work_order_date:            'Work Order Date',
   },
   DRAWING_APPROVAL: {
-    drawing_type:   'Drawing Type',
-    drawing_number: 'Drawing Number',
+    drawing_type:    'Drawing Type',
+    drawing_number:  'Drawing Number',
+    drawing_title:   'Drawing Title',
+    name_of_section: 'Name of Section / Station',
+    chainage_from:   'Chainage From',
+    chainage_to:     'Chainage To',
+    revision_number: 'Revision Number',
+    remarks:         'Remarks',
   },
   TENDER_PACKAGING: {
     package_name:    'Package Name',
@@ -598,10 +604,12 @@ export function ActivityMetadataForm({
     }
 
     // ── Drawing Approval ─────────────────────────────────────────────────
+    // All drawing details are captured here on the activity; no separate
+    // record creation is needed (the record is auto-created on the backend).
     case 'DRAWING_APPROVAL':
       return (
         <>
-          <Form.Item label="Drawing Type" required>
+          <Form.Item label="Drawing Type" required tooltip="Determines the approval chain and form. Cannot be changed after creation.">
             <Select
               placeholder="Select drawing type…"
               options={DRAWING_TYPE_OPTIONS}
@@ -611,11 +619,57 @@ export function ActivityMetadataForm({
               onChange={(v) => onChange('drawing_type', v)}
             />
           </Form.Item>
-          <Form.Item label="Drawing Number">
+          <Form.Item label="Drawing Number" required>
             <Input
               placeholder="e.g. CONST/NR/ABL-LDH/ESP/001"
               value={str('drawing_number')}
               onChange={(e) => onChange('drawing_number', e.target.value)}
+            />
+          </Form.Item>
+          <Form.Item label="Drawing Title">
+            <Input
+              placeholder="e.g. Earth Slope Protection — Km 132 to 145"
+              value={str('drawing_title')}
+              onChange={(e) => onChange('drawing_title', e.target.value)}
+            />
+          </Form.Item>
+          <Form.Item label="Name of Section / Station">
+            <Input
+              placeholder="e.g. Ambala–Ludhiana Section or Ambala Cantt"
+              value={str('name_of_section')}
+              onChange={(e) => onChange('name_of_section', e.target.value)}
+            />
+          </Form.Item>
+          <Form.Item label="Chainage From" help="KM+M format, e.g. 132+450">
+            <Input
+              placeholder="e.g. 132+450"
+              value={str('chainage_from')}
+              onChange={(e) => onChange('chainage_from', e.target.value)}
+            />
+          </Form.Item>
+          <Form.Item label="Chainage To" help="KM+M format, e.g. 145+200">
+            <Input
+              placeholder="e.g. 145+200"
+              value={str('chainage_to')}
+              onChange={(e) => onChange('chainage_to', e.target.value)}
+            />
+          </Form.Item>
+          <Form.Item label="Revision Number">
+            <InputNumber
+              min={0}
+              precision={0}
+              style={{ width: '100%' }}
+              placeholder="0"
+              value={num('revision_number')}
+              onChange={(v) => onChange('revision_number', v ?? undefined)}
+            />
+          </Form.Item>
+          <Form.Item label="Remarks">
+            <Input.TextArea
+              rows={3}
+              placeholder="Additional notes, DPR reference, design standard…"
+              value={str('remarks')}
+              onChange={(e) => onChange('remarks', e.target.value)}
             />
           </Form.Item>
         </>
