@@ -159,6 +159,71 @@ export async function deleteRecord(recordId: string): Promise<void> {
   }
 }
 
+// ── Drawing approver checklist ────────────────────────────────────────────────
+
+export interface DrawingApproverDto {
+  id: string;
+  approvalDesignationCode: string;
+  /** Human-readable designation name, e.g. "Senior Divisional Engineer". */
+  designationName: string;
+  position: number;
+  /** ISO date string "YYYY-MM-DD" or null if not yet approved. */
+  approvedOn: string | null;
+  remarks: string | null;
+}
+
+export interface DrawingApproverListResponse {
+  recordId: string;
+  /** True when all slots have an approvedOn date. */
+  allApproved: boolean;
+  approvers: DrawingApproverDto[];
+}
+
+export async function fetchDrawingApprovers(recordId: string): Promise<DrawingApproverListResponse> {
+  const res = await fetch(`${BASE}/activity-records/${recordId}/drawing-approvers`, { credentials: 'include' });
+  return handleResponse<DrawingApproverListResponse>(res);
+}
+
+export async function updateDrawingApproval(
+  recordId: string,
+  approverId: string,
+  approvedOn: string | null,
+  remarks: string | null,
+): Promise<DrawingApproverDto> {
+  const res = await fetch(`${BASE}/activity-records/${recordId}/drawing-approvers/${approverId}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ approvedOn, remarks }),
+  });
+  return handleResponse<DrawingApproverDto>(res);
+}
+
+export async function addDrawingApprover(
+  recordId: string,
+  designationCode: string,
+  position?: number,
+): Promise<DrawingApproverDto> {
+  const res = await fetch(`${BASE}/activity-records/${recordId}/drawing-approvers`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ designationCode, position }),
+  });
+  return handleResponse<DrawingApproverDto>(res);
+}
+
+export async function removeDrawingApprover(recordId: string, approverId: string): Promise<void> {
+  const res = await fetch(`${BASE}/activity-records/${recordId}/drawing-approvers/${approverId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+}
+
 /**
  * GET /api/v1/activities/{activityId}
  */

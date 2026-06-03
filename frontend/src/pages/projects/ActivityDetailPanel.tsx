@@ -59,6 +59,7 @@ import {
   deleteRecord,
   type ActivityRecordDetail,
 } from '@api/activityRecords';
+import { DrawingApproversPanel } from './DrawingApproversPanel';
 import {
   fetchActivityWorkflowState,
   performActivityAction,
@@ -96,11 +97,33 @@ const SCOPE_NOTE_PLACEHOLDERS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  NOT_STARTED: 'default',
-  IN_PROGRESS: 'blue',
-  COMPLETED:   'green',
-  ON_HOLD:     'orange',
-  CANCELLED:   'red',
+  DRAFT:                       'default',
+  SUBMITTED_FOR_VERIFICATION:  'blue',
+  VERIFIED:                    'cyan',
+  AUTHENTICATED:               'green',
+  SENT_BACK_TO_DYCE:           'orange',
+  SENT_BACK_TO_NODAL:          'gold',
+  // legacy DB values
+  NOT_STARTED:                 'default',
+  IN_PROGRESS:                 'blue',
+  COMPLETED:                   'green',
+  ON_HOLD:                     'orange',
+  CANCELLED:                   'red',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  DRAFT:                       'Draft',
+  SUBMITTED_FOR_VERIFICATION:  'Submitted',
+  VERIFIED:                    'Verified',
+  AUTHENTICATED:               'Authenticated',
+  SENT_BACK_TO_DYCE:           'Sent back to Dy CE/C',
+  SENT_BACK_TO_NODAL:          'Sent back to Nodal',
+  // legacy DB values
+  NOT_STARTED:                 'Draft',
+  IN_PROGRESS:                 'Submitted',
+  COMPLETED:                   'Authenticated',
+  ON_HOLD:                     'Sent back to Dy CE/C',
+  CANCELLED:                   'Sent back to Nodal',
 };
 
 // ── Edit form values ──────────────────────────────────────────────────────────
@@ -117,6 +140,7 @@ interface ActivityDetailPanelProps {
   activityId: string;
   canEdit: boolean;         // true when caller has ACTIVITY.UPDATE.OWN
   onClose: () => void;
+  onStatusChanged?: (activityId: string, newStatus: string) => void;
 }
 
 // ── Record state → badge colour ───────────────────────────────────────────────
@@ -145,7 +169,7 @@ function recordStateLabel(state: string): string {
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
-export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDetailPanelProps) {
+export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChanged }: ActivityDetailPanelProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -206,6 +230,8 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
       performActivityAction(activityId, action, comment),
     onSuccess: (updated) => {
       queryClient.setQueryData(['activityWorkflow', activityId], updated);
+      void queryClient.invalidateQueries({ queryKey: ['activity', activityId] });
+      onStatusChanged?.(activityId, updated.currentStateCode);
       notifApi.success({ message: 'Activity updated', duration: 2 });
     },
     onError: (err: Error) => {
@@ -350,7 +376,7 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
                 {activity.name}
               </Title>
               <Tag color={STATUS_COLORS[activity.status] ?? 'default'} style={{ flexShrink: 0 }}>
-                {activity.status.replace(/_/g, ' ')}
+                {STATUS_LABELS[activity.status] ?? activity.status.replace(/_/g, ' ')}
               </Tag>
             </div>
 
@@ -590,21 +616,30 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose }: ActivityDe
                           ) : null,
                         ].filter(Boolean)}
                       >
-                        <div
-                          style={{ cursor: 'pointer', flex: 1 }}
-                          onClick={() => navigate(`/records/${record.id}/edit`, { state: { returnPath: location.pathname } })}
-                        >
-                          <Space size={6}>
-                            <FileTextOutlined style={{ color: 'var(--ant-color-text-secondary)', fontSize: 12 }} />
-                            <Text style={{ fontSize: 12 }}>
-                              {record.recordSubtype
-                                ? record.recordSubtype
-                                : `Record ${index + 1}`}
-                            </Text>
-                            <Text type="secondary" style={{ fontSize: 11 }}>
-                              {dayjs(record.updatedAt).format('D MMM YYYY')}
-                            </Text>
-                          </Space>
+                        <div style={{ flex: 1 }}>
+                          <div
+                            style={{ cursor: activity.activityTypeCode !== 'DRAWING_APPROVAL' ? 'pointer' : 'default' }}
+                            onClick={() => {
+                              if (activity.activityTypeCode !== 'DRAWING_APPROVAL') {
+                                navigate(`/records/${record.id}/edit`, { state: { returnPath: location.pathname } });
+                              }
+                            }}
+                          >
+                            <Space size={6}>
+                              <FileTextOutlined style={{ color: 'var(--ant-color-text-secondary)', fontSize: 12 }} />
+                              <Text style={{ fontSize: 12 }}>
+                                {record.recordSubtype
+                                  ? record.recordSubtype
+                                  : `Record ${index + 1}`}
+                              </Text>
+                              <Text type="secondary" style={{ fontSize: 11 }}>
+                                {dayjs(record.updatedAt).format('D MMM YYYY')}
+                              </Text>
+                            </Space>
+                          </div>
+                          {activity.activityTypeCode === 'DRAWING_APPROVAL' && (
+                            <DrawingApproversPanel recordId={record.id} canEdit={canEdit} />
+                          )}
                         </div>
                       </List.Item>
                     );

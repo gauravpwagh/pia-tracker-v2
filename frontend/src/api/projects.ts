@@ -44,6 +44,7 @@ export interface ProjectSummaryResponse {
   chainageToKm: number | null;
   lengthKm: number | null;
   targetCompletionYear: number | null;
+  createdAt: string;
 }
 
 export interface ProjectDetailResponse {

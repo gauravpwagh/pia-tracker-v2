@@ -69,6 +69,12 @@ button {
   align-self: center !important;
 }
 
+/* Make the title span fill available width so flex space-between pushes
+   the status badge + days elapsed to the right edge */
+.pia-project-tree .ant-tree-title {
+  width: 100%;
+}
+
 /* No-print utility — hide elements when printing */
 @media print {
   .no-print {

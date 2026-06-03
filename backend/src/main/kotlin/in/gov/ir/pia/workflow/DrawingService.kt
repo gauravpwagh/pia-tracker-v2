@@ -4,7 +4,6 @@ import `in`.gov.ir.pia.audit.AuditLogWriter
 import `in`.gov.ir.pia.domain.activity.ActivityRecord
 import `in`.gov.ir.pia.domain.drawing.DrawingApprover
 import `in`.gov.ir.pia.domain.form.FormDefinition
-import `in`.gov.ir.pia.notification.NotificationService
 import `in`.gov.ir.pia.repository.ActivityRecordRepository
 import `in`.gov.ir.pia.repository.DrawingApproverRepository
 import `in`.gov.ir.pia.repository.ProjectActivityRepository
@@ -15,7 +14,6 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
-import java.time.Instant
 import java.util.UUID
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -23,69 +21,55 @@ import java.util.UUID
 data class DrawingApproverResponse(
     val id: UUID,
     val approvalDesignationCode: String,
-    val userId: UUID?,
-    val status: String,
+    /** Human-readable designation name, e.g. "Senior Divisional Engineer". */
+    val designationName: String,
     val position: Int,
-    val actedAt: Instant?,
-    val comment: String?,
+    /** Date the physical sign-off was received; null = not yet approved. */
+    val approvedOn: java.time.LocalDate?,
+    val remarks: String?,
 )
 
 data class DrawingApproverListResponse(
     val recordId: UUID,
-    val derivedState: String,
+    /** True when all non-deleted slots have an approvedOn date. */
+    val allApproved: Boolean,
     val approvers: List<DrawingApproverResponse>,
 )
 
-data class ApproveRequest(
-    val comment: String? = null,
-)
-
-data class SendBackRequest(
-    val comment: String,
-)
-
-data class ReapproveRequest(
-    /** If true, all APPROVED rows are reset to PENDING (full re-review). */
-    val requestReApproval: Boolean = false,
+/**
+ * Request to record (or clear) an approval date on a slot.
+ * [approvedOn] null clears the date (marks the slot as not-yet-approved again).
+ */
+data class UpdateApprovalRequest(
+    val approvedOn: java.time.LocalDate?,
+    val remarks: String? = null,
 )
 
 /**
- * Request to add a new approver slot to a drawing (Phase 2.7).
- *
- * [designationCode] must be an approval-role designation (`is_approval_role = true`).
- * [userId] is optional; null leaves the slot unassigned.
- * [position] is optional; null appends after the last existing slot.
+ * Request to add a new approver slot.
+ * [designationCode] must be an approval-role designation.
+ * [position] defaults to max(existing)+1 if not supplied.
  */
 data class AddApproverRequest(
     val designationCode: String,
-    val userId: UUID? = null,
     val position: Int? = null,
-)
-
-/**
- * Request to reassign an approver slot to a different user (Phase 2.7).
- *
- * The slot must not be in APPROVED status (decision BBBB).
- * Pass [userId] = null to clear the assignment.
- */
-data class ReassignApproverRequest(
-    val userId: UUID?,
 )
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
 /**
- * Drawing checklist model — separate from the workflow engine (docs/workflow.md § 5).
+ * Drawing approver checklist service.
  *
- * Drawings have NO [WorkflowInstance] rows. Their overall state is derived from
- * [DrawingApprover] rows and cached in [ActivityRecord.recordState].
+ * Each drawing activity record has a list of approving authorities
+ * (by designation code) that were specified when the drawing type was chosen.
+ * DY CE/C or Nodal DY CE/C records the date ([approvedOn]) when physical
+ * sign-off is received from each authority.
  *
- * Key decisions:
- * - CCCC: send-back flips only the acting approver's row; other rows unchanged.
- * - BBBB: reapprove flips only SENT_BACK rows to PENDING; APPROVED rows stay
- *         (unless [ReapproveRequest.requestReApproval] is true).
- * - HHHH: default approvers are resolved at record-creation time; subsequent
- *         zone / user changes do not affect existing rows.
+ * Approving authorities do NOT log in to the system.
+ *
+ * Derived record state (cached on activity_records.record_state):
+ *   - All slots approved → AUTHENTICATED
+ *   - Any slot pending  → DRAFT
  */
 @Service
 @Transactional(readOnly = true)
@@ -96,34 +80,102 @@ class DrawingService(
     private val projectRepository: ProjectRepository,
     private val jdbc: JdbcTemplate,
     private val auditLogWriter: AuditLogWriter,
-    private val notificationService: NotificationService,
 ) {
     // ── Read ──────────────────────────────────────────────────────────────────
 
     /**
-     * Returns all non-deleted approver rows for [recordId] together with
-     * the derived drawing state.
+     * Returns all non-deleted approver rows for [recordId] with the derived
+     * allApproved flag (true when every slot has an [approvedOn] date).
      */
     fun listApprovers(
         recordId: UUID,
         principal: PiaPrincipal,
     ): DrawingApproverListResponse {
-        val record = requireRecordAccess(recordId, principal)
-        val rows =
-            drawingApproverRepository
-                .findAllByActivityRecordIdAndIsDeletedFalseOrderByPositionAsc(recordId)
-        // If the Dy CE/C hasn't submitted yet, honour the cached DRAFT state —
-        // the rows exist but the drawing hasn't entered the approval circuit.
-        val derivedState =
-            if (record.recordState == "DRAFT") "DRAFT" else deriveState(rows)
+        requireRecordAccess(recordId, principal)
+        val rows = jdbc.query(
+            """
+            SELECT da.id, da.approval_designation_code, COALESCE(d.name, da.approval_designation_code) AS designation_name,
+                   da.position, da.approved_on, da.remarks
+              FROM drawing_approvers da
+              LEFT JOIN designations d ON d.code = da.approval_designation_code
+             WHERE da.activity_record_id = ? AND NOT da.is_deleted
+             ORDER BY da.position
+            """.trimIndent(),
+            { rs, _ -> DrawingApproverResponse(
+                id                      = UUID.fromString(rs.getString("id")),
+                approvalDesignationCode = rs.getString("approval_designation_code"),
+                designationName         = rs.getString("designation_name"),
+                position                = rs.getInt("position"),
+                approvedOn              = rs.getDate("approved_on")?.toLocalDate(),
+                remarks                 = rs.getString("remarks"),
+            )},
+            recordId,
+        )
         return DrawingApproverListResponse(
-            recordId = recordId,
-            derivedState = derivedState,
-            approvers = rows.map { it.toResponse() },
+            recordId    = recordId,
+            allApproved = rows.isNotEmpty() && rows.all { it.approvedOn != null },
+            approvers   = rows,
         )
     }
 
     // ── Write ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Records (or clears) the sign-off date for an approver slot.
+     *
+     * Called by DY CE/C or Nodal DY CE/C when physical approval is received.
+     * [request.approvedOn] null clears the date (marks slot pending again).
+     * After updating, re-derives the overall record state and caches it.
+     */
+    @Transactional
+    fun updateApproval(
+        recordId: UUID,
+        approverId: UUID,
+        request: UpdateApprovalRequest,
+        actor: PiaPrincipal,
+    ): DrawingApproverResponse {
+        requireRecordAccess(recordId, actor)
+        val approver = requireApproverSlot(approverId, recordId)
+
+        jdbc.update(
+            """
+            UPDATE drawing_approvers
+               SET approved_on = ?,
+                   remarks     = ?,
+                   updated_at  = now()
+             WHERE id = ?
+               AND NOT is_deleted
+            """.trimIndent(),
+            request.approvedOn,
+            request.remarks,
+            approverId,
+        )
+
+        deriveAndCacheState(recordId)
+
+        auditLogWriter.write(
+            actorUserId = actor.userId,
+            action      = if (request.approvedOn != null) "DRAWING.APPROVAL_RECORDED" else "DRAWING.APPROVAL_CLEARED",
+            entityType  = "DRAWING_APPROVER",
+            entityId    = approverId,
+        )
+
+        val designationName = jdbc.queryForObject(
+            "SELECT COALESCE(name, ?) FROM designations WHERE code = ?",
+            String::class.java,
+            approver.approvalDesignationCode,
+            approver.approvalDesignationCode,
+        ) ?: approver.approvalDesignationCode
+
+        return DrawingApproverResponse(
+            id                       = approver.id,
+            approvalDesignationCode  = approver.approvalDesignationCode,
+            designationName          = designationName,
+            position                 = approver.position,
+            approvedOn               = request.approvedOn,
+            remarks                  = request.remarks,
+        )
+    }
 
     /**
      * Seeds the default approver checklist for a newly created drawing record.
@@ -143,209 +195,20 @@ class DrawingService(
         projectZoneId: UUID?,
     ) {
         formDef.defaultApproverDesignations.forEachIndexed { index, designationCode ->
-            val matchingUsers: List<UUID> =
-                if (projectZoneId != null) {
-                    jdbc.queryForList(
-                        """
-                        SELECT id FROM users
-                        WHERE designation_code = ?
-                          AND primary_zone_id  = ?
-                          AND is_active         = true
-                          AND is_deleted        = false
-                        """.trimIndent(),
-                        UUID::class.java,
-                        designationCode,
-                        projectZoneId,
-                    )
-                } else {
-                    emptyList()
-                }
-
-            val userId = if (matchingUsers.size == 1) matchingUsers.first() else null
-
-            val approver =
+            drawingApproverRepository.save(
                 DrawingApprover(
-                    activityRecordId = recordId,
+                    activityRecordId        = recordId,
                     approvalDesignationCode = designationCode,
-                    userId = userId,
-                    status = "PENDING",
-                    position = index,
+                    position                = index,
                 )
-            drawingApproverRepository.save(approver)
+            )
         }
     }
 
     /**
-     * Transitions a drawing from DRAFT to IN_APPROVAL.
-     *
-     * The Dy CE/C calls this when the drawing is ready for review.
-     * Throws 409 if the record is not in DRAFT state.
-     */
-    @Transactional
-    fun submit(
-        recordId: UUID,
-        actor: PiaPrincipal,
-    ) {
-        val record = requireRecordAccess(recordId, actor)
-        if (record.recordState != "DRAFT") {
-            throw ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "Drawing is not in DRAFT state (current: ${record.recordState}); cannot submit",
-            )
-        }
-        updateRecordState(recordId, "IN_APPROVAL")
-        auditLogWriter.write(
-            actorUserId = actor.userId,
-            action = "DRAWING.SUBMIT",
-            entityType = "ACTIVITY_RECORD",
-            entityId = recordId,
-        )
-    }
-
-    /**
-     * Approves one approver slot on a drawing.
-     *
-     * The actor must be the user assigned to [approverId].
-     * The slot must be in PENDING status.
-     * After approval the drawing state is recomputed and cached.
-     */
-    @Transactional
-    fun approve(
-        recordId: UUID,
-        approverId: UUID,
-        actor: PiaPrincipal,
-        comment: String?,
-    ) {
-        requireRecordAccess(recordId, actor)
-        val approver = requireApproverSlot(approverId, recordId)
-        requireIsActingApprover(approver, actor)
-        if (approver.status != "PENDING") {
-            throw ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "Approver slot is not PENDING (current: ${approver.status})",
-            )
-        }
-        mutateApproverRow(approverId, "APPROVED", actor.userId, comment)
-        deriveAndCacheState(recordId)
-        auditLogWriter.write(
-            actorUserId = actor.userId,
-            action = "DRAWING.APPROVE",
-            entityType = "DRAWING_APPROVER",
-            entityId = approverId,
-        )
-    }
-
-    /**
-     * Sends a drawing back for revision on behalf of one approver.
-     *
-     * Decision CCCC: only this approver's row changes; other rows are untouched.
-     * The slot must be in PENDING status.
-     * A non-blank [comment] is required.
-     */
-    @Transactional
-    fun sendBack(
-        recordId: UUID,
-        approverId: UUID,
-        actor: PiaPrincipal,
-        comment: String,
-    ) {
-        if (comment.isBlank()) {
-            throw ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "Comment is required for send-back")
-        }
-        requireRecordAccess(recordId, actor)
-        val approver = requireApproverSlot(approverId, recordId)
-        requireIsActingApprover(approver, actor)
-        if (approver.status != "PENDING") {
-            throw ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "Approver slot is not PENDING (current: ${approver.status})",
-            )
-        }
-        mutateApproverRow(approverId, "SENT_BACK", actor.userId, comment)
-        deriveAndCacheState(recordId)
-        auditLogWriter.write(
-            actorUserId = actor.userId,
-            action = "DRAWING.SEND_BACK",
-            entityType = "DRAWING_APPROVER",
-            entityId = approverId,
-        )
-    }
-
-    /**
-     * Re-submits a drawing after the Dy CE/C has addressed a send-back.
-     *
-     * Decision BBBB:
-     * - SENT_BACK rows → PENDING.
-     * - APPROVED rows → stay APPROVED (unless [ReapproveRequest.requestReApproval] = true,
-     *   which signals a substantive change requiring full re-review).
-     *
-     * Throws 409 if the drawing is not currently SENT_BACK.
-     */
-    @Transactional
-    fun reapprove(
-        recordId: UUID,
-        actor: PiaPrincipal,
-        requestReApproval: Boolean = false,
-    ) {
-        val record = requireRecordAccess(recordId, actor)
-        if (record.recordState != "SENT_BACK") {
-            throw ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "Drawing is not in SENT_BACK state (current: ${record.recordState}); cannot reapprove",
-            )
-        }
-
-        // Flip SENT_BACK → PENDING
-        jdbc.update(
-            """
-            UPDATE drawing_approvers
-               SET status     = 'PENDING',
-                   acted_at   = null,
-                   comment    = null,
-                   updated_at = now()
-             WHERE activity_record_id = ?
-               AND status = 'SENT_BACK'
-               AND NOT is_deleted
-            """.trimIndent(),
-            recordId,
-        )
-
-        // If substantive change: reset APPROVED → PENDING too (decision BBBB)
-        if (requestReApproval) {
-            jdbc.update(
-                """
-                UPDATE drawing_approvers
-                   SET status     = 'PENDING',
-                       acted_at   = null,
-                       comment    = null,
-                       updated_at = now()
-                 WHERE activity_record_id = ?
-                   AND status = 'APPROVED'
-                   AND NOT is_deleted
-                """.trimIndent(),
-                recordId,
-            )
-        }
-
-        deriveAndCacheState(recordId)
-        auditLogWriter.write(
-            actorUserId = actor.userId,
-            action = "DRAWING.REAPPROVE",
-            entityType = "ACTIVITY_RECORD",
-            entityId = recordId,
-        )
-    }
-
-    /**
-     * Adds a new approver slot to a drawing (Phase 2.7).
-     *
-     * Gated to DRAWING.EDIT_APPROVERS in the controller (CE/C, Nodal Dy CE/C, Super Admin).
-     *
-     * [request.designationCode] must be an approval-role designation.
-     * [request.position] defaults to max(existing) + 1 if not supplied.
-     * If [request.userId] is provided, a notification is sent to that user.
-     *
-     * Throws 422 if [designationCode] is not a valid approval-role designation.
+     * Adds a new approver slot.
+     * Gated to DRAWING.EDIT_APPROVERS (CE/C, DY CE/C, Nodal DY CE/C).
+     * [designationCode] must be an approval-role designation.
      */
     @Transactional
     fun addApprover(
@@ -356,61 +219,46 @@ class DrawingService(
         requireRecordAccess(recordId, actor)
         requireApprovalRoleDesignation(request.designationCode)
 
-        val position =
-            request.position
-                ?: (
-                    jdbc.queryForObject(
-                        """
-                        SELECT COALESCE(MAX(position), -1) + 1
-                          FROM drawing_approvers
-                         WHERE activity_record_id = ?
-                           AND NOT is_deleted
-                        """.trimIndent(),
-                        Int::class.java,
-                        recordId,
-                    ) ?: 0
-                )
+        val position = request.position
+            ?: (jdbc.queryForObject(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM drawing_approvers WHERE activity_record_id = ? AND NOT is_deleted",
+                Int::class.java, recordId,
+            ) ?: 0)
 
-        val approver =
-            DrawingApprover(
-                activityRecordId = recordId,
-                approvalDesignationCode = request.designationCode,
-                userId = request.userId,
-                status = "PENDING",
-                position = position,
-            )
+        val approver = DrawingApprover(
+            activityRecordId        = recordId,
+            approvalDesignationCode = request.designationCode,
+            position                = position,
+        )
         drawingApproverRepository.save(approver)
-
-        // Notify the newly assigned user (if any)
-        request.userId?.let { uid ->
-            notificationService.create(
-                recipientUserId = uid,
-                notificationType = "DRAWING_APPROVER_ADDED",
-                title = "You have been added as a drawing approver",
-                body = "You have been added to the approver checklist for a drawing record. Please review and act on it.",
-                entityType = "ACTIVITY_RECORD",
-                entityId = recordId,
-                linkUrl = "/activity-records/$recordId/drawing-approvers",
-            )
-        }
 
         auditLogWriter.write(
             actorUserId = actor.userId,
-            action = "DRAWING.ADD_APPROVER",
-            entityType = "DRAWING_APPROVER",
-            entityId = approver.id,
+            action      = "DRAWING.ADD_APPROVER",
+            entityType  = "DRAWING_APPROVER",
+            entityId    = approver.id,
         )
 
-        return approver.toResponse()
+        val designationName = jdbc.queryForObject(
+            "SELECT COALESCE(name, ?) FROM designations WHERE code = ?",
+            String::class.java,
+            request.designationCode,
+            request.designationCode,
+        ) ?: request.designationCode
+
+        return DrawingApproverResponse(
+            id                      = approver.id,
+            approvalDesignationCode = approver.approvalDesignationCode,
+            designationName         = designationName,
+            position                = approver.position,
+            approvedOn              = null,
+            remarks                 = null,
+        )
     }
 
     /**
-     * Soft-deletes an approver slot (Phase 2.7).
-     *
-     * Gated to DRAWING.EDIT_APPROVERS in the controller.
-     *
-     * Decision BBBB: APPROVED slots cannot be removed. Throws 409 if the slot
-     * is already APPROVED.
+     * Soft-deletes an approver slot.
+     * Only allowed when [approvedOn] is null (not yet approved).
      */
     @Transactional
     fun removeApprover(
@@ -421,134 +269,35 @@ class DrawingService(
         requireRecordAccess(recordId, actor)
         val approver = requireApproverSlot(approverId, recordId)
 
-        if (approver.status == "APPROVED") {
+        if (approver.approvedOn != null) {
             throw ResponseStatusException(
                 HttpStatus.CONFLICT,
-                "Cannot remove an APPROVED approver slot (decision BBBB); the approver has already signed off",
+                "Cannot remove an already-approved slot; clear the approval date first.",
             )
         }
 
         jdbc.update(
-            """
-            UPDATE drawing_approvers
-               SET is_deleted  = true,
-                   updated_at  = now()
-             WHERE id = ?
-               AND NOT is_deleted
-            """.trimIndent(),
+            "UPDATE drawing_approvers SET is_deleted = true, updated_at = now() WHERE id = ? AND NOT is_deleted",
             approverId,
         )
-
         deriveAndCacheState(recordId)
 
         auditLogWriter.write(
             actorUserId = actor.userId,
-            action = "DRAWING.REMOVE_APPROVER",
-            entityType = "DRAWING_APPROVER",
-            entityId = approverId,
+            action      = "DRAWING.REMOVE_APPROVER",
+            entityType  = "DRAWING_APPROVER",
+            entityId    = approverId,
         )
-    }
-
-    /**
-     * Reassigns an approver slot to a different user (Phase 2.7).
-     *
-     * Gated to DRAWING.REASSIGN_APPROVER in the controller (CE/C, Super Admin).
-     *
-     * Decision BBBB: APPROVED slots cannot be reassigned. Throws 409 if the slot
-     * is APPROVED.
-     * If [newUserId] is non-null, a notification is sent to the new user.
-     */
-    @Transactional
-    fun reassignApprover(
-        recordId: UUID,
-        approverId: UUID,
-        newUserId: UUID?,
-        actor: PiaPrincipal,
-    ) {
-        requireRecordAccess(recordId, actor)
-        val approver = requireApproverSlot(approverId, recordId)
-
-        if (approver.status == "APPROVED") {
-            throw ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "Cannot reassign an APPROVED approver slot (decision BBBB)",
-            )
-        }
-
-        jdbc.update(
-            """
-            UPDATE drawing_approvers
-               SET user_id    = ?,
-                   updated_at = now()
-             WHERE id = ?
-               AND NOT is_deleted
-            """.trimIndent(),
-            newUserId,
-            approverId,
-        )
-
-        newUserId?.let { uid ->
-            notificationService.create(
-                recipientUserId = uid,
-                notificationType = "DRAWING_APPROVER_ADDED",
-                title = "You have been assigned as a drawing approver",
-                body = "You have been assigned to an approver slot on a drawing record. Please review and act on it.",
-                entityType = "ACTIVITY_RECORD",
-                entityId = recordId,
-                linkUrl = "/activity-records/$recordId/drawing-approvers",
-            )
-        }
-
-        auditLogWriter.write(
-            actorUserId = actor.userId,
-            action = "DRAWING.REASSIGN_APPROVER",
-            entityType = "DRAWING_APPROVER",
-            entityId = approverId,
-        )
-    }
-
-    // ── State derivation ──────────────────────────────────────────────────────
-
-    /**
-     * Derives the overall drawing state from its non-deleted approver rows.
-     *
-     * | Condition                         | State      |
-     * |-----------------------------------|------------|
-     * | No rows / all PENDING (pre-submit)| DRAFT      |
-     * | Any SENT_BACK                     | SENT_BACK  |
-     * | All APPROVED                      | APPROVED   |
-     * | Otherwise (at least one PENDING)  | IN_APPROVAL|
-     *
-     * Note: once a drawing has been submitted the record_state is set to
-     * IN_APPROVAL; subsequent derivations never return DRAFT (the rows still
-     * exist as PENDING if an approver hasn't acted).  The cached record_state
-     * is authoritative for "has this been submitted?".
-     */
-    fun deriveState(rows: List<DrawingApprover>): String {
-        if (rows.isEmpty()) return "DRAFT"
-        if (rows.any { it.status == "SENT_BACK" }) return "SENT_BACK"
-        if (rows.all { it.status == "APPROVED" }) return "APPROVED"
-        return "IN_APPROVAL"
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
-    /**
-     * Verifies [principal] can access the record (zone filter via project).
-     * Returns the record for further checks.
-     */
-    private fun requireRecordAccess(
-        recordId: UUID,
-        principal: PiaPrincipal,
-    ): ActivityRecord {
-        val record =
-            recordRepository.findByIdAndIsDeletedFalse(recordId)
-                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-        val activity =
-            activityRepository.findByIdAndIsDeletedFalse(record.projectActivityId)
-                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-
-        if (principal.isSuperAdmin) {
+    private fun requireRecordAccess(recordId: UUID, principal: PiaPrincipal): ActivityRecord {
+        val record = recordRepository.findByIdAndIsDeletedFalse(recordId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val activity = activityRepository.findByIdAndIsDeletedFalse(record.projectActivityId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        if (principal.isSuperAdmin || principal.permissions.contains("PROJECT.READ.ALL")) {
             projectRepository.findByIdAndIsDeletedFalse(activity.projectId)
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         } else {
@@ -560,139 +309,39 @@ class DrawingService(
         return record
     }
 
-    /**
-     * Validates that [designationCode] exists in the designations table and has
-     * [is_approval_role = true].  Throws 422 otherwise.
-     */
     private fun requireApprovalRoleDesignation(designationCode: String) {
-        val isValid =
-            jdbc.queryForObject(
-                """
-                SELECT EXISTS(
-                    SELECT 1 FROM designations
-                     WHERE code = ? AND is_approval_role = true
-                )
-                """.trimIndent(),
-                Boolean::class.java,
-                designationCode,
-            ) ?: false
-        if (!isValid) {
-            throw ResponseStatusException(
-                HttpStatus.UNPROCESSABLE_ENTITY,
-                "'$designationCode' is not a valid approval-role designation",
-            )
-        }
+        val isValid = jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM designations WHERE code = ? AND is_approval_role = true)",
+            Boolean::class.java, designationCode,
+        ) ?: false
+        if (!isValid) throw ResponseStatusException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "'$designationCode' is not a valid approval-role designation",
+        )
     }
 
-    /**
-     * Loads a non-deleted approver row that belongs to [recordId].
-     * Throws 404 if not found.
-     */
-    private fun requireApproverSlot(
-        approverId: UUID,
-        recordId: UUID,
-    ): DrawingApprover {
-        val approver =
-            drawingApproverRepository.findByIdAndIsDeletedFalse(approverId)
-                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Approver slot not found")
-        if (approver.activityRecordId != recordId) {
+    private fun requireApproverSlot(approverId: UUID, recordId: UUID): DrawingApprover {
+        val approver = drawingApproverRepository.findByIdAndIsDeletedFalse(approverId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Approver slot not found")
+        if (approver.activityRecordId != recordId)
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "Approver slot does not belong to this record")
-        }
         return approver
     }
 
     /**
-     * Verifies that [actor] is the user assigned to [approver].
-     * Super-admins bypass this check.
-     */
-    private fun requireIsActingApprover(
-        approver: DrawingApprover,
-        actor: PiaPrincipal,
-    ) {
-        if (actor.isSuperAdmin) return
-        if (approver.userId == null || approver.userId != actor.userId) {
-            throw ResponseStatusException(
-                HttpStatus.FORBIDDEN,
-                "You are not assigned to this approver slot",
-            )
-        }
-    }
-
-    /** SQL UPDATE to flip an approver row's status + acted_at + comment. */
-    private fun mutateApproverRow(
-        approverId: UUID,
-        newStatus: String,
-        actorId: UUID,
-        comment: String?,
-    ) {
-        jdbc.update(
-            """
-            UPDATE drawing_approvers
-               SET status     = ?,
-                   acted_at   = now(),
-                   comment    = ?,
-                   updated_at = now()
-             WHERE id = ?
-               AND NOT is_deleted
-            """.trimIndent(),
-            newStatus,
-            comment,
-            approverId,
-        )
-    }
-
-    /**
-     * Re-derives the drawing state from current rows and writes it into
-     * [activity_records.record_state].
+     * Re-derives the record state from current approvedOn values and caches it.
+     * AUTHENTICATED = all slots approved; DRAFT = any pending.
      */
     private fun deriveAndCacheState(recordId: UUID) {
-        // Use JDBC directly to bypass JPA L1 cache which can return stale entities
-        // after plain JDBC mutations (mutateApproverRow uses jdbc.update()).
-        val statuses =
-            jdbc.queryForList(
-                """
-                SELECT status FROM drawing_approvers
-                 WHERE activity_record_id = ?
-                   AND NOT is_deleted
-                """.trimIndent(),
-                String::class.java,
-                recordId,
-            )
-        val state =
-            when {
-                statuses.isEmpty() -> "DRAFT"
-                statuses.any { it == "SENT_BACK" } -> "SENT_BACK"
-                statuses.all { it == "APPROVED" } -> "APPROVED"
-                else -> "IN_APPROVAL"
-            }
-        updateRecordState(recordId, state)
-    }
-
-    private fun updateRecordState(
-        recordId: UUID,
-        state: String,
-    ) {
+        val pendingCount = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM drawing_approvers WHERE activity_record_id = ? AND approved_on IS NULL AND NOT is_deleted",
+            Long::class.java, recordId,
+        ) ?: 0L
+        val state = if (pendingCount == 0L) "AUTHENTICATED" else "DRAFT"
         jdbc.update(
-            """
-            UPDATE activity_records
-               SET record_state = ?,
-                   updated_at   = now()
-             WHERE id = ?
-               AND NOT is_deleted
-            """.trimIndent(),
-            state,
-            recordId,
+            "UPDATE activity_records SET record_state = ?, updated_at = now() WHERE id = ? AND NOT is_deleted",
+            state, recordId,
         )
     }
 
-    private fun DrawingApprover.toResponse(): DrawingApproverResponse =
-        DrawingApproverResponse(
-            id = id,
-            approvalDesignationCode = approvalDesignationCode,
-            userId = userId,
-            status = status,
-            position = position,
-            actedAt = actedAt,
-            comment = comment,
-        )
 }

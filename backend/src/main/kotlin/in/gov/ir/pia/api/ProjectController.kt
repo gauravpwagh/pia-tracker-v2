@@ -34,6 +34,8 @@ data class ProjectSummaryResponse(
     val chainageToKm: java.math.BigDecimal?,
     val lengthKm: java.math.BigDecimal?,
     val targetCompletionYear: Int?,
+    /** Creation timestamp — used on the UI to show days elapsed since zone assignment. */
+    val createdAt: java.time.Instant,
 )
 
 // ─── Controller ────────────────────────────────────────────────────────────────
@@ -85,6 +87,7 @@ class ProjectController(
                     chainageToKm = p.chainageToKm,
                     lengthKm = p.lengthKm,
                     targetCompletionYear = p.targetCompletionYear,
+                    createdAt = p.createdAt,
                 )
             }
 

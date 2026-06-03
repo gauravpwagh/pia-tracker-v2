@@ -17,6 +17,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import dayjs from 'dayjs';
 import { useNavigate, useMatch } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -81,14 +82,30 @@ const LIFECYCLE_BADGE: Record<string, { color: string; label: string }> = {
   CLOSED:                  { color: 'default', label: 'Closed' },
 };
 
-// ── Activity status colours ───────────────────────────────────────────────────
+// ── Activity status colours + labels ─────────────────────────────────────────
 
 const ACTIVITY_STATUS_COLORS: Record<string, string> = {
-  NOT_STARTED: 'default',
-  IN_PROGRESS: 'blue',
-  COMPLETED:   'green',
-  ON_HOLD:     'orange',
-  LAGGING:     'red',
+  DRAFT:                       'default',
+  SUBMITTED_FOR_VERIFICATION:  'blue',
+  VERIFIED:                    'cyan',
+  AUTHENTICATED:               'green',
+  SENT_BACK_TO_DYCE:           'orange',
+  SENT_BACK_TO_NODAL:          'gold',
+};
+
+const ACTIVITY_STATUS_LABELS: Record<string, string> = {
+  DRAFT:                       'Draft',
+  SUBMITTED_FOR_VERIFICATION:  'Submitted',
+  VERIFIED:                    'Verified',
+  AUTHENTICATED:               'Authenticated',
+  SENT_BACK_TO_DYCE:           'Sent back to Dy CE/C',
+  SENT_BACK_TO_NODAL:          'Sent back to Nodal',
+  // legacy values still present in existing DB rows
+  NOT_STARTED:                 'Draft',
+  IN_PROGRESS:                 'Submitted',
+  COMPLETED:                   'Authenticated',
+  ON_HOLD:                     'Sent back to Dy CE/C',
+  CANCELLED:                   'Sent back to Nodal',
 };
 
 // ── Activity type → icon / label ─────────────────────────────────────────────
@@ -160,13 +177,16 @@ function ProjectNodeTitle({
         )}
       </div>
 
-      {/* Right: target year + lifecycle badge + more */}
+      {/* Right: target year + days elapsed + lifecycle badge + more */}
       <Space size={6} style={{ flexShrink: 0, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
         {project.targetCompletionYear && (
           <Text type="secondary" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
             {project.targetCompletionYear}
           </Text>
         )}
+        <Text type="secondary" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+          {dayjs().diff(dayjs(project.createdAt), 'day')}d
+        </Text>
         <Tag color={badge.color} style={{ margin: 0, fontSize: 11, lineHeight: '18px', padding: '0 6px' }}>
           {badge.label}
         </Tag>
@@ -190,7 +210,8 @@ function ProjectNodeTitle({
 
 function ActivityNodeTitle({ activity }: { activity: ActivityDetailResponse }) {
   const statusColor = ACTIVITY_STATUS_COLORS[activity.status] ?? 'default';
-  const statusLabel = activity.status.replace(/_/g, ' ');
+  const statusLabel = ACTIVITY_STATUS_LABELS[activity.status] ?? activity.status.replace(/_/g, ' ');
+  const daysElapsed = dayjs().diff(dayjs(activity.createdAt), 'day');
 
   return (
     <div
@@ -204,8 +225,11 @@ function ActivityNodeTitle({ activity }: { activity: ActivityDetailResponse }) {
         {activity.name || activity.activityTypeCode.replace(/_/g, ' ')}
       </Text>
 
-      {/* Right: status badge + more */}
+      {/* Right: days elapsed + status badge + more */}
       <Space size={6} style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+        <Text type="secondary" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+          {daysElapsed}d
+        </Text>
         <Tag color={statusColor} style={{ margin: 0, fontSize: 11, lineHeight: '18px', padding: '0 6px' }}>
           {statusLabel}
         </Tag>
@@ -517,6 +541,19 @@ export default function ProjectsPage() {
         activityId={activityIdFromKey(selectedKey)}
         canEdit={currentUser?.permissions.includes('ACTIVITY.UPDATE.OWN') ?? false}
         onClose={handleClosePane}
+        onStatusChanged={(id, newStatus) => {
+          setActivityMap((prev) => {
+            const next = { ...prev };
+            for (const [pId, acts] of Object.entries(next)) {
+              const idx = acts.findIndex((a) => a.id === id);
+              if (idx !== -1) {
+                next[pId] = acts.map((a) => a.id === id ? { ...a, status: newStatus } : a);
+                break;
+              }
+            }
+            return next;
+          });
+        }}
       />
     ) : null
   ) : null;
