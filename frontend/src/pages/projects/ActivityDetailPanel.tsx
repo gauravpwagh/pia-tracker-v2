@@ -60,11 +60,6 @@ import {
   type ActivityRecordDetail,
 } from '@api/activityRecords';
 import { DrawingApproversPanel } from './DrawingApproversPanel';
-import { LandAcquisitionDashboard } from './dashboards/LandAcquisitionDashboard';
-import { UtilityShiftingDashboard } from './dashboards/UtilityShiftingDashboard';
-import { ForestClearanceDashboard } from './dashboards/ForestClearanceDashboard';
-import { DrawingApprovalDashboard } from './dashboards/DrawingApprovalDashboard';
-import { TenderOfficeDashboard } from './dashboards/TenderOfficeDashboard';
 import {
   fetchActivityWorkflowState,
   performActivityAction,
@@ -516,33 +511,6 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
                     at activity-creation time using drawing_type as recordSubtype.
                   • All others: full create + list UI.
             */}
-            {/* ── Per-activity dashboard ────────────────────────────────── */}
-            <div>
-              <Divider orientation="left" orientationMargin={0}
-                style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 6px' }}>
-                Dashboard
-              </Divider>
-              {activity.activityTypeCode === 'LAND_ACQUISITION' && (
-                <LandAcquisitionDashboard projectId={activity.projectId} />
-              )}
-              {activity.activityTypeCode === 'UTILITY_SHIFTING' && (
-                <UtilityShiftingDashboard projectId={activity.projectId} />
-              )}
-              {activity.activityTypeCode === 'FOREST_CLEARANCE' && (
-                <ForestClearanceDashboard projectId={activity.projectId} />
-              )}
-              {activity.activityTypeCode === 'DRAWING_APPROVAL' && (
-                <DrawingApprovalDashboard projectId={activity.projectId} />
-              )}
-              {(activity.activityTypeCode === 'TENDER_PACKAGING' ||
-                activity.activityTypeCode === 'TEMPORARY_OFFICE_SPACE') && (
-                <TenderOfficeDashboard
-                  projectId={activity.projectId}
-                  activityTypeCode={activity.activityTypeCode as 'TENDER_PACKAGING' | 'TEMPORARY_OFFICE_SPACE'}
-                />
-              )}
-            </div>
-
             {activity.activityTypeCode !== 'UTILITY_SHIFTING' && <div>
               <Divider orientation="left" orientationMargin={0}
                 style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>

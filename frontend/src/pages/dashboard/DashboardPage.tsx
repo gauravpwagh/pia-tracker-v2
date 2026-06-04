@@ -55,6 +55,11 @@ import {
   type ZoneProjectDto,
   type ZoneSummaryDto,
 } from '@api/dashboard';
+import { LandAcquisitionDashboard } from '@pages/projects/dashboards/LandAcquisitionDashboard';
+import { UtilityShiftingDashboard } from '@pages/projects/dashboards/UtilityShiftingDashboard';
+import { ForestClearanceDashboard } from '@pages/projects/dashboards/ForestClearanceDashboard';
+import { DrawingApprovalDashboard } from '@pages/projects/dashboards/DrawingApprovalDashboard';
+import { TenderOfficeDashboard } from '@pages/projects/dashboards/TenderOfficeDashboard';
 
 const { Title, Text } = Typography;
 
@@ -431,15 +436,40 @@ const ACTIVITIES: ActivityDef[] = [
   },
 ];
 
+// ── Per-activity detail dashboard (shown when a single project is selected) ───
+
+interface ActivityDetailProps {
+  activityTypeCode: string;
+  projectId: string;
+}
+
+function ActivityDetailDashboard({ activityTypeCode, projectId }: ActivityDetailProps) {
+  if (activityTypeCode === 'LAND_ACQUISITION')
+    return <LandAcquisitionDashboard projectId={projectId} />;
+  if (activityTypeCode === 'UTILITY_SHIFTING')
+    return <UtilityShiftingDashboard projectId={projectId} />;
+  if (activityTypeCode === 'FOREST_CLEARANCE')
+    return <ForestClearanceDashboard projectId={projectId} />;
+  if (activityTypeCode === 'DRAWING_APPROVAL')
+    return <DrawingApprovalDashboard projectId={projectId} />;
+  if (activityTypeCode === 'TENDER_PACKAGING')
+    return <TenderOfficeDashboard projectId={projectId} activityTypeCode="TENDER_PACKAGING" />;
+  if (activityTypeCode === 'TEMPORARY_OFFICE_SPACE')
+    return <TenderOfficeDashboard projectId={projectId} activityTypeCode="TEMPORARY_OFFICE_SPACE" />;
+  return null;
+}
+
 // ── KPI card for one activity ─────────────────────────────────────────────────
 
 interface ActivityKpiCardProps {
   def: ActivityDef;
   summary: CumulativeActivitySummaryDto | undefined;
   loading: boolean;
+  /** Set when exactly one project is selected — enables the detail drill-down. */
+  singleProjectId: string | null;
 }
 
-function ActivityKpiCard({ def, summary, loading }: ActivityKpiCardProps) {
+function ActivityKpiCard({ def, summary, loading, singleProjectId }: ActivityKpiCardProps) {
   const total = summary?.totalRecords ?? 0;
   const slaBreaches = summary?.slaBreachCount ?? 0;
 
@@ -543,6 +573,31 @@ function ActivityKpiCard({ def, summary, loading }: ActivityKpiCardProps) {
                   style={{ marginBottom: 0 }}
                 />
               </div>
+            )}
+
+            {/* Detail drill-down — only when a single project is in scope */}
+            {singleProjectId ? (
+              <Collapse
+                ghost
+                size="small"
+                style={{ marginTop: 12 }}
+                items={[{
+                  key: 'detail',
+                  label: <Text type="secondary" style={{ fontSize: 12 }}>Details</Text>,
+                  children: (
+                    <ActivityDetailDashboard
+                      activityTypeCode={def.code}
+                      projectId={singleProjectId}
+                    />
+                  ),
+                }]}
+              />
+            ) : (
+              total > 0 && (
+                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 10 }}>
+                  Select a single project to see detailed breakdown.
+                </Text>
+              )
             )}
           </>
         )}
@@ -873,6 +928,21 @@ export default function DashboardPage() {
     return map;
   }, [cumulative]);
 
+  // When the filter resolves to exactly one project, pass it to cards for detail drill-down.
+  const singleProjectId = useMemo((): string | null => {
+    if (!scope || !filtersInitialized) return null;
+    // Determine the effective project set (mirrors queryProjectIds logic but returns ids, not empty=[all])
+    const zoneSet = new Set(
+      selectedZoneIds.length > 0 ? selectedZoneIds : scope.zones.map((z) => z.id),
+    );
+    const visibleProjects = scope.projects.filter((p) => zoneSet.has(p.zoneId));
+    const effectiveIds =
+      selectedProjectIds.length === visibleProjects.length
+        ? visibleProjects.map((p) => p.id)
+        : selectedProjectIds;
+    return effectiveIds.length === 1 ? effectiveIds[0] : null;
+  }, [scope, filtersInitialized, selectedZoneIds, selectedProjectIds]);
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (!currentUser) {
@@ -939,6 +1009,7 @@ export default function DashboardPage() {
           def={def}
           summary={summaryByActivity[def.code]}
           loading={cumulativeLoading}
+          singleProjectId={singleProjectId}
         />
       ))}
 
