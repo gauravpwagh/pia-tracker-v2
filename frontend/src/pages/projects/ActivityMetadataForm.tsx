@@ -7,7 +7,7 @@
  * ActivityMetadataView — read-only Descriptions block for the same data.
  */
 
-import { DatePicker, Descriptions, Divider, Form, Input, InputNumber, Select } from 'antd';
+import { DatePicker, Descriptions, Divider, Form, Input, InputNumber, Select, Switch } from 'antd';
 import dayjs from 'dayjs';
 
 // ── Option lists ────────────────────────────────────────────────────────────
@@ -84,10 +84,6 @@ const STRUCTURE_TYPE_OPTIONS = [
   { value: 'HIRING',        label: 'Hiring / Rent' },
 ];
 
-const TENDER_TYPE_OPTIONS = [
-  { value: 'OPEN',    label: 'Open Tender' },
-  { value: 'LIMITED', label: 'Limited Tender' },
-];
 
 // ── Label maps for view mode ───────────────────────────────────────────────
 
@@ -159,9 +155,9 @@ const LABEL_MAP: Record<string, Record<string, string>> = {
     remarks:         'Remarks',
   },
   TENDER_PACKAGING: {
-    package_name:    'Package Name',
-    estimated_value: 'Estimated Value',
-    tender_type:     'Tender Type',
+    package_name:         'Package Name',
+    epc_document_prepared:'EPC Document Prepared',
+    tender_finalized:     'EPC Tender Finalized',
   },
   TEMPORARY_OFFICE_SPACE: {
     structure_type:    'Structure Type',
@@ -176,7 +172,11 @@ const DATE_KEYS = new Set([
 ]);
 
 const CURRENCY_KEYS = new Set([
-  'estimated_cost', 'sanctioned_cost', 'estimated_value',
+  'estimated_cost', 'sanctioned_cost',
+]);
+
+const BOOLEAN_KEYS = new Set([
+  'epc_document_prepared', 'tender_finalized',
 ]);
 
 /** Map enum code → human label for display. */
@@ -190,7 +190,7 @@ function enumLabel(key: string, value: unknown): string {
   if (key === 'current_status')   return UTILITY_STATUS_OPTIONS.find((o) => o.value === v)?.label ?? v;
   if (key === 'drawing_type')     return DRAWING_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
   if (key === 'structure_type')   return STRUCTURE_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
-  if (key === 'tender_type')      return TENDER_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
+  if (BOOLEAN_KEYS.has(key))      return (value === true || v === 'true') ? 'Yes' : 'No';
   if (CURRENCY_KEYS.has(key))     return `₹ ${Number(v).toLocaleString('en-IN')}`;
   if (DATE_KEYS.has(key)) {
     // ISO date string → "D MMM YYYY"
@@ -686,31 +686,26 @@ export function ActivityMetadataForm({
               onChange={(e) => onChange('package_name', e.target.value)}
             />
           </Form.Item>
-          <Form.Item label="Estimated Value (₹)">
-            <InputNumber
-              min={0}
-              step={100000}
-              precision={2}
-              style={{ width: '100%' }}
-              formatter={(v) =>
-                v != null
-                  ? `₹ ${String(v)}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-                  : ''
-              }
-              parser={(v) =>
-                (v ? parseFloat(v.replace(/₹\s?|,/g, '')) : 0) as unknown as 0
-              }
-              value={num('estimated_value')}
-              onChange={(v) => onChange('estimated_value', v ?? undefined)}
+          <Form.Item
+            label="EPC Document Prepared"
+            tooltip="Has the EPC document been prepared?"
+          >
+            <Switch
+              checkedChildren="Yes"
+              unCheckedChildren="No"
+              checked={values['epc_document_prepared'] === true}
+              onChange={(checked) => onChange('epc_document_prepared', checked)}
             />
           </Form.Item>
-          <Form.Item label="Tender Type">
-            <Select
-              placeholder="Select…"
-              options={TENDER_TYPE_OPTIONS}
-              allowClear
-              value={str('tender_type')}
-              onChange={(v) => onChange('tender_type', v ?? undefined)}
+          <Form.Item
+            label="EPC Tender Finalized"
+            tooltip="Has the EPC tender been finalized?"
+          >
+            <Switch
+              checkedChildren="Yes"
+              unCheckedChildren="No"
+              checked={values['tender_finalized'] === true}
+              onChange={(checked) => onChange('tender_finalized', checked)}
             />
           </Form.Item>
         </>
