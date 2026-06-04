@@ -379,8 +379,42 @@ class DashboardService(
      * this endpoint serves tabular record views, not KPI aggregations.
      * KPI counters still come from summary tables via [getProjectDashboard].
      */
-    fun getActivityRecordsForDashboard(projectId: UUID, activityTypeCode: String): List<DashboardRecordDto> =
-        jdbc.query(
+    fun getActivityRecordsForDashboard(projectId: UUID, activityTypeCode: String): List<DashboardRecordDto> {
+        // Tender Packaging has no child activity_records — data lives on the activity
+        // itself (package_name, epc_document_prepared, tender_finalized).  Return the
+        // activities as synthetic DashboardRecordDto rows so the frontend can render
+        // its table without a separate code path.
+        if (activityTypeCode == "TENDER_PACKAGING") {
+            return jdbc.query(
+                """
+                SELECT pa.id, pa.status, pa.created_at, pa.updated_at,
+                       tpd.package_name, tpd.epc_document_prepared, tpd.tender_finalized
+                FROM project_activities pa
+                LEFT JOIN tender_packaging_details tpd ON tpd.activity_id = pa.id
+                WHERE pa.project_id       = ?
+                  AND pa.activity_type_code = 'TENDER_PACKAGING'
+                  AND NOT pa.is_deleted
+                ORDER BY pa.created_at
+                """.trimIndent(),
+                { rs, _ ->
+                    val node = objectMapper.createObjectNode()
+                    rs.getString("package_name")?.let { node.put("package_name", it) }
+                    node.put("epc_document_prepared", rs.getBoolean("epc_document_prepared"))
+                    node.put("tender_finalized",      rs.getBoolean("tender_finalized"))
+                    DashboardRecordDto(
+                        id            = rs.getObject("id", UUID::class.java),
+                        recordState   = rs.getString("status") ?: "DRAFT",
+                        recordSubtype = null,
+                        dataJson      = node,
+                        createdAt     = rs.getTimestamp("created_at").toInstant(),
+                        updatedAt     = rs.getTimestamp("updated_at").toInstant(),
+                    )
+                },
+                projectId,
+            )
+        }
+
+        return jdbc.query(
             """
             SELECT ar.id, ar.record_state, ar.record_subtype,
                    ar.data_json::text AS data_json, ar.created_at, ar.updated_at
@@ -405,6 +439,7 @@ class DashboardService(
             projectId,
             activityTypeCode,
         )
+    }
 
     // ── Cumulative / scope endpoints ──────────────────────────────────────────
 
@@ -633,9 +668,9 @@ class DashboardService(
             """
             SELECT da.approval_designation_code                                        AS desig,
                    COALESCE(ar.data_json->>'drawing_type', 'UNKNOWN')                 AS dtype,
-                   COUNT(*) FILTER (WHERE da.status = 'PENDING')                      AS pending,
-                   COUNT(*) FILTER (WHERE da.status = 'APPROVED')                     AS approved,
-                   COUNT(*) FILTER (WHERE da.status = 'SENT_BACK')                    AS sent_back
+                   COUNT(*) FILTER (WHERE da.approved_on IS NULL)                     AS pending,
+                   COUNT(*) FILTER (WHERE da.approved_on IS NOT NULL)                 AS approved,
+                   0                                                                   AS sent_back
             FROM drawing_approvers da
             JOIN activity_records   ar ON ar.id = da.activity_record_id
             JOIN project_activities pa ON pa.id = ar.project_activity_id

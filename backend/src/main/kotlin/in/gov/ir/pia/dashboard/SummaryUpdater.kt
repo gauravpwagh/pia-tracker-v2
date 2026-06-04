@@ -86,6 +86,48 @@ class SummaryUpdater(
         eventPublisher.publishEvent(ProjectSummaryChangedEvent(event.projectId))
     }
 
+    /**
+     * Handles workflow transitions for activity types whose data lives on the
+     * activity itself rather than on child records (currently TENDER_PACKAGING).
+     *
+     * Updates [project_activity_summary] state counts in the same way as
+     * record-level transitions so the dashboard KPI strip stays accurate.
+     */
+    @EventListener
+    fun onActivityWorkflowStateChanged(event: WorkflowStateChangedEvent) {
+        if (event.entityType != "PROJECT_ACTIVITY") return
+
+        val activity = projectActivityRepo.findById(event.entityId).orElse(null) ?: return
+        if (activity.activityTypeCode != "TENDER_PACKAGING") return
+
+        val projectId = activity.projectId
+        val typeCode  = activity.activityTypeCode
+        val fromCol   = stateToColumn(event.fromStateCode)
+        val toCol     = stateToColumn(event.toStateCode)
+
+        jdbc.update(
+            "INSERT INTO project_activity_summary (project_id, activity_type_code) VALUES (?, ?) ON CONFLICT DO NOTHING",
+            projectId, typeCode,
+        )
+        if (fromCol != null) {
+            jdbc.update(
+                "UPDATE project_activity_summary SET $fromCol = GREATEST(0, $fromCol - 1) WHERE project_id = ? AND activity_type_code = ?",
+                projectId, typeCode,
+            )
+        }
+        if (toCol != null) {
+            jdbc.update(
+                "UPDATE project_activity_summary SET $toCol = $toCol + 1 WHERE project_id = ? AND activity_type_code = ?",
+                projectId, typeCode,
+            )
+        }
+        jdbc.update(
+            "UPDATE project_activity_summary SET total_records = draft_count + submitted_count + verified_count + authenticated_count + sent_back_count WHERE project_id = ? AND activity_type_code = ?",
+            projectId, typeCode,
+        )
+        eventPublisher.publishEvent(ProjectSummaryChangedEvent(projectId))
+    }
+
     @EventListener
     fun onWorkflowStateChanged(event: WorkflowStateChangedEvent) {
         if (event.entityType != "ACTIVITY_RECORD") return
