@@ -414,6 +414,47 @@ class DashboardService(
             )
         }
 
+        // Temporary Office Space has no child activity_records — data lives on
+        // the activity itself.  Return activities as synthetic DashboardRecordDto rows.
+        if (activityTypeCode == "TEMPORARY_OFFICE_SPACE") {
+            return jdbc.query(
+                """
+                SELECT pa.id, pa.status, pa.created_at, pa.updated_at,
+                       tosd.details_required, tosd.count, tosd.structure_type,
+                       tosd.new_agency_available, tosd.new_tdc,
+                       tosd.old_possession_given, tosd.old_tdc,
+                       tosd.hiring_rental_agreement, tosd.hiring_tdc
+                FROM project_activities pa
+                LEFT JOIN temporary_office_space_details tosd ON tosd.activity_id = pa.id
+                WHERE pa.project_id         = ?
+                  AND pa.activity_type_code = 'TEMPORARY_OFFICE_SPACE'
+                  AND NOT pa.is_deleted
+                ORDER BY pa.created_at
+                """.trimIndent(),
+                { rs, _ ->
+                    val node = objectMapper.createObjectNode()
+                    node.put("details_required", rs.getBoolean("details_required"))
+                    rs.getObject("count")?.let { node.put("count", rs.getInt("count")) }
+                    rs.getString("structure_type")?.let { node.put("structure_type", it) }
+                    rs.getObject("new_agency_available")?.let { node.put("new_agency_available", rs.getBoolean("new_agency_available")) }
+                    rs.getString("new_tdc")?.let { node.put("new_tdc", it) }
+                    rs.getObject("old_possession_given")?.let { node.put("old_possession_given", rs.getBoolean("old_possession_given")) }
+                    rs.getString("old_tdc")?.let { node.put("old_tdc", it) }
+                    rs.getObject("hiring_rental_agreement")?.let { node.put("hiring_rental_agreement", rs.getBoolean("hiring_rental_agreement")) }
+                    rs.getString("hiring_tdc")?.let { node.put("hiring_tdc", it) }
+                    DashboardRecordDto(
+                        id            = rs.getObject("id", UUID::class.java),
+                        recordState   = rs.getString("status") ?: "DRAFT",
+                        recordSubtype = null,
+                        dataJson      = node,
+                        createdAt     = rs.getTimestamp("created_at").toInstant(),
+                        updatedAt     = rs.getTimestamp("updated_at").toInstant(),
+                    )
+                },
+                projectId,
+            )
+        }
+
         return jdbc.query(
             """
             SELECT ar.id, ar.record_state, ar.record_subtype,

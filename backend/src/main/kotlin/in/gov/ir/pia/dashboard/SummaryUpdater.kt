@@ -98,7 +98,8 @@ class SummaryUpdater(
         if (event.entityType != "PROJECT_ACTIVITY") return
 
         val activity = projectActivityRepo.findById(event.entityId).orElse(null) ?: return
-        if (activity.activityTypeCode != "TENDER_PACKAGING") return
+        if (activity.activityTypeCode != "TENDER_PACKAGING" &&
+            activity.activityTypeCode != "TEMPORARY_OFFICE_SPACE") return
 
         val projectId = activity.projectId
         val typeCode  = activity.activityTypeCode

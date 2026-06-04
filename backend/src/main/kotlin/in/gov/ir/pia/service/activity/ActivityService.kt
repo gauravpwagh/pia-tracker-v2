@@ -370,7 +370,8 @@ class ActivityService(
         // For activity types that have no records (data lives on the activity
         // itself), seed the project_activity_summary row so the dashboard shows
         // the activity from the moment it is created.
-        if (request.activityTypeCode == "TENDER_PACKAGING") {
+        if (request.activityTypeCode == "TENDER_PACKAGING" ||
+            request.activityTypeCode == "TEMPORARY_OFFICE_SPACE") {
             eventPublisher.publishEvent(
                 ActivityRecordCreatedEvent(
                     projectId        = projectId,
