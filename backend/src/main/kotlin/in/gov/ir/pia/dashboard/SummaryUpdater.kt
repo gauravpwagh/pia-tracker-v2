@@ -44,9 +44,100 @@ class SummaryUpdater(
 ) {
     private val log = LoggerFactory.getLogger(SummaryUpdater::class.java)
 
+    /**
+     * Increments [draft_count] and [total_records] in [project_activity_summary]
+     * when a new record is created (before any workflow action is taken).
+     *
+     * Also seeds [project_utility_subtype_summary] for Utility Shifting records
+     * so the subtype breakdown is accurate from the moment of creation.
+     */
+    @EventListener
+    fun onActivityRecordCreated(event: ActivityRecordCreatedEvent) {
+        jdbc.update(
+            """
+            INSERT INTO project_activity_summary
+                (project_id, activity_type_code, draft_count, total_records)
+            VALUES (?, ?, 1, 1)
+            ON CONFLICT (project_id, activity_type_code) DO UPDATE
+                SET draft_count   = project_activity_summary.draft_count + 1,
+                    total_records = project_activity_summary.total_records + 1,
+                    updated_at    = now()
+            """.trimIndent(),
+            event.projectId,
+            event.activityTypeCode,
+        )
+
+        if (event.recordSubtype != null) {
+            jdbc.update(
+                """
+                INSERT INTO project_utility_subtype_summary
+                    (project_id, record_subtype, draft_count, total_records)
+                VALUES (?, ?, 1, 1)
+                ON CONFLICT (project_id, record_subtype) DO UPDATE
+                    SET draft_count   = project_utility_subtype_summary.draft_count + 1,
+                        total_records = project_utility_subtype_summary.total_records + 1,
+                        updated_at    = now()
+                """.trimIndent(),
+                event.projectId,
+                event.recordSubtype,
+            )
+        }
+
+        eventPublisher.publishEvent(ProjectSummaryChangedEvent(event.projectId))
+    }
+
     @EventListener
     fun onWorkflowStateChanged(event: WorkflowStateChangedEvent) {
         if (event.entityType != "ACTIVITY_RECORD") return
+
+        // Section-level events (sectionCode != null) are for per-section workflow
+        // instances (e.g., LA's 9 sections, FC's 3 stages).  The main
+        // project_activity_summary tracks records, not individual sections, so we
+        // skip the main summary update here.  project_forest_stage_summary is still
+        // updated below for Forest Clearance stages.
+        if (event.sectionCode != null) {
+            val record =
+                activityRecordRepo.findById(event.entityId).orElse(null) ?: return
+            val activity =
+                projectActivityRepo.findById(record.projectActivityId).orElse(null) ?: return
+
+            // ── Per-stage summary (Forest Clearance sections only) ────────────
+            if (activity.activityTypeCode == "FOREST_CLEARANCE") {
+                val stageCode = event.sectionCode!!
+                val fromCol = stateToColumn(event.fromStateCode)
+                val toCol   = stateToColumn(event.toStateCode)
+
+                jdbc.update(
+                    """
+                    INSERT INTO project_forest_stage_summary (project_id, stage_code)
+                    VALUES (?, ?) ON CONFLICT (project_id, stage_code) DO NOTHING
+                    """.trimIndent(),
+                    activity.projectId, stageCode,
+                )
+                if (fromCol != null) {
+                    jdbc.update(
+                        "UPDATE project_forest_stage_summary SET $fromCol = GREATEST(0, $fromCol - 1) WHERE project_id = ? AND stage_code = ?",
+                        activity.projectId, stageCode,
+                    )
+                }
+                if (toCol != null) {
+                    jdbc.update(
+                        "UPDATE project_forest_stage_summary SET $toCol = $toCol + 1 WHERE project_id = ? AND stage_code = ?",
+                        activity.projectId, stageCode,
+                    )
+                }
+                jdbc.update(
+                    """
+                    UPDATE project_forest_stage_summary
+                    SET total_records = draft_count + submitted_count + verified_count
+                                      + authenticated_count + sent_back_count
+                    WHERE project_id = ? AND stage_code = ?
+                    """.trimIndent(),
+                    activity.projectId, stageCode,
+                )
+            }
+            return
+        }
 
         val record =
             activityRecordRepo.findById(event.entityId).orElse(null) ?: run {
@@ -140,60 +231,6 @@ class SummaryUpdater(
 
         // Cascade to project summary and then zone summary
         eventPublisher.publishEvent(ProjectSummaryChangedEvent(projectId))
-
-        // ── Per-stage summary (Forest Clearance) ─────────────────────────────
-        // Maintain project_forest_stage_summary when the activity is Forest
-        // Clearance and the event carries a section code (stage_i / stage_ii /
-        // post_approval).  One row per (project_id, stage_code).
-        if (activity.activityTypeCode == "FOREST_CLEARANCE" && event.sectionCode != null) {
-            val stageCode = event.sectionCode!!
-
-            jdbc.update(
-                """
-                INSERT INTO project_forest_stage_summary
-                    (project_id, stage_code)
-                VALUES (?, ?)
-                ON CONFLICT (project_id, stage_code) DO NOTHING
-                """.trimIndent(),
-                projectId,
-                stageCode,
-            )
-
-            if (fromCol != null) {
-                jdbc.update(
-                    """
-                    UPDATE project_forest_stage_summary
-                    SET $fromCol = GREATEST(0, $fromCol - 1)
-                    WHERE project_id = ? AND stage_code = ?
-                    """.trimIndent(),
-                    projectId,
-                    stageCode,
-                )
-            }
-
-            if (toCol != null) {
-                jdbc.update(
-                    """
-                    UPDATE project_forest_stage_summary
-                    SET $toCol = $toCol + 1
-                    WHERE project_id = ? AND stage_code = ?
-                    """.trimIndent(),
-                    projectId,
-                    stageCode,
-                )
-            }
-
-            jdbc.update(
-                """
-                UPDATE project_forest_stage_summary
-                SET total_records = draft_count + submitted_count + verified_count
-                                  + authenticated_count + sent_back_count
-                WHERE project_id = ? AND stage_code = ?
-                """.trimIndent(),
-                projectId,
-                stageCode,
-            )
-        }
 
         // ── Per-subtype summary (Utility Shifting) ────────────────────────────
         // Maintain project_utility_subtype_summary when the record has a subtype.

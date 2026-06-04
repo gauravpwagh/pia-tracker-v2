@@ -15,8 +15,10 @@ import `in`.gov.ir.pia.repository.WorkflowInstanceRepository
 import `in`.gov.ir.pia.security.PiaPrincipal
 import `in`.gov.ir.pia.service.comment.CommentService
 import `in`.gov.ir.pia.service.comment.CreateCommentRequest
+import `in`.gov.ir.pia.dashboard.ActivityRecordCreatedEvent
 import `in`.gov.ir.pia.workflow.DrawingService
 import `in`.gov.ir.pia.workflow.WorkflowService
+import org.springframework.context.ApplicationEventPublisher
 import jakarta.persistence.EntityManager
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
@@ -192,6 +194,7 @@ class ActivityService(
     private val instanceRepository: WorkflowInstanceRepository,
     private val commentService: CommentService,
     private val drawingService: DrawingService,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
     private val log = LoggerFactory.getLogger(ActivityService::class.java)
 
@@ -202,12 +205,41 @@ class ActivityService(
      *
      * Throws 404 if the project is not accessible (zone mismatch or deleted).
      */
+    /**
+     * Returns activities on [projectId] visible to [principal].
+     *
+     * Filter rules:
+     * - ACTIVITY.READ.ALL (EDGS/CI, SUPER_ADMIN, ADMIN) → all activities.
+     * - ACTIVITY.READ.ZONE (CAO/C)                      → all activities.
+     * - ACTIVITY.READ.OWN + CE_C designation             → all activities
+     *   (CE/C oversees the whole project).
+     * - ACTIVITY.READ.OWN + NODAL_DY_CE_C designation   → all activities
+     *   (Nodal verifies records across all activities).
+     * - ACTIVITY.READ.OWN + DY_CE_C designation          → only activities
+     *   where primary_dyce_user_id = principal.userId.
+     */
     fun listForProject(
         projectId: UUID,
         principal: PiaPrincipal,
     ): List<ProjectActivity> {
         requireProjectAccess(projectId, principal)
-        return activityRepository.findAllByProjectIdAndIsDeletedFalseOrderByCreatedAtAsc(projectId)
+
+        val allActivities = principal.isSuperAdmin ||
+            principal.permissions.contains("ACTIVITY.READ.ALL") ||
+            principal.permissions.contains("ACTIVITY.READ.ZONE") ||
+            principal.designationCode == "CE_C" ||
+            principal.designationCode == "NODAL_DY_CE_C"
+
+        return if (allActivities) {
+            activityRepository.findAllByProjectIdAndIsDeletedFalseOrderByCreatedAtAsc(projectId)
+        } else {
+            // DY_CE_C: only activities they are personally assigned to
+            activityRepository
+                .findAllByProjectIdAndPrimaryDyceUserIdAndIsDeletedFalseOrderByCreatedAtAsc(
+                    projectId,
+                    principal.userId,
+                )
+        }
     }
 
     /**
@@ -561,6 +593,16 @@ class ActivityService(
             action = "ACTIVITY_RECORD.CREATE",
             entityType = "ACTIVITY_RECORD",
             entityId = record.id,
+        )
+
+        // Seed the summary so the record is visible on the dashboard immediately,
+        // before any workflow action is taken.
+        eventPublisher.publishEvent(
+            ActivityRecordCreatedEvent(
+                projectId        = activity.projectId,
+                activityTypeCode = activity.activityTypeCode,
+                recordSubtype    = record.recordSubtype,
+            ),
         )
 
         return record.toDetailResponse()
@@ -1110,8 +1152,12 @@ class ActivityService(
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
-     * Verifies [principal] can access the project (zone filter).
-     * Throws 404 if not found or inaccessible zone.
+     * Verifies [principal] can access the project, using the same scope rules
+     * as [ProjectService.getForPrincipal]:
+     *   ALL-scope  → any non-deleted project.
+     *   ZONE-scope → project must be in an accessible zone.
+     *   OWN-scope  → user must have an active assignment on the project.
+     * Throws 404 (not 403) to avoid existence leaks.
      */
     private fun requireProjectAccess(
         projectId: UUID,
@@ -1122,9 +1168,15 @@ class ActivityService(
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
             return
         }
-        val zones = principal.accessibleZoneIds
-        if (zones.isEmpty()) throw ResponseStatusException(HttpStatus.NOT_FOUND)
-        projectRepository.findByIdInZones(projectId, zones)
+        if (principal.permissions.contains("PROJECT.READ.ZONE")) {
+            val zones = principal.accessibleZoneIds
+            if (zones.isEmpty()) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+            projectRepository.findByIdInZones(projectId, zones)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+            return
+        }
+        // OWN-scope: must have an active assignment on the project
+        projectRepository.findByIdAndAssignedUser(projectId, principal.userId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
     }
 
