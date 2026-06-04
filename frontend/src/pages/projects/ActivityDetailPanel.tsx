@@ -517,6 +517,7 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
             */}
             {activity.activityTypeCode !== 'UTILITY_SHIFTING'
               && activity.activityTypeCode !== 'TENDER_PACKAGING'
+              && activity.activityTypeCode !== 'TEMPORARY_OFFICE_SPACE'
               && <div>
               <Divider orientation="left" orientationMargin={0}
                 style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
