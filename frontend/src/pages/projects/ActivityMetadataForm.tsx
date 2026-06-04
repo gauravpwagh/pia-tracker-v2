@@ -200,6 +200,18 @@ function enumLabel(key: string, value: unknown): string {
   return v;
 }
 
+/**
+ * Returns default metadata values for an activity type.
+ * Used by ActivityDetailPanel to seed boolean fields when entering edit mode
+ * so they are always saved — even when the user doesn't explicitly toggle them.
+ */
+export function getMetadataDefaults(activityTypeCode: string): Record<string, unknown> {
+  if (activityTypeCode === 'TENDER_PACKAGING') {
+    return { epc_document_prepared: false, tender_finalized: false };
+  }
+  return {};
+}
+
 // ── Controlled form component (edit mode) ─────────────────────────────────
 
 export interface ActivityMetadataFormProps {
@@ -771,7 +783,11 @@ export function ActivityMetadataView({
   const labels = LABEL_MAP[activityTypeCode] ?? {};
   const entries = Object.entries(labels)
     .map(([key, label]) => ({ key, label, value: metadataJson[key] }))
-    .filter(({ value }) => value !== undefined && value !== null && value !== '');
+    // Boolean fields always show (even when undefined/false — display as "No").
+    // Other fields are hidden when not yet filled in.
+    .filter(({ key, value }) =>
+      BOOLEAN_KEYS.has(key) || (value !== undefined && value !== null && value !== ''),
+    );
 
   if (entries.length === 0) return null;
 

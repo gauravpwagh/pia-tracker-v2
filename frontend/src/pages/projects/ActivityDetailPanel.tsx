@@ -31,7 +31,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import { ActivityMetadataForm, ActivityMetadataView } from './ActivityMetadataForm';
+import { ActivityMetadataForm, ActivityMetadataView, getMetadataDefaults } from './ActivityMetadataForm';
 import {
   AuditOutlined,
   BranchesOutlined,
@@ -262,8 +262,12 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
         ? dayjs(activity.targetCompletionDate)
         : null,
     });
-    // Seed metadata state directly from the server response.
-    setMetadataState({ ...(activity.metadataJson ?? {}) } as Record<string, unknown>);
+    // Seed metadata state: start with type defaults (so boolean fields are
+    // always present), then overlay the actual saved values.
+    setMetadataState({
+      ...getMetadataDefaults(activity.activityTypeCode),
+      ...(activity.metadataJson ?? {}),
+    } as Record<string, unknown>);
     setEditing(true);
   };
 
@@ -511,7 +515,9 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
                     at activity-creation time using drawing_type as recordSubtype.
                   • All others: full create + list UI.
             */}
-            {activity.activityTypeCode !== 'UTILITY_SHIFTING' && <div>
+            {activity.activityTypeCode !== 'UTILITY_SHIFTING'
+              && activity.activityTypeCode !== 'TENDER_PACKAGING'
+              && <div>
               <Divider orientation="left" orientationMargin={0}
                 style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
                 {activity.activityTypeCode === 'DRAWING_APPROVAL' ? 'Approval record' : 'Records'}
