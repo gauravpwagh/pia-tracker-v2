@@ -160,15 +160,21 @@ const LABEL_MAP: Record<string, Record<string, string>> = {
     tender_finalized:     'EPC Tender Finalized',
   },
   TEMPORARY_OFFICE_SPACE: {
-    structure_type:    'Structure Type',
-    count:             'No. of Offices',
-    location_name:     'Location Name',
-    location_chainage: 'Location Chainage',
+    details_required:        'Details Required',
+    count:                   'No. of Offices',
+    structure_type:          'Structure Type',
+    new_agency_available:    'Agency Available',
+    new_tdc:                 'TDC (Target Date of Completion)',
+    old_possession_given:    'Possession Given by OL',
+    old_tdc:                 'TDC (Target Date of Completion)',
+    hiring_rental_agreement: 'Rental Agreement',
+    hiring_tdc:              'TDC (Target Date of Completion)',
   },
 };
 
 const DATE_KEYS = new Set([
   'work_start_date', 'expected_completion_date', 'actual_completion_date', 'work_order_date',
+  'new_tdc', 'old_tdc', 'hiring_tdc',
 ]);
 
 const CURRENCY_KEYS = new Set([
@@ -177,6 +183,8 @@ const CURRENCY_KEYS = new Set([
 
 const BOOLEAN_KEYS = new Set([
   'epc_document_prepared', 'tender_finalized',
+  // Temporary Office Space — top-level gate + conditional per-type booleans
+  'details_required', 'new_agency_available', 'old_possession_given', 'hiring_rental_agreement',
 ]);
 
 /** Map enum code → human label for display. */
@@ -211,6 +219,9 @@ function enumLabel(key: string, value: unknown): string {
 export function getMetadataDefaults(activityTypeCode: string): Record<string, unknown> {
   if (activityTypeCode === 'TENDER_PACKAGING') {
     return { epc_document_prepared: false, tender_finalized: false };
+  }
+  if (activityTypeCode === 'TEMPORARY_OFFICE_SPACE') {
+    return { details_required: false };
   }
   return {};
 }
@@ -727,45 +738,135 @@ export function ActivityMetadataForm({
       );
 
     // ── Temporary Office Space ───────────────────────────────────────────
-    case 'TEMPORARY_OFFICE_SPACE':
+    case 'TEMPORARY_OFFICE_SPACE': {
+      const structureType    = str('structure_type');
+      const detailsRequired  = values['details_required'] === true;
+      const isNew            = structureType === 'NEW_REQUIRED';
+      const isOld            = structureType === 'OLD_AVAILABLE';
+      const isHiring         = structureType === 'HIRING';
+      const dateVal          = (key: string) => str(key) ? dayjs(str(key)) : null;
+
+      const clearConditionalFields = () => {
+        onChange('new_agency_available',    undefined);
+        onChange('new_tdc',                 undefined);
+        onChange('old_possession_given',    undefined);
+        onChange('old_tdc',                 undefined);
+        onChange('hiring_rental_agreement', undefined);
+        onChange('hiring_tdc',              undefined);
+      };
+
       return (
         <>
-          <Form.Item label="Structure Type" required>
-            <Select
-              placeholder="Select…"
-              options={STRUCTURE_TYPE_OPTIONS}
-              value={str('structure_type')}
-              onChange={(v) => onChange('structure_type', v)}
+          <Form.Item label="Details of Temp. Office Space Required">
+            <Switch
+              checkedChildren="Yes"
+              unCheckedChildren="No"
+              checked={detailsRequired}
+              onChange={(checked) => {
+                onChange('details_required', checked);
+                if (!checked) {
+                  onChange('count', undefined);
+                  onChange('structure_type', undefined);
+                  clearConditionalFields();
+                }
+              }}
             />
           </Form.Item>
-          <Form.Item label="No. of Office Spaces">
-            <InputNumber
-              min={1}
-              precision={0}
-              style={{ width: '100%' }}
-              value={num('count')}
-              onChange={(v) => onChange('count', v ?? undefined)}
-            />
-          </Form.Item>
-          <Form.Item label="Location Name">
-            <Input
-              placeholder="e.g. Near Ambala Cantt station"
-              value={str('location_name')}
-              onChange={(e) => onChange('location_name', e.target.value)}
-            />
-          </Form.Item>
-          <Form.Item
-            label="Location Chainage"
-            help="Use KM+M format, e.g. 132+450"
-          >
-            <Input
-              placeholder="e.g. 132+450"
-              value={str('location_chainage')}
-              onChange={(e) => onChange('location_chainage', e.target.value)}
-            />
-          </Form.Item>
+
+          {detailsRequired && (
+            <>
+              <Form.Item label="No. of Offices">
+                <InputNumber
+                  min={1}
+                  precision={0}
+                  style={{ width: '100%' }}
+                  value={num('count')}
+                  onChange={(v) => onChange('count', v ?? undefined)}
+                />
+              </Form.Item>
+
+              <Form.Item label="Structure Type" required>
+                <Select
+                  placeholder="Select…"
+                  options={STRUCTURE_TYPE_OPTIONS}
+                  value={str('structure_type')}
+                  onChange={(v) => {
+                    onChange('structure_type', v);
+                    clearConditionalFields();
+                  }}
+                />
+              </Form.Item>
+
+              {/* ── New Structure Required ──────────────────────── */}
+              {isNew && (
+                <>
+                  <Form.Item label="Agency Available">
+                    <Switch
+                      checkedChildren="Yes"
+                      unCheckedChildren="No"
+                      checked={values['new_agency_available'] === true}
+                      onChange={(checked) => onChange('new_agency_available', checked)}
+                    />
+                  </Form.Item>
+                  <Form.Item label="TDC">
+                    <DatePicker
+                      style={{ width: '100%' }}
+                      format="D MMM YYYY"
+                      value={dateVal('new_tdc')}
+                      onChange={(d) => onChange('new_tdc', d ? d.format('YYYY-MM-DD') : undefined)}
+                    />
+                  </Form.Item>
+                </>
+              )}
+
+              {/* ── Old Structure Available ─────────────────────── */}
+              {isOld && (
+                <>
+                  <Form.Item label="Possession Given by OL">
+                    <Switch
+                      checkedChildren="Yes"
+                      unCheckedChildren="No"
+                      checked={values['old_possession_given'] === true}
+                      onChange={(checked) => onChange('old_possession_given', checked)}
+                    />
+                  </Form.Item>
+                  <Form.Item label="TDC">
+                    <DatePicker
+                      style={{ width: '100%' }}
+                      format="D MMM YYYY"
+                      value={dateVal('old_tdc')}
+                      onChange={(d) => onChange('old_tdc', d ? d.format('YYYY-MM-DD') : undefined)}
+                    />
+                  </Form.Item>
+                </>
+              )}
+
+              {/* ── Hiring of Structure ─────────────────────────── */}
+              {isHiring && (
+                <>
+                  <Form.Item label="Rental Agreement">
+                    <Switch
+                      checkedChildren="Yes"
+                      unCheckedChildren="No"
+                      checked={values['hiring_rental_agreement'] === true}
+                      onChange={(checked) => onChange('hiring_rental_agreement', checked)}
+                    />
+                  </Form.Item>
+                  <Form.Item label="TDC">
+                    <DatePicker
+                      style={{ width: '100%' }}
+                      format="D MMM YYYY"
+                      value={dateVal('hiring_tdc')}
+                      onChange={(d) => onChange('hiring_tdc', d ? d.format('YYYY-MM-DD') : undefined)}
+                    />
+                  </Form.Item>
+                </>
+              )}
+            </>
+          )}
         </>
       );
+    }
 
     default:
       return null;
@@ -786,10 +887,13 @@ export function ActivityMetadataView({
   const labels = LABEL_MAP[activityTypeCode] ?? {};
   const entries = Object.entries(labels)
     .map(([key, label]) => ({ key, label, value: metadataJson[key] }))
-    // Boolean fields always show (even when undefined/false — display as "No").
-    // Other fields are hidden when not yet filled in.
+    // Boolean fields show when they are present in the response (value !== undefined).
+    // Conditional booleans (e.g. new_agency_available) are omitted by the backend
+    // when null, so value will be undefined — hiding them correctly.
+    // Non-boolean fields are hidden when not filled in.
     .filter(({ key, value }) =>
-      BOOLEAN_KEYS.has(key) || (value !== undefined && value !== null && value !== ''),
+      (BOOLEAN_KEYS.has(key) && value !== undefined) ||
+      (value !== undefined && value !== null && value !== ''),
     );
 
   if (entries.length === 0) return null;

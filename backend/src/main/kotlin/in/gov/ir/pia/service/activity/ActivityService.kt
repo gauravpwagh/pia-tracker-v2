@@ -956,7 +956,12 @@ class ActivityService(
                     listOf("package_name", "epc_document_prepared", "tender_finalized")
             "TEMPORARY_OFFICE_SPACE" ->
                 "temporary_office_space_details" to
-                    listOf("structure_type", "count", "location_name", "location_chainage")
+                    listOf(
+                        "details_required", "count", "structure_type",
+                        "new_agency_available", "new_tdc",
+                        "old_possession_given", "old_tdc",
+                        "hiring_rental_agreement", "hiring_tdc",
+                    )
             else -> return JsonNodeFactory.instance.objectNode()
         }
 
@@ -1006,6 +1011,17 @@ class ActivityService(
                     else -> false
                 }
             } ?: false
+
+        // Returns null when the key is absent or explicitly null — used for
+        // conditional Boolean columns that are only applicable for one structure type.
+        fun boolOrNull(key: String): Boolean? =
+            metadata.get(key)?.takeIf { !it.isNull }?.let {
+                when {
+                    it.isBoolean -> it.booleanValue()
+                    it.isTextual -> it.asText().equals("true", ignoreCase = true)
+                    else -> null
+                }
+            }
 
         when (typeCode) {
             "LAND_ACQUISITION" -> jdbc.update(
@@ -1155,19 +1171,32 @@ class ActivityService(
             "TEMPORARY_OFFICE_SPACE" -> jdbc.update(
                 """
                 INSERT INTO temporary_office_space_details
-                    (activity_id, structure_type, count, location_name, location_chainage)
-                VALUES (?, ?, ?, ?, ?)
+                    (activity_id, details_required, count, structure_type,
+                     new_agency_available, new_tdc,
+                     old_possession_given, old_tdc,
+                     hiring_rental_agreement, hiring_tdc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (activity_id) DO UPDATE SET
-                    structure_type    = EXCLUDED.structure_type,
-                    count             = EXCLUDED.count,
-                    location_name     = EXCLUDED.location_name,
-                    location_chainage = EXCLUDED.location_chainage
+                    details_required        = EXCLUDED.details_required,
+                    count                   = EXCLUDED.count,
+                    structure_type          = EXCLUDED.structure_type,
+                    new_agency_available    = EXCLUDED.new_agency_available,
+                    new_tdc                 = EXCLUDED.new_tdc,
+                    old_possession_given    = EXCLUDED.old_possession_given,
+                    old_tdc                 = EXCLUDED.old_tdc,
+                    hiring_rental_agreement = EXCLUDED.hiring_rental_agreement,
+                    hiring_tdc              = EXCLUDED.hiring_tdc
                 """.trimIndent(),
                 activityId,
-                str("structure_type"),
+                bool("details_required"),
                 int("count"),
-                str("location_name"),
-                str("location_chainage"),
+                str("structure_type"),
+                boolOrNull("new_agency_available"),
+                dat("new_tdc"),
+                boolOrNull("old_possession_given"),
+                dat("old_tdc"),
+                boolOrNull("hiring_rental_agreement"),
+                dat("hiring_tdc"),
             )
         }
     }
