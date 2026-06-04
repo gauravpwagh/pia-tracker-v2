@@ -95,6 +95,10 @@ export interface ForestStageBreakdownDto {
 
 export interface DashboardRecordDto {
   id: string;
+  /** Parent project_activities.id — used to deduplicate activity-level fields
+   *  (e.g. LA area totals) when multiple records share one activity.
+   *  Null for synthetic rows (TP, TOS) where the row IS the activity. */
+  projectActivityId: string | null;
   recordState: string;
   recordSubtype: string | null;
   /** Full form data_json — field names depend on the activity type. */

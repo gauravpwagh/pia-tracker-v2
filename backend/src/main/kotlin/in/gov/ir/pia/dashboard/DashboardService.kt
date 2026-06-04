@@ -108,6 +108,10 @@ data class ProjectOverviewDto(
  */
 data class DashboardRecordDto(
     val id: UUID,
+    /** The parent project_activities.id — used by the frontend to deduplicate
+     *  activity-level fields (e.g. LA area totals) when multiple records share
+     *  one activity.  Null for synthetic rows (TP, TOS) where the row IS the activity. */
+    val projectActivityId: UUID?,
     val recordState: String,
     val recordSubtype: String?,
     val dataJson: JsonNode,
@@ -402,12 +406,13 @@ class DashboardService(
                     node.put("epc_document_prepared", rs.getBoolean("epc_document_prepared"))
                     node.put("tender_finalized",      rs.getBoolean("tender_finalized"))
                     DashboardRecordDto(
-                        id            = rs.getObject("id", UUID::class.java),
-                        recordState   = rs.getString("status") ?: "DRAFT",
-                        recordSubtype = null,
-                        dataJson      = node,
-                        createdAt     = rs.getTimestamp("created_at").toInstant(),
-                        updatedAt     = rs.getTimestamp("updated_at").toInstant(),
+                        id                = rs.getObject("id", UUID::class.java),
+                        projectActivityId = null,
+                        recordState       = rs.getString("status") ?: "DRAFT",
+                        recordSubtype     = null,
+                        dataJson          = node,
+                        createdAt         = rs.getTimestamp("created_at").toInstant(),
+                        updatedAt         = rs.getTimestamp("updated_at").toInstant(),
                     )
                 },
                 projectId,
@@ -443,12 +448,59 @@ class DashboardService(
                     rs.getObject("hiring_rental_agreement")?.let { node.put("hiring_rental_agreement", rs.getBoolean("hiring_rental_agreement")) }
                     rs.getString("hiring_tdc")?.let { node.put("hiring_tdc", it) }
                     DashboardRecordDto(
-                        id            = rs.getObject("id", UUID::class.java),
-                        recordState   = rs.getString("status") ?: "DRAFT",
-                        recordSubtype = null,
-                        dataJson      = node,
-                        createdAt     = rs.getTimestamp("created_at").toInstant(),
-                        updatedAt     = rs.getTimestamp("updated_at").toInstant(),
+                        id                = rs.getObject("id", UUID::class.java),
+                        projectActivityId = null,
+                        recordState       = rs.getString("status") ?: "DRAFT",
+                        recordSubtype     = null,
+                        dataJson          = node,
+                        createdAt         = rs.getTimestamp("created_at").toInstant(),
+                        updatedAt         = rs.getTimestamp("updated_at").toInstant(),
+                    )
+                },
+                projectId,
+            )
+        }
+
+        // Land Acquisition: area totals live in land_acquisition_details (activity level),
+        // not in activity_records.data_json.  JOIN the detail table so each record row
+        // carries the parent activity's area breakdown.  The frontend deduplicates by
+        // projectActivityId when summing areas to avoid counting the same activity twice.
+        if (activityTypeCode == "LAND_ACQUISITION") {
+            return jdbc.query(
+                """
+                SELECT ar.id, ar.project_activity_id,
+                       ar.record_state, ar.record_subtype,
+                       ar.data_json::text AS data_json,
+                       ar.created_at, ar.updated_at,
+                       lad.area_hectares_total,
+                       lad.area_hectares_private,
+                       lad.area_hectares_govt,
+                       lad.area_hectares_forest
+                FROM activity_records ar
+                JOIN project_activities pa ON pa.id = ar.project_activity_id
+                LEFT JOIN land_acquisition_details lad ON lad.activity_id = pa.id
+                WHERE pa.project_id         = ?
+                  AND pa.activity_type_code = 'LAND_ACQUISITION'
+                  AND NOT ar.is_deleted
+                  AND NOT pa.is_deleted
+                ORDER BY ar.created_at
+                """.trimIndent(),
+                { rs, _ ->
+                    val base = objectMapper.readTree(rs.getString("data_json") ?: "{}") as com.fasterxml.jackson.databind.node.ObjectNode
+                    // Merge activity-level area fields into the record's dataJson so the
+                    // frontend can read them from one place.
+                    rs.getBigDecimal("area_hectares_total")?.let   { base.put("area_hectares_total",   it) }
+                    rs.getBigDecimal("area_hectares_private")?.let { base.put("area_hectares_private", it) }
+                    rs.getBigDecimal("area_hectares_govt")?.let    { base.put("area_hectares_govt",    it) }
+                    rs.getBigDecimal("area_hectares_forest")?.let  { base.put("area_hectares_forest",  it) }
+                    DashboardRecordDto(
+                        id                = rs.getObject("id", UUID::class.java),
+                        projectActivityId = rs.getObject("project_activity_id", UUID::class.java),
+                        recordState       = rs.getString("record_state"),
+                        recordSubtype     = rs.getString("record_subtype"),
+                        dataJson          = base,
+                        createdAt         = rs.getTimestamp("created_at").toInstant(),
+                        updatedAt         = rs.getTimestamp("updated_at").toInstant(),
                     )
                 },
                 projectId,
@@ -457,7 +509,8 @@ class DashboardService(
 
         return jdbc.query(
             """
-            SELECT ar.id, ar.record_state, ar.record_subtype,
+            SELECT ar.id, ar.project_activity_id,
+                   ar.record_state, ar.record_subtype,
                    ar.data_json::text AS data_json, ar.created_at, ar.updated_at
             FROM activity_records ar
             JOIN project_activities pa ON pa.id = ar.project_activity_id
@@ -469,12 +522,13 @@ class DashboardService(
             """.trimIndent(),
             { rs, _ ->
                 DashboardRecordDto(
-                    id            = rs.getObject("id", UUID::class.java),
-                    recordState   = rs.getString("record_state"),
-                    recordSubtype = rs.getString("record_subtype"),
-                    dataJson      = objectMapper.readTree(rs.getString("data_json") ?: "{}"),
-                    createdAt     = rs.getTimestamp("created_at").toInstant(),
-                    updatedAt     = rs.getTimestamp("updated_at").toInstant(),
+                    id                = rs.getObject("id", UUID::class.java),
+                    projectActivityId = rs.getObject("project_activity_id", UUID::class.java),
+                    recordState       = rs.getString("record_state"),
+                    recordSubtype     = rs.getString("record_subtype"),
+                    dataJson          = objectMapper.readTree(rs.getString("data_json") ?: "{}"),
+                    createdAt         = rs.getTimestamp("created_at").toInstant(),
+                    updatedAt         = rs.getTimestamp("updated_at").toInstant(),
                 )
             },
             projectId,

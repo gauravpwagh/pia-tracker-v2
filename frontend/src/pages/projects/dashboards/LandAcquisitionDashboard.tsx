@@ -104,19 +104,27 @@ export function LandAcquisitionDashboard({ projectId }: Props) {
   const records  = recordsQuery.data ?? [];
   const rows     = useMemo(() => toRows(records), [records]);
 
-  // Aggregate hectares
+  // Aggregate hectares — area totals are activity-level fields (stored in
+  // land_acquisition_details), so deduplicate by projectActivityId to avoid
+  // counting the same activity's area once per record.
   const { totalHa, acquiredHa, privateHa, govtHa, forestHa,
           acqPrivate, acqGovt, acqForest } = useMemo(() => {
     let total = 0, acquired = 0, priv = 0, govt = 0, forest = 0;
     let aqPriv = 0, aqGovt = 0, aqForest = 0;
+    const seenActivity = new Set<string>();
     for (const r of records) {
-      const d   = r.dataJson;
-      const aut = r.recordState === 'AUTHENTICATED';
-      total   += parseNum(d.area_hectares_total);
-      priv    += parseNum(d.area_hectares_private);
-      govt    += parseNum(d.area_hectares_govt);
-      forest  += parseNum(d.area_hectares_forest);
-      if (aut) {
+      const d      = r.dataJson;
+      const actId  = r.projectActivityId ?? r.id; // fallback to record id if no parent
+      const isNew  = !seenActivity.has(actId);
+      if (isNew) {
+        seenActivity.add(actId);
+        total  += parseNum(d.area_hectares_total);
+        priv   += parseNum(d.area_hectares_private);
+        govt   += parseNum(d.area_hectares_govt);
+        forest += parseNum(d.area_hectares_forest);
+      }
+      // Acquired: count only authenticated records (one record = one village/section)
+      if (r.recordState === 'AUTHENTICATED') {
         acquired += parseNum(d.area_hectares_total);
         aqPriv   += parseNum(d.area_hectares_private);
         aqGovt   += parseNum(d.area_hectares_govt);
