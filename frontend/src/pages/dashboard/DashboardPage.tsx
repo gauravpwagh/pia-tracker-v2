@@ -21,15 +21,19 @@ import {
   Card,
   Checkbox,
   Col,
+  Collapse,
+  Divider,
   Dropdown,
   Progress,
   Row,
   Space,
   Spin,
   Statistic,
+  Table,
   Tag,
   Typography,
 } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -45,8 +49,11 @@ import { useAuthStore } from '@stores/authStore';
 import {
   fetchAccessibleScope,
   fetchCumulativeDashboard,
+  fetchZoneDashboard,
   type AccessibleScopeDto,
   type CumulativeActivitySummaryDto,
+  type ZoneProjectDto,
+  type ZoneSummaryDto,
 } from '@api/dashboard';
 
 const { Title, Text } = Typography;
@@ -630,6 +637,167 @@ function FilterBar({
   );
 }
 
+// ── Zone / PAN India projects section ────────────────────────────────────────
+
+const LIFECYCLE_LABELS: Record<string, string> = {
+  DRAFT:                   'Draft',
+  AWAITING_CAO_ALLOCATION: 'Awaiting CAO/C',
+  AWAITING_CEC_ASSIGNMENT: 'Awaiting CE/C',
+  ACTIVE:                  'Active',
+  CLOSED:                  'Closed',
+  CANCELLED:               'Cancelled',
+};
+
+const LIFECYCLE_COLORS: Record<string, string> = {
+  DRAFT:                   'default',
+  AWAITING_CAO_ALLOCATION: 'orange',
+  AWAITING_CEC_ASSIGNMENT: 'gold',
+  ACTIVE:                  'green',
+  CLOSED:                  'default',
+  CANCELLED:               'red',
+};
+
+const PROJECT_COLUMNS: ColumnsType<ZoneProjectDto & { zoneLabel?: string }> = [
+  {
+    title: 'Code',
+    dataIndex: 'projectCode',
+    key: 'code',
+    width: 100,
+    render: (v: string | null) => v ?? <Text type="secondary">—</Text>,
+  },
+  { title: 'Name', dataIndex: 'name', key: 'name', ellipsis: true },
+  {
+    title: 'Division',
+    dataIndex: 'divisionName',
+    key: 'division',
+    width: 110,
+    ellipsis: true,
+    render: (v: string | null) => v ?? <Text type="secondary">—</Text>,
+  },
+  {
+    title: 'Status',
+    dataIndex: 'lifecycleState',
+    key: 'state',
+    width: 120,
+    render: (s: string) => (
+      <Tag color={LIFECYCLE_COLORS[s] ?? 'default'} style={{ fontSize: 11, margin: 0 }}>
+        {LIFECYCLE_LABELS[s] ?? s.replace(/_/g, ' ')}
+      </Tag>
+    ),
+  },
+  {
+    title: 'Days since RB',
+    dataIndex: 'daysSinceRbRecommendation',
+    key: 'rbDays',
+    width: 110,
+    sorter: (a, b) =>
+      (a.daysSinceRbRecommendation ?? 0) - (b.daysSinceRbRecommendation ?? 0),
+    render: (v: number | null) =>
+      v !== null ? (
+        <Text style={{ color: v > 365 ? '#ff4d4f' : undefined }}>{v}d</Text>
+      ) : (
+        <Text type="secondary">—</Text>
+      ),
+  },
+  {
+    title: 'SLA',
+    dataIndex: 'slaBreachCount',
+    key: 'sla',
+    width: 60,
+    sorter: (a, b) => a.slaBreachCount - b.slaBreachCount,
+    render: (v: number) =>
+      v > 0 ? (
+        <Tag color="red" style={{ fontSize: 11, margin: 0 }}>
+          {v}
+        </Tag>
+      ) : (
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          0
+        </Text>
+      ),
+  },
+  {
+    title: 'Drawings in approval',
+    dataIndex: 'drawingsInApproval',
+    key: 'drawings',
+    width: 140,
+    sorter: (a, b) => a.drawingsInApproval - b.drawingsInApproval,
+    render: (v: number) =>
+      v > 0 ? <Text style={{ color: '#9254de' }}>{v}</Text> : <Text type="secondary">0</Text>,
+  },
+];
+
+function ZoneCard({ zone }: { zone: ZoneSummaryDto }) {
+  const projects = zone.projects ?? [];
+  const header = (
+    <Space>
+      <Text strong style={{ fontSize: 13 }}>
+        {zone.zoneCode} — {zone.zoneName}
+      </Text>
+      <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>
+        {zone.projectsActive} active
+      </Tag>
+      {zone.projectsWithSlaBreaches > 0 && (
+        <Tag color="red" style={{ fontSize: 11, margin: 0 }}>
+          {zone.projectsWithSlaBreaches} SLA breach{zone.projectsWithSlaBreaches !== 1 ? 'es' : ''}
+        </Tag>
+      )}
+      {zone.totalDrawingsInApproval > 0 && (
+        <Tag color="purple" style={{ fontSize: 11, margin: 0 }}>
+          {zone.totalDrawingsInApproval} drawings in approval
+        </Tag>
+      )}
+    </Space>
+  );
+
+  return (
+    <Collapse
+      size="small"
+      style={{ marginBottom: 8 }}
+      items={[{
+        key: zone.zoneId,
+        label: header,
+        children: (
+          <Table<ZoneProjectDto>
+            size="small"
+            dataSource={projects}
+            columns={PROJECT_COLUMNS}
+            rowKey="projectId"
+            pagination={{ pageSize: 10, showSizeChanger: false, size: 'small',
+              hideOnSinglePage: true }}
+            scroll={{ x: 700 }}
+          />
+        ),
+      }]}
+    />
+  );
+}
+
+function ZoneSection({ currentUser }: { currentUser: unknown }) {
+  const { data: zoneData, isLoading, isError } = useQuery({
+    queryKey: ['dashboard', 'zone'],
+    queryFn: fetchZoneDashboard,
+    enabled: !!currentUser,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  if (isLoading) return <Spin size="small" style={{ display: 'block', margin: '16px 0' }} />;
+  if (isError) return null; // silently hide — user may lack DASHBOARD.VIEW.ZONE
+  if (!zoneData || zoneData.zones.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <Divider orientation="left" style={{ fontSize: 13, margin: '16px 0 12px' }}>
+        Projects by Zone
+      </Divider>
+      {zoneData.zones.map((z) => (
+        <ZoneCard key={z.zoneId} zone={z} />
+      ))}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -773,6 +941,8 @@ export default function DashboardPage() {
           loading={cumulativeLoading}
         />
       ))}
+
+      <ZoneSection currentUser={currentUser} />
     </div>
   );
 }
