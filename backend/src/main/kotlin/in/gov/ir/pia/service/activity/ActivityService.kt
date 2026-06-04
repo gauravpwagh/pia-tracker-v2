@@ -940,7 +940,7 @@ class ActivityService(
                     listOf("drawing_type", "drawing_number")
             "TENDER_PACKAGING" ->
                 "tender_packaging_details" to
-                    listOf("package_name", "estimated_value", "tender_type")
+                    listOf("package_name", "epc_document_prepared", "tender_finalized")
             "TEMPORARY_OFFICE_SPACE" ->
                 "temporary_office_space_details" to
                     listOf("structure_type", "count", "location_name", "location_chainage")
@@ -958,6 +958,7 @@ class ActivityService(
         cols.forEach { col ->
             when (val v = row[col]) {
                 null -> {} // omit nulls — frontend treats missing keys as empty
+                is Boolean -> node.put(col, v)           // preserve as JSON boolean
                 is String -> if (v.isNotBlank()) node.put(col, v)
                 is java.math.BigDecimal -> node.put(col, v)
                 is Int -> node.put(col, v)
@@ -983,6 +984,15 @@ class ActivityService(
 
         fun dat(key: String): LocalDate? =
             str(key)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
+        fun bool(key: String): Boolean =
+            metadata.get(key)?.let {
+                when {
+                    it.isBoolean -> it.booleanValue()
+                    it.isTextual -> it.asText().equals("true", ignoreCase = true)
+                    else -> false
+                }
+            } ?: false
 
         when (typeCode) {
             "LAND_ACQUISITION" -> jdbc.update(
@@ -1117,17 +1127,17 @@ class ActivityService(
             "TENDER_PACKAGING" -> jdbc.update(
                 """
                 INSERT INTO tender_packaging_details
-                    (activity_id, package_name, estimated_value, tender_type)
+                    (activity_id, package_name, epc_document_prepared, tender_finalized)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT (activity_id) DO UPDATE SET
-                    package_name    = EXCLUDED.package_name,
-                    estimated_value = EXCLUDED.estimated_value,
-                    tender_type     = EXCLUDED.tender_type
+                    package_name          = EXCLUDED.package_name,
+                    epc_document_prepared = EXCLUDED.epc_document_prepared,
+                    tender_finalized      = EXCLUDED.tender_finalized
                 """.trimIndent(),
                 activityId,
                 str("package_name"),
-                dec("estimated_value"),
-                str("tender_type"),
+                bool("epc_document_prepared"),
+                bool("tender_finalized"),
             )
             "TEMPORARY_OFFICE_SPACE" -> jdbc.update(
                 """
