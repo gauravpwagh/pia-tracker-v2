@@ -181,6 +181,10 @@ const BOOLEAN_KEYS = new Set([
 
 /** Map enum code → human label for display. */
 function enumLabel(key: string, value: unknown): string {
+  // Boolean check must come before the early-exit guard below, because
+  // value may be false or undefined — both of which produce an empty string
+  // from String(value ?? '') and would be swallowed by `if (!v) return v`.
+  if (BOOLEAN_KEYS.has(key))      return (value === true || String(value) === 'true') ? 'Yes' : 'No';
   const v = String(value ?? '');
   if (!v) return v;
   if (key === 'utility_type')     return UTILITY_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
@@ -190,7 +194,6 @@ function enumLabel(key: string, value: unknown): string {
   if (key === 'current_status')   return UTILITY_STATUS_OPTIONS.find((o) => o.value === v)?.label ?? v;
   if (key === 'drawing_type')     return DRAWING_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
   if (key === 'structure_type')   return STRUCTURE_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
-  if (BOOLEAN_KEYS.has(key))      return (value === true || v === 'true') ? 'Yes' : 'No';
   if (CURRENCY_KEYS.has(key))     return `₹ ${Number(v).toLocaleString('en-IN')}`;
   if (DATE_KEYS.has(key)) {
     // ISO date string → "D MMM YYYY"
