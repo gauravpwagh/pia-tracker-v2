@@ -1,21 +1,29 @@
 /**
  * RecordDetailPanel — right-pane content when a record node is selected in the tree.
  *
- * For activity types that have an RJSF form (LAND_ACQUISITION, FOREST_CLEARANCE) the
- * full form is rendered inline — no navigation to a separate page.
+ * Layout:
+ *   ┌───────────────────────────────────┐
+ *   │ Title bar  (name · badge · ✕)     │  fixed
+ *   ├───────────────────────────────────┤
+ *   │ Master tabs  [ Form ]  [ Info ]   │  fixed
+ *   ├───────────────────────────────────┤
+ *   │                                   │
+ *   │  Form tab:                        │
+ *   │    Section sub-tabs (sticky top)  │
+ *   │    RJSF form          ↕ scroll    │
+ *   │                                   │
+ *   │  Info tab:                        │
+ *   │    Workflow state                 │
+ *   │    Comments           ↕ scroll    │
+ *   │    Attachments                    │
+ *   │    History                        │
+ *   │                                   │
+ *   ├───────────────────────────────────┤
+ *   │ Save · Workflow · Autosave status │  fixed, Form tab only
+ *   └───────────────────────────────────┘
  *
- * For DRAWING_APPROVAL the approver checklist is shown inline.
- *
- * Layout (form types):
- *   ┌─────────────────────────────────┐
- *   │ Title bar (name · badge · ✕)    │  fixed
- *   ├─────────────────────────────────┤
- *   │ Section tabs (if multi-section) │  fixed
- *   ├─────────────────────────────────┤
- *   │ RJSF form                       │  scrollable
- *   ├─────────────────────────────────┤
- *   │ Save · Workflow · Autosave      │  fixed
- *   └─────────────────────────────────┘
+ * For DRAWING_APPROVAL the approver checklist replaces the RJSF form.
+ * For other types only the Info tab is shown.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -36,10 +44,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import {
-  CloseOutlined,
-  FileTextOutlined,
-} from '@ant-design/icons';
+import { CloseOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
 import { fetchRecord, patchRecord, type ActivityRecordDetail } from '@api/activityRecords';
@@ -51,55 +56,58 @@ import {
   type WorkflowActionCode,
 } from '@api/workflow';
 import { useAutosave } from '@hooks/useAutosave';
+import { useAuthStore } from '@stores/authStore';
 import { RjsfForm } from '@/forms/RjsfForm';
 import type { RjsfFormHandle } from '@/forms/RjsfForm';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { DrawingApproversPanel } from './DrawingApproversPanel';
 import { SendBackModal } from '@pages/records/SendBackModal';
+import { CommentPanel } from '@components/comments/CommentPanel';
+import { HistoryPanel } from '@components/comments/HistoryPanel';
+import { AttachmentPanel } from '@components/attachments/AttachmentPanel';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/** Activity types whose records have an RJSF form rendered inline. */
 const FORM_TYPES = new Set(['LAND_ACQUISITION', 'FOREST_CLEARANCE']);
 
 // ── State colours / labels ────────────────────────────────────────────────────
 
 const RECORD_STATE_COLORS: Record<string, string> = {
-  DRAFT:                        'default',
-  SUBMITTED_FOR_VERIFICATION:   'blue',
-  VERIFIED:                     'cyan',
-  AUTHENTICATED:                'green',
-  SENT_BACK_TO_DYCE:            'orange',
-  SENT_BACK_TO_NODAL:           'gold',
+  DRAFT:                      'default',
+  SUBMITTED_FOR_VERIFICATION: 'blue',
+  VERIFIED:                   'cyan',
+  AUTHENTICATED:              'green',
+  SENT_BACK_TO_DYCE:          'orange',
+  SENT_BACK_TO_NODAL:         'gold',
 };
 
 const RECORD_STATE_LABELS: Record<string, string> = {
-  DRAFT:                        'Draft',
-  SUBMITTED_FOR_VERIFICATION:   'Submitted',
-  VERIFIED:                     'Pending Authentication',
-  AUTHENTICATED:                'Authenticated',
-  SENT_BACK_TO_DYCE:            'Sent Back to Dy CE/C',
-  SENT_BACK_TO_NODAL:           'Sent Back to Nodal',
+  DRAFT:                      'Draft',
+  SUBMITTED_FOR_VERIFICATION: 'Submitted',
+  VERIFIED:                   'Pending Authentication',
+  AUTHENTICATED:              'Authenticated',
+  SENT_BACK_TO_DYCE:          'Sent Back to Dy CE/C',
+  SENT_BACK_TO_NODAL:         'Sent Back to Nodal',
 };
 
 const SECTION_DOT_COLORS: Record<string, string> = {
-  DRAFT:                        '#d9d9d9',
-  SUBMITTED_FOR_VERIFICATION:   '#1677ff',
-  VERIFIED:                     '#52c41a',
-  AUTHENTICATED:                '#722ed1',
-  SENT_BACK_TO_DYCE:            '#fa8c16',
-  SENT_BACK_TO_NODAL:           '#fa8c16',
+  DRAFT:                      '#d9d9d9',
+  SUBMITTED_FOR_VERIFICATION: '#1677ff',
+  VERIFIED:                   '#52c41a',
+  AUTHENTICATED:              '#722ed1',
+  SENT_BACK_TO_DYCE:          '#fa8c16',
+  SENT_BACK_TO_NODAL:         '#fa8c16',
 };
 
 function recordLabel(record: ActivityRecordDetail): string {
-  if (record.name) return record.name;
+  if (record.name)        return record.name;
   if (record.recordSubtype) return record.recordSubtype.replace(/_/g, ' ');
   return 'Record';
 }
 
-// ── Workflow actions (bottom bar) ─────────────────────────────────────────────
+// ── Workflow actions ──────────────────────────────────────────────────────────
 
 interface WorkflowActionsProps {
   sectionState: SectionWorkflowState | undefined;
@@ -114,51 +122,45 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
 
   if (!sectionState || sectionState.isTerminal) return null;
 
-  const actions = sectionState.availableActions;
-  const canSubmit   = actions.includes('submit');
-  const canResubmit = actions.includes('resubmit');
-  const canVerify   = actions.includes('verify');
-  const canReVerify = actions.includes('re_verify');
-  const canAuth     = actions.includes('authenticate');
-  const canSendBack = actions.includes('send_back');
+  const a = sectionState.availableActions;
 
   return (
     <>
-      <Space>
-        {canSubmit && (
+      <Space wrap>
+        {a.includes('submit') && (
           <Tooltip title={t('record.actions.submitTooltip')}>
-            <Button type="primary" loading={loading} onClick={() => onAction('submit')}>
+            <Button size="small" type="primary" loading={loading} onClick={() => onAction('submit')}>
               {t('record.actions.submitSection')}
             </Button>
           </Tooltip>
         )}
-        {canResubmit && (
-          <Button loading={loading} onClick={() => onAction('resubmit')}>
+        {a.includes('resubmit') && (
+          <Button size="small" loading={loading} onClick={() => onAction('resubmit')}>
             {t('record.actions.resubmit')}
           </Button>
         )}
-        {canVerify && (
+        {a.includes('verify') && (
           <Tooltip title={t('record.actions.verifyTooltip')}>
-            <Button type="primary" loading={loading} onClick={() => onAction('verify')}>
+            <Button size="small" type="primary" loading={loading} onClick={() => onAction('verify')}>
               {t('record.actions.verify')}
             </Button>
           </Tooltip>
         )}
-        {canReVerify && (
-          <Button loading={loading} onClick={() => onAction('re-verify')}>
+        {a.includes('re_verify') && (
+          <Button size="small" loading={loading} onClick={() => onAction('re-verify')}>
             {t('record.actions.reVerify')}
           </Button>
         )}
-        {canAuth && (
+        {a.includes('authenticate') && (
           <Tooltip title={t('record.actions.authenticateTooltip')}>
-            <Button type="primary" loading={loading} onClick={() => onAction('authenticate')}>
+            <Button size="small" type="primary" loading={loading} onClick={() => onAction('authenticate')}>
               {t('record.actions.authenticate')}
             </Button>
           </Tooltip>
         )}
-        {canSendBack && (
+        {a.includes('send_back') && (
           <Tooltip title={t('record.actions.sendBackTooltip')}>
-            <Button danger loading={loading} onClick={() => setSendBackOpen(true)}>
+            <Button size="small" danger loading={loading} onClick={() => setSendBackOpen(true)}>
               {t('record.actions.sendBack')}
             </Button>
           </Tooltip>
@@ -180,23 +182,139 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
 
 function AutosaveIndicator({ status, savedAt }: { status: string; savedAt: Date | null }) {
   const { t } = useTranslation('forms');
-  if (status === 'saving') return <Text type="secondary" style={{ fontSize: 12 }}>{t('record.autosave.saving')}</Text>;
+  if (status === 'saving')
+    return <Text type="secondary" style={{ fontSize: 11 }}>{t('record.autosave.saving')}</Text>;
   if (status === 'saved' && savedAt)
-    return <Text type="secondary" style={{ fontSize: 12 }}>{t('record.autosave.saved', { time: dayjs(savedAt).format('HH:mm') })}</Text>;
-  if (status === 'error') return <Text type="danger" style={{ fontSize: 12 }}>{t('record.autosave.saveFailed')}</Text>;
+    return <Text type="secondary" style={{ fontSize: 11 }}>{t('record.autosave.saved', { time: dayjs(savedAt).format('HH:mm') })}</Text>;
+  if (status === 'error')
+    return <Text type="danger" style={{ fontSize: 11 }}>{t('record.autosave.saveFailed')}</Text>;
   return null;
 }
 
-// ── Inline form view ──────────────────────────────────────────────────────────
+// ── Info tab content ──────────────────────────────────────────────────────────
 
-interface RecordFormInlineProps {
+const DIVIDER_STYLE: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: 'var(--ant-color-text-secondary)',
+  margin: '0 0 10px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+};
+
+interface InfoTabProps {
   recordId: string;
+  activeSectionState: SectionWorkflowState | undefined;
+  record: ActivityRecordDetail;
+}
+
+function InfoTab({ recordId, activeSectionState, record }: InfoTabProps) {
+  const { t } = useTranslation('forms');
+  const currentUser = useAuthStore((s) => s.currentUser);
+
+  const stateColor = RECORD_STATE_COLORS[record.recordState] ?? 'default';
+  const stateLabel = RECORD_STATE_LABELS[record.recordState] ?? record.recordState.replace(/_/g, ' ');
+
+  return (
+    <Space direction="vertical" size={0} style={{ width: '100%' }}>
+
+      {/* Record metadata */}
+      <div style={{ marginBottom: 16 }}>
+        <Divider orientation="left" orientationMargin={0} style={DIVIDER_STYLE}>
+          Details
+        </Divider>
+        <Descriptions size="small" column={1} bordered>
+          <Descriptions.Item label="State">
+            <Tag color={stateColor} style={{ margin: 0 }}>{stateLabel}</Tag>
+          </Descriptions.Item>
+          {record.recordSubtype && (
+            <Descriptions.Item label="Type">
+              {record.recordSubtype.replace(/_/g, ' ')}
+            </Descriptions.Item>
+          )}
+          <Descriptions.Item label="Created">
+            {dayjs(record.createdAt).format('D MMM YYYY')}
+          </Descriptions.Item>
+          <Descriptions.Item label="Last updated">
+            {dayjs(record.updatedAt).format('D MMM YYYY, HH:mm')}
+          </Descriptions.Item>
+        </Descriptions>
+      </div>
+
+      {/* Workflow state */}
+      {activeSectionState && (
+        <div style={{ marginBottom: 16 }}>
+          <Divider orientation="left" orientationMargin={0} style={DIVIDER_STYLE}>
+            {t('record.panel.workflow')}
+          </Divider>
+          <div>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('record.workflow.stateLabel')}: </Text>
+            <Tag color={RECORD_STATE_COLORS[activeSectionState.currentStateCode] ?? 'default'} style={{ margin: 0 }}>
+              {RECORD_STATE_LABELS[activeSectionState.currentStateCode] ?? activeSectionState.currentStateCode}
+            </Tag>
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {t('record.workflow.enteredAt', {
+                date: dayjs(activeSectionState.enteredStateAt).format('DD MMM YYYY HH:mm'),
+              })}
+            </Text>
+          </div>
+          {activeSectionState.isSlaBreached && (
+            <Tag color="error" style={{ marginTop: 8 }}>SLA Breached</Tag>
+          )}
+        </div>
+      )}
+
+      {/* Comments */}
+      <div style={{ marginBottom: 16 }}>
+        <Divider orientation="left" orientationMargin={0} style={DIVIDER_STYLE}>
+          {t('record.panel.comments')}
+        </Divider>
+        <CommentPanel
+          entityType="ACTIVITY_RECORD"
+          entityId={recordId}
+          currentUserId={currentUser?.userId}
+        />
+      </div>
+
+      {/* Attachments */}
+      <div style={{ marginBottom: 16 }}>
+        <Divider orientation="left" orientationMargin={0} style={DIVIDER_STYLE}>
+          {t('record.panel.attachments')}
+        </Divider>
+        <AttachmentPanel
+          entityType="ACTIVITY_RECORD"
+          entityId={recordId}
+          canUpload={currentUser?.permissions.includes('ATTACHMENT.UPLOAD.OWN_RECORDS')}
+          currentUserId={currentUser?.userId}
+        />
+      </div>
+
+      {/* History */}
+      <div style={{ marginBottom: 8 }}>
+        <Divider orientation="left" orientationMargin={0} style={DIVIDER_STYLE}>
+          {t('record.panel.history')}
+        </Divider>
+        <HistoryPanel recordId={recordId} />
+      </div>
+
+    </Space>
+  );
+}
+
+// ── Full record view (form types) ─────────────────────────────────────────────
+
+interface RecordContentProps {
+  recordId: string;
+  activityTypeCode: string;
   canEdit: boolean;
 }
 
-function RecordFormInline({ recordId, canEdit }: RecordFormInlineProps) {
+function RecordContent({ recordId, activityTypeCode, canEdit }: RecordContentProps) {
   const { t } = useTranslation('forms');
   const queryClient = useQueryClient();
+  const [masterTab, setMasterTab] = useState<'form' | 'info'>('form');
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
@@ -227,7 +345,7 @@ function RecordFormInline({ recordId, canEdit }: RecordFormInlineProps) {
   // ── Section state ──────────────────────────────────────────────────────────
 
   const sectionCodes = formDef?.sectionCodes ?? [];
-  const hasSections = sectionCodes.length > 0;
+  const hasSections  = sectionCodes.length > 0;
   const [activeSection, setActiveSection] = useState('');
   const activeSectionResolved = hasSections ? activeSection || sectionCodes[0] : '';
 
@@ -291,10 +409,10 @@ function RecordFormInline({ recordId, canEdit }: RecordFormInlineProps) {
         comment: comment ?? null,
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['workflow', recordId] });
-      void queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+      void queryClient.invalidateQueries({ queryKey: ['workflow',       recordId] });
+      void queryClient.invalidateQueries({ queryKey: ['record',         recordId] });
       void queryClient.invalidateQueries({ queryKey: ['comments', 'ACTIVITY_RECORD', recordId] });
-      void queryClient.invalidateQueries({ queryKey: ['recordHistory', recordId] });
+      void queryClient.invalidateQueries({ queryKey: ['recordHistory',  recordId] });
     },
   });
 
@@ -321,9 +439,12 @@ function RecordFormInline({ recordId, canEdit }: RecordFormInlineProps) {
     ? activeSectionResolved.replace(/_/g, ' ')
     : 'Record';
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  const hasForm      = FORM_TYPES.has(activityTypeCode);
+  const hasApprovers = activityTypeCode === 'DRAWING_APPROVAL';
 
-  if (recordLoading || schemaLoading) {
+  // ── Loading / error ────────────────────────────────────────────────────────
+
+  if (recordLoading || (hasForm && schemaLoading)) {
     return (
       <Flex justify="center" align="center" style={{ flex: 1 }}>
         <Spin size="large" tip={t('common:feedback.loading')} />
@@ -333,24 +454,14 @@ function RecordFormInline({ recordId, canEdit }: RecordFormInlineProps) {
 
   if (recordError || !record) {
     return (
-      <Alert
-        type="error"
-        message={t('forms:record.error.loadFailed')}
-        showIcon
-        style={{ margin: 16 }}
-        action={<Button size="small" onClick={() => void refetchRecord()}>Retry</Button>}
-      />
+      <Alert type="error" message={t('forms:record.error.loadFailed')} showIcon style={{ margin: 16 }}
+        action={<Button size="small" onClick={() => void refetchRecord()}>Retry</Button>} />
     );
   }
 
-  if (schemaError || !formDef || !sectionSchema) {
+  if (hasForm && (schemaError || !formDef || !sectionSchema)) {
     return (
-      <Alert
-        type="error"
-        message={t('forms:record.error.schemaLoadFailed')}
-        showIcon
-        style={{ margin: 16 }}
-      />
+      <Alert type="error" message={t('forms:record.error.schemaLoadFailed')} showIcon style={{ margin: 16 }} />
     );
   }
 
@@ -358,116 +469,174 @@ function RecordFormInline({ recordId, canEdit }: RecordFormInlineProps) {
     autosaveStatus === 'conflict' ||
     activeSectionState?.isTerminal === true;
 
+  // ── Master tab items ───────────────────────────────────────────────────────
+
+  const masterTabItems = [
+    ...(hasForm || hasApprovers ? [{
+      key: 'form' as const,
+      label: 'Form',
+    }] : []),
+    {
+      key: 'info' as const,
+      label: 'Info',
+    },
+  ];
+
+  // If no form types, default to info tab
+  const effectiveTab = masterTabItems.find(i => i.key === masterTab)
+    ? masterTab
+    : 'info';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
 
-      {/* Conflict / workflow error alerts */}
-      {autosaveStatus === 'conflict' && (
-        <Alert
-          type="warning"
-          showIcon
+      {/* Master tab bar */}
+      <div style={{
+        flexShrink: 0,
+        borderBottom: '1px solid var(--ant-color-border)',
+        padding: '0 12px',
+        background: 'var(--ant-color-bg-container)',
+      }}>
+        <Tabs
+          size="small"
+          activeKey={effectiveTab}
+          onChange={(k) => setMasterTab(k as 'form' | 'info')}
+          items={masterTabItems}
+        />
+      </div>
+
+      {/* Alerts (conflict / workflow error) — shown on Form tab only */}
+      {effectiveTab === 'form' && autosaveStatus === 'conflict' && (
+        <Alert type="warning" showIcon
           message={t('forms:record.error.conflict')}
           description={t('forms:record.error.conflictDetail')}
           action={<Button size="small" onClick={() => void handleReload()}>Reload</Button>}
-          style={{ margin: '0 12px 8px', flexShrink: 0 }}
+          style={{ margin: '8px 12px 0', flexShrink: 0 }}
         />
       )}
-      {workflowMutation.isError && (
-        <Alert
-          type="error"
-          showIcon
-          closable
+      {effectiveTab === 'form' && workflowMutation.isError && (
+        <Alert type="error" showIcon closable
           message="Workflow action failed"
           description={String(workflowMutation.error)}
-          style={{ margin: '0 12px 8px', flexShrink: 0 }}
+          style={{ margin: '8px 12px 0', flexShrink: 0 }}
         />
       )}
 
-      {/* Section tabs (horizontal, compact) */}
-      {hasSections && (
+      {/* ── Scrollable content area ── */}
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+
+        {/* FORM TAB */}
+        {effectiveTab === 'form' && (
+          <div style={{ padding: '0 0 8px' }}>
+
+            {/* Section sub-tabs — sticky within the scroll container */}
+            {hasSections && (
+              <div style={{
+                position: 'sticky',
+                top: 0,
+                zIndex: 10,
+                background: 'var(--ant-color-bg-container)',
+                borderBottom: '1px solid var(--ant-color-border)',
+                padding: '0 12px',
+              }}>
+                <Tabs
+                  size="small"
+                  activeKey={activeSectionResolved}
+                  onChange={setActiveSection}
+                  items={sectionCodes.map((code) => {
+                    const inst = sectionStates[code];
+                    const dotColor = inst
+                      ? (SECTION_DOT_COLORS[inst.currentStateCode] ?? '#d9d9d9')
+                      : '#d9d9d9';
+                    return {
+                      key: code,
+                      label: (
+                        <Flex align="center" gap={4}>
+                          <Badge color={dotColor} />
+                          <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            {code.replace(/_/g, ' ')}
+                          </span>
+                        </Flex>
+                      ),
+                    };
+                  })}
+                />
+              </div>
+            )}
+
+            {/* RJSF form or approver checklist */}
+            <div style={{ padding: '16px 12px' }}>
+              {hasForm && sectionSchema && (
+                <RjsfForm
+                  ref={formRef}
+                  schema={sectionSchema}
+                  uiSchema={sectionUiSchema}
+                  formData={
+                    hasSections && activeSectionResolved
+                      ? ((formData[activeSectionResolved] ?? {}) as Record<string, unknown>)
+                      : formData
+                  }
+                  onChange={handleFormChange}
+                  disabled={isDisabled}
+                />
+              )}
+              {hasApprovers && (
+                <DrawingApproversPanel recordId={recordId} canEdit={canEdit} />
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* INFO TAB */}
+        {effectiveTab === 'info' && (
+          <div style={{ padding: 16 }}>
+            <InfoTab
+              recordId={recordId}
+              activeSectionState={activeSectionState}
+              record={record}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Bottom action bar — Form tab only, for types with forms */}
+      {effectiveTab === 'form' && hasForm && (
         <div style={{
           flexShrink: 0,
-          borderBottom: '1px solid var(--ant-color-border)',
-          padding: '0 12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 12px',
+          borderTop: '1px solid var(--ant-color-border)',
           background: 'var(--ant-color-bg-container)',
+          flexWrap: 'wrap',
         }}>
-          <Tabs
-            size="small"
-            activeKey={activeSectionResolved}
-            onChange={setActiveSection}
-            items={sectionCodes.map((code) => {
-              const inst = sectionStates[code];
-              const dotColor = inst
-                ? (SECTION_DOT_COLORS[inst.currentStateCode] ?? '#d9d9d9')
-                : '#d9d9d9';
-              return {
-                key: code,
-                label: (
-                  <Flex align="center" gap={4}>
-                    <Badge color={dotColor} />
-                    <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      {code.replace(/_/g, ' ')}
-                    </span>
-                  </Flex>
-                ),
-              };
-            })}
+          {canEdit && (
+            <Button
+              size="small"
+              onClick={() => void saveNow()}
+              disabled={autosaveStatus === 'saving' || autosaveStatus === 'conflict'}
+              loading={autosaveStatus === 'saving'}
+            >
+              {t('forms:record.actions.saveDraft')}
+            </Button>
+          )}
+          <WorkflowActions
+            sectionState={activeSectionState}
+            sectionLabel={sectionLabel}
+            onAction={handleWorkflowAction}
+            loading={workflowMutation.isPending}
           />
+          <div style={{ marginLeft: 'auto' }}>
+            <AutosaveIndicator status={autosaveStatus} savedAt={savedAt} />
+          </div>
         </div>
       )}
-
-      {/* Scrollable form area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 12px' }}>
-        <RjsfForm
-          ref={formRef}
-          schema={sectionSchema}
-          uiSchema={sectionUiSchema}
-          formData={
-            hasSections && activeSectionResolved
-              ? ((formData[activeSectionResolved] ?? {}) as Record<string, unknown>)
-              : formData
-          }
-          onChange={handleFormChange}
-          disabled={isDisabled}
-        />
-      </div>
-
-      {/* Bottom action bar */}
-      <div style={{
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '8px 12px',
-        borderTop: '1px solid var(--ant-color-border)',
-        background: 'var(--ant-color-bg-container)',
-        flexWrap: 'wrap',
-      }}>
-        {canEdit && (
-          <Button
-            size="small"
-            onClick={() => void saveNow()}
-            disabled={autosaveStatus === 'saving' || autosaveStatus === 'conflict'}
-            loading={autosaveStatus === 'saving'}
-          >
-            {t('forms:record.actions.saveDraft')}
-          </Button>
-        )}
-        <WorkflowActions
-          sectionState={activeSectionState}
-          sectionLabel={sectionLabel}
-          onAction={handleWorkflowAction}
-          loading={workflowMutation.isPending}
-        />
-        <div style={{ marginLeft: 'auto' }}>
-          <AutosaveIndicator status={autosaveStatus} savedAt={savedAt} />
-        </div>
-      </div>
     </div>
   );
 }
 
-// ── Panel ─────────────────────────────────────────────────────────────────────
+// ── Panel shell ───────────────────────────────────────────────────────────────
 
 interface RecordDetailPanelProps {
   recordId: string;
@@ -489,12 +658,9 @@ export function RecordDetailPanel({
   });
 
   const record = recordQuery.data;
-  const stateColor = RECORD_STATE_COLORS[record?.recordState ?? ''] ?? 'default';
-  const stateLabel = RECORD_STATE_LABELS[record?.recordState ?? ''] ?? (record?.recordState ?? '').replace(/_/g, ' ');
+  const stateColor  = RECORD_STATE_COLORS[record?.recordState ?? ''] ?? 'default';
+  const stateLabel  = RECORD_STATE_LABELS[record?.recordState ?? ''] ?? (record?.recordState ?? '').replace(/_/g, ' ');
   const displayName = record ? recordLabel(record) : '…';
-
-  const hasForm      = FORM_TYPES.has(activityTypeCode);
-  const hasApprovers = activityTypeCode === 'DRAWING_APPROVAL';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -510,17 +676,11 @@ export function RecordDetailPanel({
         minHeight: 48,
       }}>
         <FileTextOutlined style={{ color: 'var(--ant-color-text-secondary)', flexShrink: 0 }} />
-        <Text
-          strong
-          style={{
-            flex: 1,
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            fontSize: 13,
-          }}
-        >
+        <Text strong style={{
+          flex: 1, minWidth: 0,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          fontSize: 13,
+        }}>
           {displayName}
         </Text>
 
@@ -530,68 +690,23 @@ export function RecordDetailPanel({
           </Tag>
         )}
 
-        <Button
-          type="text"
-          size="small"
-          icon={<CloseOutlined />}
-          onClick={onClose}
-          style={{ flexShrink: 0 }}
-        />
+        <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose}
+          style={{ flexShrink: 0 }} />
       </div>
 
-      {/* ── Body ───────────────────────────────────────────────────────────── */}
-      {hasForm ? (
-        /* Full inline form — RecordFormInline manages its own scroll + action bar */
-        <RecordFormInline recordId={recordId} canEdit={canEdit} />
-      ) : (
-        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-          {recordQuery.isLoading && <Skeleton active paragraph={{ rows: 4 }} />}
-          {recordQuery.isError && (
-            <Alert type="error" message="Failed to load record" showIcon />
-          )}
-
-          {record && (
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              {/* Name + state */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-                <Title level={5} style={{ margin: 0, flex: 1, minWidth: 0 }}>
-                  {displayName}
-                </Title>
-                <Tag color={stateColor} style={{ flexShrink: 0 }}>
-                  {stateLabel}
-                </Tag>
-              </div>
-
-              <Descriptions size="small" column={1} bordered>
-                {record.recordSubtype && (
-                  <Descriptions.Item label="Type">
-                    {record.recordSubtype.replace(/_/g, ' ')}
-                  </Descriptions.Item>
-                )}
-                <Descriptions.Item label="Created">
-                  {dayjs(record.createdAt).format('D MMM YYYY')}
-                </Descriptions.Item>
-                <Descriptions.Item label="Last updated">
-                  {dayjs(record.updatedAt).format('D MMM YYYY, HH:mm')}
-                </Descriptions.Item>
-              </Descriptions>
-
-              {/* Drawing approvers */}
-              {hasApprovers && (
-                <>
-                  <Divider
-                    orientation="left"
-                    orientationMargin={0}
-                    style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}
-                  >
-                    Approval Checklist
-                  </Divider>
-                  <DrawingApproversPanel recordId={recordId} canEdit={canEdit} />
-                </>
-              )}
-            </Space>
-          )}
+      {/* ── Content (tabs + body + bottom bar) ─────────────────────────────── */}
+      {recordQuery.isLoading ? (
+        <div style={{ padding: 16 }}>
+          <Skeleton active paragraph={{ rows: 5 }} />
         </div>
+      ) : recordQuery.isError ? (
+        <Alert type="error" message="Failed to load record" showIcon style={{ margin: 16 }} />
+      ) : (
+        <RecordContent
+          recordId={recordId}
+          activityTypeCode={activityTypeCode}
+          canEdit={canEdit}
+        />
       )}
     </div>
   );
@@ -606,12 +721,12 @@ function buildSectionSchema(schema: RJSFSchema, sectionCode: string): RJSFSchema
   const sectionProp = props[sectionCode];
   if (!sectionProp) return schema;
 
-  let sectionSchema: RJSFSchema = sectionProp;
+  let resolved: RJSFSchema = sectionProp;
   const ref = sectionProp.$ref as string | undefined;
   if (ref) {
     const defName = ref.replace('#/$defs/', '');
-    sectionSchema = defs[defName] ?? sectionProp;
+    resolved = defs[defName] ?? sectionProp;
   }
 
-  return { ...sectionSchema, $defs: defs };
+  return { ...resolved, $defs: defs };
 }
