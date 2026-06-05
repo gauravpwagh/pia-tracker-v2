@@ -104,31 +104,38 @@ class ProjectService(
     /**
      * Returns all projects visible to [principal].
      *
-     * - SUPER_ADMIN and ALL-scope holders → all non-deleted projects.
-     * - ZONE / OWN-scope holders → projects whose zone is in the principal's
-     *   accessible zones.
-     * - No readable scope → empty list (the controller's @PreAuthorize will
-     *   have already blocked principals with no read permission at all).
+     * Scope rules:
+     * - SUPER_ADMIN / PROJECT.READ.ALL → all non-deleted projects.
+     * - PROJECT.READ.ZONE (CAO/C)      → projects in accessible zones.
+     * - PROJECT.READ.OWN (CE/C, Dy CE/C, Nodal) → projects the user is
+     *   actively assigned to via [project_assignments].
      */
     fun listForPrincipal(principal: PiaPrincipal): List<Project> =
-        if (principal.isSuperAdmin || principal.permissions.contains("PROJECT.READ.ALL")) {
-            projectRepository.findAllByIsDeletedFalseOrderByCreatedAtDesc()
-        } else {
-            val zones = principal.accessibleZoneIds
-            if (zones.isEmpty()) {
-                emptyList()
-            } else {
-                projectRepository.findAllByZoneIdInAndIsDeletedFalse(zones)
+        when {
+            principal.isSuperAdmin || principal.permissions.contains("PROJECT.READ.ALL") ->
+                projectRepository.findAllByIsDeletedFalseOrderByCreatedAtDesc()
+
+            principal.permissions.contains("PROJECT.READ.ZONE") -> {
+                val zones = principal.accessibleZoneIds
+                if (zones.isEmpty()) emptyList()
+                else projectRepository.findAllByZoneIdInAndIsDeletedFalse(zones)
             }
+
+            else ->
+                // PROJECT.READ.OWN: show only projects the user is assigned to
+                projectRepository.findAllByAssignedUser(principal.userId)
         }
 
     /**
      * Returns a single project if [principal] can access it, or throws 404.
      *
-     * A principal with ALL-scope can load any non-deleted project.
-     * ZONE / OWN-scope principals can only load projects in their zones.
-     * Projects in inaccessible zones return 404 (not 403) to prevent
-     * zone-membership enumeration.
+     * Scope rules mirror [listForPrincipal]:
+     * - ALL-scope → any non-deleted project.
+     * - ZONE-scope → project must be in an accessible zone.
+     * - OWN-scope → user must have an active assignment on the project.
+     *
+     * Always returns 404 (not 403) for inaccessible projects to prevent
+     * zone/assignment enumeration.
      */
     fun getForPrincipal(
         id: UUID,
@@ -138,9 +145,14 @@ class ProjectService(
             return projectRepository.findByIdAndIsDeletedFalse(id)
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         }
-        val zones = principal.accessibleZoneIds
-        if (zones.isEmpty()) throw ResponseStatusException(HttpStatus.NOT_FOUND)
-        return projectRepository.findByIdInZones(id, zones)
+        if (principal.permissions.contains("PROJECT.READ.ZONE")) {
+            val zones = principal.accessibleZoneIds
+            if (zones.isEmpty()) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+            return projectRepository.findByIdInZones(id, zones)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        }
+        // PROJECT.READ.OWN: must have an active assignment
+        return projectRepository.findByIdAndAssignedUser(id, principal.userId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
     }
 

@@ -10,7 +10,6 @@
  */
 
 import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@stores/authStore';
 import dayjs from 'dayjs';
@@ -22,13 +21,12 @@ import {
   Divider,
   Form,
   Input,
-  List,
+  Modal,
   notification,
   Popconfirm,
   Skeleton,
   Space,
   Tag,
-  Tooltip,
   Typography,
 } from 'antd';
 import { ActivityMetadataForm, ActivityMetadataView, getMetadataDefaults } from './ActivityMetadataForm';
@@ -38,9 +36,7 @@ import {
   CheckCircleOutlined,
   CloseOutlined,
   ClusterOutlined,
-  DeleteOutlined,
   EditOutlined,
-  FileTextOutlined,
   HomeOutlined,
   PlusOutlined,
   SafetyOutlined,
@@ -54,12 +50,9 @@ import {
   type UpdateActivityRequest,
 } from '@api/projects';
 import {
-  listRecords,
   createRecord,
-  deleteRecord,
   type ActivityRecordDetail,
 } from '@api/activityRecords';
-import { DrawingApproversPanel } from './DrawingApproversPanel';
 import {
   fetchActivityWorkflowState,
   performActivityAction,
@@ -141,39 +134,20 @@ interface ActivityDetailPanelProps {
   canEdit: boolean;         // true when caller has ACTIVITY.UPDATE.OWN
   onClose: () => void;
   onStatusChanged?: (activityId: string, newStatus: string) => void;
+  /** Called after a new record is created so the parent can add it to the tree. */
+  onRecordCreated?: (record: ActivityRecordDetail) => void;
 }
 
-// ── Record state → badge colour ───────────────────────────────────────────────
-
-const RECORD_STATE_COLORS: Record<string, string> = {
-  DRAFT:                        'default',
-  SUBMITTED_FOR_VERIFICATION:   'blue',
-  VERIFIED:                     'cyan',
-  AUTHENTICATED:                'green',
-  SENT_BACK_TO_DYCE:            'orange',
-  SENT_BACK_TO_NODAL:           'orange',
-};
-
-const RECORD_STATE_LABELS: Record<string, string> = {
-  DRAFT:                        'Draft',
-  SUBMITTED_FOR_VERIFICATION:   'Pending Nodal Verification',
-  VERIFIED:                     'Pending CE/C Authentication',
-  AUTHENTICATED:                'Authenticated',
-  SENT_BACK_TO_DYCE:            'Sent Back to Dy CE/C',
-  SENT_BACK_TO_NODAL:           'Sent Back to Nodal Dy CE/C',
-};
-
-function recordStateLabel(state: string): string {
-  return RECORD_STATE_LABELS[state] ?? state.replace(/_/g, ' ');
-}
+/** Activity types that support manual record creation. */
+const RECORD_CREATABLE_TYPES = new Set(['LAND_ACQUISITION', 'FOREST_CLEARANCE']);
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
-export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChanged }: ActivityDetailPanelProps) {
-  const navigate = useNavigate();
-  const location = useLocation();
+export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChanged, onRecordCreated }: ActivityDetailPanelProps) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [addRecordOpen, setAddRecordOpen] = useState(false);
+  const [newRecordName, setNewRecordName] = useState('');
   useAuthStore(); // kept to trigger re-render on auth change
   const [notifApi, notifCtx] = notification.useNotification();
   const [form] = Form.useForm<EditValues>();
@@ -200,28 +174,16 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
     },
   });
 
-  // ── Records ──────────────────────────────────────────────────────────────────
-
-  const recordsQuery = useQuery<ActivityRecordDetail[]>({
-    queryKey: ['records', activityId],
-    queryFn: () => listRecords(activityId),
-    staleTime: 30_000,
-  });
-
   const createRecordMutation = useMutation({
-    mutationFn: () => createRecord(activityId),
+    mutationFn: (name: string) => createRecord(activityId, undefined, name || undefined),
     onSuccess: (record) => {
       void queryClient.invalidateQueries({ queryKey: ['records', activityId] });
-      navigate(`/records/${record.id}/edit`, {
-        state: { returnPath: location.pathname },
-      });
+      setAddRecordOpen(false);
+      setNewRecordName('');
+      onRecordCreated?.(record);
     },
-  });
-
-  const deleteRecordMutation = useMutation({
-    mutationFn: (recordId: string) => deleteRecord(recordId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['records', activityId] });
+    onError: (err: Error) => {
+      notifApi.error({ message: 'Failed to create record', description: err.message, duration: 5 });
     },
   });
 
@@ -329,9 +291,21 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
 
         {/* Action buttons — hidden once activity is authenticated */}
         {activity && canEdit && !editing && !isTerminal && (
-          <Button size="small" icon={<EditOutlined />} onClick={startEditing}>
-            Edit
-          </Button>
+          <Space size={4}>
+            {RECORD_CREATABLE_TYPES.has(activity.activityTypeCode) && (
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => { setNewRecordName(''); setAddRecordOpen(true); }}
+              >
+                Add Record
+              </Button>
+            )}
+            <Button size="small" icon={<EditOutlined />} onClick={startEditing}>
+              Edit
+            </Button>
+          </Space>
         )}
         {editing && (
           <Space size={4}>
@@ -446,7 +420,7 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
                     currentStateCode === 'SENT_BACK_TO_NODAL' ? 'orange' : 'default'
                   }
                 >
-                  {RECORD_STATE_LABELS[currentStateCode] ?? currentStateCode.replace(/_/g, ' ')}
+                  {STATUS_LABELS[currentStateCode] ?? currentStateCode.replace(/_/g, ' ')}
                 </Tag>
                 <Space direction="vertical" style={{ width: '100%' }} size={8}>
                   {availableActions.includes('submit') && (
@@ -509,151 +483,7 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
               </div>
             )}
 
-            {/* ── Records
-                  • UTILITY_SHIFTING: hidden (data lives on the activity itself)
-                  • DRAWING_APPROVAL: no "New Record" button — the record is auto-created
-                    at activity-creation time using drawing_type as recordSubtype.
-                  • All others: full create + list UI.
-            */}
-            {activity.activityTypeCode !== 'UTILITY_SHIFTING'
-              && activity.activityTypeCode !== 'TENDER_PACKAGING'
-              && activity.activityTypeCode !== 'TEMPORARY_OFFICE_SPACE'
-              && <div>
-              <Divider orientation="left" orientationMargin={0}
-                style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
-                {activity.activityTypeCode === 'DRAWING_APPROVAL' ? 'Approval record' : 'Records'}
-              </Divider>
-
-              {activity.activityTypeCode !== 'DRAWING_APPROVAL' && (
-                <>
-                  <Button
-                    block
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    loading={createRecordMutation.isPending}
-                    onClick={() => createRecordMutation.mutate()}
-                    style={{ marginBottom: 10 }}
-                  >
-                    New Record
-                  </Button>
-
-                  {createRecordMutation.isError && (
-                    <Alert
-                      type="error"
-                      message="Failed to create record"
-                      description={
-                        createRecordMutation.error instanceof Error
-                          ? createRecordMutation.error.message
-                          : undefined
-                      }
-                      showIcon
-                      style={{ marginBottom: 8 }}
-                    />
-                  )}
-                </>
-              )}
-
-              {recordsQuery.isLoading && <Skeleton active paragraph={{ rows: 2 }} />}
-
-              {recordsQuery.isError && (
-                <Alert type="error" message="Failed to load records" showIcon />
-              )}
-
-              {recordsQuery.data && recordsQuery.data.length === 0 && (
-                <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
-                  No records yet.
-                </Text>
-              )}
-
-              {deleteRecordMutation.isError && (
-                <Alert
-                  type="error"
-                  message="Failed to delete record"
-                  description={
-                    deleteRecordMutation.error instanceof Error
-                      ? deleteRecordMutation.error.message
-                      : undefined
-                  }
-                  showIcon
-                  closable
-                  style={{ marginBottom: 8 }}
-                />
-              )}
-
-              {recordsQuery.data && recordsQuery.data.length > 0 && (
-                <List
-                  size="small"
-                  bordered
-                  dataSource={recordsQuery.data}
-                  renderItem={(record, index) => {
-                    const isAuthenticated = record.recordState === 'AUTHENTICATED';
-                    return (
-                      <List.Item
-                        key={record.id}
-                        style={{ padding: '6px 10px' }}
-                        actions={[
-                          <Tag
-                            key="state"
-                            color={RECORD_STATE_COLORS[record.recordState] ?? 'default'}
-                            style={{ fontSize: 11, margin: 0 }}
-                          >
-                            {recordStateLabel(record.recordState)}
-                          </Tag>,
-                          canEdit && !isAuthenticated ? (
-                            <Popconfirm
-                              key="delete"
-                              title="Delete this record?"
-                              description="This cannot be undone."
-                              okText="Delete"
-                              okButtonProps={{ danger: true }}
-                              cancelText="Cancel"
-                              onConfirm={() => deleteRecordMutation.mutate(record.id)}
-                            >
-                              <Tooltip title="Delete record">
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  danger
-                                  icon={<DeleteOutlined />}
-                                  loading={deleteRecordMutation.isPending}
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                              </Tooltip>
-                            </Popconfirm>
-                          ) : null,
-                        ].filter(Boolean)}
-                      >
-                        <div style={{ flex: 1 }}>
-                          <div
-                            style={{ cursor: activity.activityTypeCode !== 'DRAWING_APPROVAL' ? 'pointer' : 'default' }}
-                            onClick={() => {
-                              if (activity.activityTypeCode !== 'DRAWING_APPROVAL') {
-                                navigate(`/records/${record.id}/edit`, { state: { returnPath: location.pathname } });
-                              }
-                            }}
-                          >
-                            <Space size={6}>
-                              <FileTextOutlined style={{ color: 'var(--ant-color-text-secondary)', fontSize: 12 }} />
-                              <Text style={{ fontSize: 12 }}>
-                                {record.recordSubtype
-                                  ? record.recordSubtype
-                                  : `Record ${index + 1}`}
-                              </Text>
-                              <Text type="secondary" style={{ fontSize: 11 }}>
-                                {dayjs(record.updatedAt).format('D MMM YYYY')}
-                              </Text>
-                            </Space>
-                          </div>
-                          {activity.activityTypeCode === 'DRAWING_APPROVAL' && (
-                            <DrawingApproversPanel recordId={record.id} canEdit={canEdit} />
-                          )}
-                        </div>
-                      </List.Item>
-                    );
-                  }}
-                />
-              )}
-            </div>}
+            {/* Records are shown as tree children — expand the activity node in the left tree. */}
           </Space>
         )}
 
@@ -700,6 +530,36 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
           </>
         )}
       </div>
+
+      {/* ── Add Record modal ──────────────────────────────────────────────── */}
+      <Modal
+        title="Add Record"
+        open={addRecordOpen}
+        onOk={() => createRecordMutation.mutate(newRecordName)}
+        onCancel={() => { setAddRecordOpen(false); setNewRecordName(''); }}
+        okText="Add"
+        confirmLoading={createRecordMutation.isPending}
+        destroyOnClose
+      >
+        <Form layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            label="Record name"
+            extra="A short label to identify this record, e.g. 'Ambala Village' or 'Section 3'"
+          >
+            <Input
+              autoFocus
+              placeholder="e.g. Ambala Village, Section 3…"
+              value={newRecordName}
+              onChange={(e) => setNewRecordName(e.target.value)}
+              onPressEnter={() => {
+                if (!createRecordMutation.isPending) {
+                  createRecordMutation.mutate(newRecordName);
+                }
+              }}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

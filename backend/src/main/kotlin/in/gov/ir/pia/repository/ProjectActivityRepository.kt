@@ -21,6 +21,18 @@ interface ProjectActivityRepository : JpaRepository<ProjectActivity, UUID> {
     fun findByIdAndIsDeletedFalse(id: UUID): ProjectActivity?
 
     /**
+     * Returns non-deleted activities on [projectId] where [userId] is the
+     * primary Dy CE/C ([primaryDyceUserId]).
+     *
+     * Used to filter the activity list for DY_CE_C principals who should only
+     * see activities they are personally assigned to.
+     */
+    fun findAllByProjectIdAndPrimaryDyceUserIdAndIsDeletedFalseOrderByCreatedAtAsc(
+        projectId: UUID,
+        primaryDyceUserId: UUID,
+    ): List<ProjectActivity>
+
+    /**
      * Existence check: is [userId] the [primaryDyceUserId] of any active
      * activity on [projectId]?  Used by the assignment guard in
      * [ActivityService.create].

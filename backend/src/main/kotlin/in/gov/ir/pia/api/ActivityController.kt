@@ -488,6 +488,7 @@ class ActivityController(
             dataJson = dataJson,
             recordState = recordState,
             recordSubtype = recordSubtype,
+            name = name,
             createdByUserId = createdByUserId,
             createdAt = createdAt,
             updatedAt = updatedAt,

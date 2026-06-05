@@ -20,6 +20,8 @@ export interface ActivityRecordDetail {
   dataJson: Record<string, unknown>;
   recordState: string;
   recordSubtype: string | null;
+  /** User-supplied display name, or null for records without a name. */
+  name: string | null;
   createdByUserId: string;
   createdAt: string;
   updatedAt: string;
@@ -84,8 +86,12 @@ export async function fetchRecord(recordId: string): Promise<ActivityRecordDetai
 export async function createRecord(
   activityId: string,
   recordSubtype?: string,
+  name?: string,
 ): Promise<ActivityRecordDetail> {
-  const body = recordSubtype ? JSON.stringify({ recordSubtype }) : '{}';
+  const payload: Record<string, unknown> = {};
+  if (recordSubtype) payload.recordSubtype = recordSubtype;
+  if (name) payload.name = name;
+  const body = JSON.stringify(payload);
   const res = await fetch(`${BASE}/activities/${activityId}/records`, {
     method: 'POST',
     credentials: 'include',

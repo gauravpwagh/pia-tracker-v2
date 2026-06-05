@@ -10,19 +10,8 @@ import java.util.UUID
  * Service layer verifies access permissions before calling these methods.
  */
 interface DrawingApproverRepository : JpaRepository<DrawingApprover, UUID> {
-    /**
-     * All non-deleted approver rows for a drawing record, ordered by display position.
-     */
+    /** All non-deleted approver rows for a drawing record, ordered by display position. */
     fun findAllByActivityRecordIdAndIsDeletedFalseOrderByPositionAsc(activityRecordId: UUID): List<DrawingApprover>
-
-    /**
-     * All drawings (non-deleted) where [userId] has a PENDING slot.
-     * Used for inbox badge counts.
-     */
-    fun findAllByUserIdAndStatusAndIsDeletedFalse(
-        userId: UUID,
-        status: String,
-    ): List<DrawingApprover>
 
     /** Single non-deleted approver row. Returns null → 404 in service. */
     fun findByIdAndIsDeletedFalse(id: UUID): DrawingApprover?

@@ -52,4 +52,43 @@ interface ProjectRepository : JpaRepository<Project, UUID> {
 
     /** Existence check ignoring zone (used internally; service enforces zone). */
     fun findByIdAndIsDeletedFalse(id: UUID): Project?
+
+    /**
+     * Returns all non-deleted projects where [userId] has an active assignment
+     * (CE_C, DY_CE_C, or NODAL_DY_CE_C row in project_assignments).
+     *
+     * Used for PROJECT.READ.OWN holders — CE/C and Dy CE/C see only projects
+     * they are actually assigned to, not every project in their zone.
+     */
+    @Query(
+        """
+        SELECT DISTINCT p FROM Project p
+        JOIN ProjectAssignment a ON a.projectId = p.id
+        WHERE a.userId = :userId
+          AND a.isActive = true
+          AND p.isDeleted = false
+        ORDER BY p.createdAt DESC
+        """,
+    )
+    fun findAllByAssignedUser(@Param("userId") userId: UUID): List<Project>
+
+    /**
+     * Returns the project only if [userId] has an active assignment on it.
+     * Used for PROJECT.READ.OWN detail access when zone filtering is replaced
+     * by assignment filtering.
+     */
+    @Query(
+        """
+        SELECT p FROM Project p
+        JOIN ProjectAssignment a ON a.projectId = p.id
+        WHERE p.id = :id
+          AND a.userId = :userId
+          AND a.isActive = true
+          AND p.isDeleted = false
+        """,
+    )
+    fun findByIdAndAssignedUser(
+        @Param("id") id: UUID,
+        @Param("userId") userId: UUID,
+    ): Project?
 }

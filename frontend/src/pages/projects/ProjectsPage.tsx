@@ -19,6 +19,8 @@
 import React, { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
 import { useNavigate, useMatch } from 'react-router-dom';
+import type { ActivityRecordDetail } from '@api/activityRecords';
+import { listRecords } from '@api/activityRecords';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -45,6 +47,7 @@ import {
   BranchesOutlined,
   ClusterOutlined,
   ExportOutlined,
+  FileTextOutlined,
   FolderOutlined,
   HomeOutlined,
   MoreOutlined,
@@ -63,6 +66,7 @@ import { useAuthStore } from '@stores/authStore';
 import ProjectCreateWizard from './ProjectCreateWizard';
 import { ProjectDetailPanel } from './ProjectDetailPanel';
 import { ActivityDetailPanel } from './ActivityDetailPanel';
+import { RecordDetailPanel } from './RecordDetailPanel';
 
 const { Title, Text } = Typography;
 const { Search } = Input;
@@ -131,13 +135,48 @@ const ACTIVITY_TYPE_LABELS: Record<string, string> = {
 function projectNodeKey(projectId: string) { return `project:${projectId}`; }
 function activityNodeKey(activityId: string) { return `activity:${activityId}`; }
 function actGroupNodeKey(projectId: string, typeCode: string) { return `actgroup:${projectId}:${typeCode}`; }
+function recordNodeKey(recordId: string) { return `record:${recordId}`; }
 
 function isProjectKey(key: string) { return key.startsWith('project:'); }
 function isActivityKey(key: string) { return key.startsWith('activity:'); }
 function isActGroupKey(key: string) { return key.startsWith('actgroup:'); }
+function isRecordKey(key: string) { return key.startsWith('record:'); }
 
 function projectIdFromKey(key: string) { return key.replace('project:', ''); }
 function activityIdFromKey(key: string) { return key.replace('activity:', ''); }
+function recordIdFromKey(key: string) { return key.replace('record:', ''); }
+
+/** Activity types whose records appear as children in the tree. */
+const RECORD_TREE_TYPES = new Set([
+  'LAND_ACQUISITION',
+  'FOREST_CLEARANCE',
+  'DRAWING_APPROVAL',
+]);
+
+/** Human-readable label for a record node. */
+function recordDisplayName(record: ActivityRecordDetail, index: number): string {
+  if (record.name) return record.name;
+  if (record.recordSubtype) return record.recordSubtype.replace(/_/g, ' ');
+  return `Record ${index + 1}`;
+}
+
+const RECORD_STATE_COLORS: Record<string, string> = {
+  DRAFT:                        'default',
+  SUBMITTED_FOR_VERIFICATION:   'blue',
+  VERIFIED:                     'cyan',
+  AUTHENTICATED:                'green',
+  SENT_BACK_TO_DYCE:            'orange',
+  SENT_BACK_TO_NODAL:           'gold',
+};
+
+const RECORD_STATE_LABELS: Record<string, string> = {
+  DRAFT:                        'Draft',
+  SUBMITTED_FOR_VERIFICATION:   'Submitted',
+  VERIFIED:                     'Pending Auth',
+  AUTHENTICATED:                'Authenticated',
+  SENT_BACK_TO_DYCE:            'Sent Back',
+  SENT_BACK_TO_NODAL:           'Sent Back',
+};
 
 // ── Project node title ────────────────────────────────────────────────────────
 
@@ -258,7 +297,24 @@ function ActivityGroupTitle({ typeCode, count }: { typeCode: string; count: numb
   );
 }
 
-// ProjectDetailPanel and ActivityDetailPanel are imported from their own files.
+// ── Record node title ─────────────────────────────────────────────────────────
+
+function RecordNodeTitle({ record, index }: { record: ActivityRecordDetail; index: number }) {
+  const stateColor = RECORD_STATE_COLORS[record.recordState] ?? 'default';
+  const stateLabel = RECORD_STATE_LABELS[record.recordState] ?? record.recordState.replace(/_/g, ' ');
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 8, minWidth: 0 }}>
+      <Text style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+        {recordDisplayName(record, index)}
+      </Text>
+      <Tag color={stateColor} style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 5px', flexShrink: 0 }}>
+        {stateLabel}
+      </Tag>
+    </div>
+  );
+}
+
+// ProjectDetailPanel, ActivityDetailPanel, RecordDetailPanel are imported from their own files.
 
 // ── Table view ────────────────────────────────────────────────────────────────
 
@@ -313,10 +369,12 @@ export default function ProjectsPage() {
   const currentUser = useAuthStore((s) => s.currentUser);
 
   // URL params
-  const matchProject = useMatch('/projects/:projectCode');
+  const matchProject  = useMatch('/projects/:projectCode');
   const matchActivity = useMatch('/projects/:projectCode/activities/:activityId');
-  const urlProjectCode = matchProject?.params.projectCode ?? matchActivity?.params.projectCode;
-  const urlActivityId = matchActivity?.params.activityId;
+  const matchRecord   = useMatch('/projects/:projectCode/activities/:activityId/records/:recordId');
+  const urlProjectCode = matchRecord?.params.projectCode ?? matchActivity?.params.projectCode ?? matchProject?.params.projectCode;
+  const urlActivityId  = matchRecord?.params.activityId  ?? matchActivity?.params.activityId;
+  const urlRecordId    = matchRecord?.params.recordId;
 
   // Local state
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -330,6 +388,8 @@ export default function ProjectsPage() {
 
   // Lazy-loaded activities per project
   const [activityMap, setActivityMap] = useState<Record<string, ActivityDetailResponse[]>>({});
+  // Lazy-loaded records per activity
+  const [recordMap, setRecordMap] = useState<Record<string, ActivityRecordDetail[]>>({});
 
   const canCreate = currentUser?.permissions.includes('PROJECT.CREATE') ?? false;
 
@@ -359,7 +419,21 @@ export default function ProjectsPage() {
   useEffect(() => {
     if (!projectsQuery.data) return;
 
-    if (urlActivityId) {
+    if (urlRecordId) {
+      setSelectedKey(recordNodeKey(urlRecordId));
+      // Expand project + group + activity nodes so the record is visible in the tree
+      if (urlActivityId && urlProjectCode) {
+        const proj = projectsQuery.data.find(
+          (p) => p.id === urlProjectCode || p.projectCode === urlProjectCode,
+        );
+        if (proj) {
+          const act = activityMap[proj.id]?.find((a) => a.id === urlActivityId);
+          const keys = [projectNodeKey(proj.id), activityNodeKey(urlActivityId)];
+          if (act) keys.push(actGroupNodeKey(proj.id, act.activityTypeCode));
+          setExpandedKeys((prev) => [...new Set([...prev, ...keys])]);
+        }
+      }
+    } else if (urlActivityId) {
       setSelectedKey(activityNodeKey(urlActivityId));
       // Find the project that owns this activity and expand it
       for (const [pId, acts] of Object.entries(activityMap)) {
@@ -381,7 +455,7 @@ export default function ProjectsPage() {
     } else {
       setSelectedKey(null);
     }
-  }, [urlProjectCode, urlActivityId, projectsQuery.data, activityMap]);
+  }, [urlProjectCode, urlActivityId, urlRecordId, projectsQuery.data, activityMap]);
 
   // ── Tree data ─────────────────────────────────────────────────────────────────
 
@@ -412,12 +486,23 @@ export default function ProjectsPage() {
       icon: ACTIVITY_TYPE_ICONS[typeCode] ?? <BranchesOutlined />,
       title: <ActivityGroupTitle typeCode={typeCode} count={typeActivities.length} />,
       isLeaf: false,
-      children: typeActivities.map((activity) => ({
-        key: activityNodeKey(activity.id),
-        icon: null,
-        title: <ActivityNodeTitle activity={activity} />,
-        isLeaf: true,
-      })),
+      children: typeActivities.map((activity) => {
+        const hasRecords   = RECORD_TREE_TYPES.has(activity.activityTypeCode);
+        const loadedRecs   = recordMap[activity.id];
+        const recChildren: DataNode[] = (loadedRecs ?? []).map((r, idx) => ({
+          key:    recordNodeKey(r.id),
+          icon:   <FileTextOutlined style={{ fontSize: 11 }} />,
+          title:  <RecordNodeTitle record={r} index={idx} />,
+          isLeaf: true,
+        }));
+        return {
+          key:      activityNodeKey(activity.id),
+          icon:     null,
+          title:    <ActivityNodeTitle activity={activity} />,
+          isLeaf:   !hasRecords,
+          children: hasRecords && loadedRecs !== undefined ? recChildren : undefined,
+        };
+      }),
     }));
 
     return {
@@ -446,7 +531,31 @@ export default function ProjectsPage() {
   // them as loaded without doing anything — their children come from treeData.
   const loadActivityData = async (node: DataNode): Promise<void> => {
     const key = String(node.key);
-    if (!isProjectKey(key)) return; // group/activity nodes: instant resolve
+
+    // Activity node: lazy-load its records
+    if (isActivityKey(key)) {
+      const activityId = activityIdFromKey(key);
+      if (recordMap[activityId] !== undefined) return; // already loaded
+      // Find the activity to check its type
+      let typeCode = '';
+      for (const acts of Object.values(activityMap)) {
+        const act = acts.find((a) => a.id === activityId);
+        if (act) { typeCode = act.activityTypeCode; break; }
+      }
+      if (!RECORD_TREE_TYPES.has(typeCode)) {
+        setRecordMap((prev) => ({ ...prev, [activityId]: [] }));
+        return;
+      }
+      try {
+        const records = await listRecords(activityId);
+        setRecordMap((prev) => ({ ...prev, [activityId]: records }));
+      } catch {
+        setRecordMap((prev) => ({ ...prev, [activityId]: [] }));
+      }
+      return;
+    }
+
+    if (!isProjectKey(key)) return; // group nodes: instant resolve
     const projectId = projectIdFromKey(key);
     if (activityMap[projectId] !== undefined) return; // already loaded
     try {
@@ -475,14 +584,12 @@ export default function ProjectsPage() {
       const proj = projectsQuery.data?.find((p) => p.id === projectId);
       if (proj) {
         setSelectedKey(key);
-        // Use project code in URL if available, otherwise use id
         const codeOrId = proj.projectCode ?? proj.id;
         navigate(`/projects/${codeOrId}`);
       }
     } else if (isActivityKey(key)) {
       const activityId = activityIdFromKey(key);
       setSelectedKey(key);
-      // Find parent project code
       let parentCode: string | undefined;
       for (const [pId, acts] of Object.entries(activityMap)) {
         if (acts.some((a) => a.id === activityId)) {
@@ -493,6 +600,20 @@ export default function ProjectsPage() {
       }
       if (parentCode) {
         navigate(`/projects/${parentCode}/activities/${activityId}`);
+      }
+    } else if (isRecordKey(key)) {
+      const recordId = recordIdFromKey(key);
+      setSelectedKey(key);
+      // Find parent activity + project
+      outer: for (const [pId, acts] of Object.entries(activityMap)) {
+        for (const act of acts) {
+          if (recordMap[act.id]?.some((r) => r.id === recordId)) {
+            const proj = projectsQuery.data?.find((p) => p.id === pId);
+            const projectCode = proj?.projectCode ?? pId;
+            navigate(`/projects/${projectCode}/activities/${act.id}/records/${recordId}`);
+            break outer;
+          }
+        }
       }
     }
   };
@@ -522,9 +643,6 @@ export default function ProjectsPage() {
         currentUser={currentUser!}
         onClose={handleClosePane}
         onActivityCreated={() => {
-          // Re-fetch activities and expand the project + all type groups so
-          // the new activity is immediately visible regardless of whether the
-          // project was already expanded before the modal was opened.
           const projectId = projectIdFromKey(selectedKey);
           void fetchActivities(projectId).then((activities) => {
             setActivityMap((prev) => ({ ...prev, [projectId]: activities }));
@@ -536,26 +654,74 @@ export default function ProjectsPage() {
           });
         }}
       />
-    ) : isActivityKey(selectedKey) ? (
-      <ActivityDetailPanel
-        activityId={activityIdFromKey(selectedKey)}
-        canEdit={currentUser?.permissions.includes('ACTIVITY.UPDATE.OWN') ?? false}
-        onClose={handleClosePane}
-        onStatusChanged={(id, newStatus) => {
-          setActivityMap((prev) => {
-            const next = { ...prev };
-            for (const [pId, acts] of Object.entries(next)) {
-              const idx = acts.findIndex((a) => a.id === id);
-              if (idx !== -1) {
-                next[pId] = acts.map((a) => a.id === id ? { ...a, status: newStatus } : a);
-                break;
+    ) : isActivityKey(selectedKey) ? (() => {
+      const activityId = activityIdFromKey(selectedKey);
+      // Find project code for record URL navigation
+      let parentProjectCode = '';
+      for (const [pId, acts] of Object.entries(activityMap)) {
+        if (acts.some((a) => a.id === activityId)) {
+          const proj = projectsQuery.data?.find((p) => p.id === pId);
+          parentProjectCode = proj?.projectCode ?? pId;
+          break;
+        }
+      }
+      return (
+        <ActivityDetailPanel
+          activityId={activityId}
+          canEdit={currentUser?.permissions.includes('ACTIVITY.UPDATE.OWN') ?? false}
+          onClose={handleClosePane}
+          onStatusChanged={(id, newStatus) => {
+            setActivityMap((prev) => {
+              const next = { ...prev };
+              for (const [pId, acts] of Object.entries(next)) {
+                const idx = acts.findIndex((a) => a.id === id);
+                if (idx !== -1) {
+                  next[pId] = acts.map((a) => a.id === id ? { ...a, status: newStatus } : a);
+                  break;
+                }
               }
+              return next;
+            });
+          }}
+          onRecordCreated={(record) => {
+            // Add to recordMap so tree shows it immediately
+            setRecordMap((prev) => ({
+              ...prev,
+              [activityId]: [...(prev[activityId] ?? []), record],
+            }));
+            // Ensure activity node is expanded
+            setExpandedKeys((prev) => [...new Set([...prev, activityNodeKey(activityId)])]);
+            // Navigate to the new record's detail pane
+            if (parentProjectCode) {
+              navigate(`/projects/${parentProjectCode}/activities/${activityId}/records/${record.id}`);
             }
-            return next;
-          });
-        }}
-      />
-    ) : null
+          }}
+        />
+      );
+    })()
+    : isRecordKey(selectedKey) ? (() => {
+      const recordId = recordIdFromKey(selectedKey);
+      // Find activityTypeCode for the record
+      let activityTypeCode = '';
+      for (const acts of Object.values(activityMap)) {
+        for (const act of acts) {
+          if (recordMap[act.id]?.some((r) => r.id === recordId)) {
+            activityTypeCode = act.activityTypeCode;
+            break;
+          }
+        }
+        if (activityTypeCode) break;
+      }
+      return (
+        <RecordDetailPanel
+          recordId={recordId}
+          activityTypeCode={activityTypeCode}
+          canEdit={currentUser?.permissions.includes('ACTIVITY_RECORD.UPDATE.OWN') ?? false}
+          onClose={handleClosePane}
+        />
+      );
+    })()
+    : null
   ) : null;
 
   const paneOpen = detailPaneContent !== null;

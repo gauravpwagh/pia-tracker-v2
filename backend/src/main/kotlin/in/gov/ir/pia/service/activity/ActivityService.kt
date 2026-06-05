@@ -51,6 +51,8 @@ data class UpdateActivityRequest(
 
 data class CreateActivityRecordRequest(
     val recordSubtype: String? = null,
+    /** Optional display name supplied by the user at creation time. */
+    val name: String? = null,
 )
 
 data class PatchActivityRecordRequest(
@@ -147,6 +149,8 @@ data class ActivityRecordDetailResponse(
     val dataJson: JsonNode,
     val recordState: String,
     val recordSubtype: String?,
+    /** User-supplied display name; null for records created before V035 or without a name. */
+    val name: String?,
     val createdByUserId: UUID,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -561,6 +565,7 @@ class ActivityService(
                 dataJson = JsonNodeFactory.instance.objectNode(),
                 schemaVersionAtSave = formDef.version,
                 recordSubtype = request.recordSubtype,
+                name = request.name?.takeIf { it.isNotBlank() },
                 createdByUserId = principal.userId,
                 updatedByUserId = principal.userId,
             )
@@ -1486,6 +1491,7 @@ class ActivityService(
             dataJson = dataJson,
             recordState = recordState,
             recordSubtype = recordSubtype,
+            name = name,
             createdByUserId = createdByUserId,
             createdAt = createdAt,
             updatedAt = updatedAt,

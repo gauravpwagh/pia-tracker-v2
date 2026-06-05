@@ -54,6 +54,9 @@ class ActivityRecord(
     /** Discriminator: null for LA; drawing sub-type code for drawing records. */
     @Column(name = "record_subtype", length = 64)
     val recordSubtype: String? = null,
+    /** User-supplied display name (e.g. "Ambala Village", "Section 3"). */
+    @Column(name = "name")
+    val name: String? = null,
     @Column(name = "created_by_user_id", nullable = false)
     val createdByUserId: UUID,
     @Column(name = "updated_by_user_id")
