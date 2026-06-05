@@ -8,8 +8,10 @@
  * field across all RJSF forms without requiring ui-schema changes.
  */
 
-import { Switch } from 'antd';
+import { Switch, Typography } from 'antd';
 import type { WidgetProps } from '@rjsf/utils';
+
+const { Text } = Typography;
 
 export function YesNoWidget({
   id,
@@ -18,12 +20,15 @@ export function YesNoWidget({
   readonly,
   onChange,
   label,
-  hideLabel,
+  schema,
 }: WidgetProps) {
   const checked = typeof value === 'boolean' ? value : false;
+  // Use the schema title if available, fall back to the label RJSF derives
+  // from the field key.
+  const question = (schema.title as string | undefined) || label;
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <Switch
         id={id}
         checked={checked}
@@ -31,8 +36,10 @@ export function YesNoWidget({
         checkedChildren="Yes"
         unCheckedChildren="No"
         onChange={(val) => onChange(val)}
-        aria-label={hideLabel ? label : undefined}
       />
+      {question && (
+        <Text style={{ fontSize: 13 }}>{question}</Text>
+      )}
     </div>
   );
 }
