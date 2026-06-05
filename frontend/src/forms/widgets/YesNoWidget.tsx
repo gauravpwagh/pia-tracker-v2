@@ -29,6 +29,9 @@ export function YesNoWidget({
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {question && (
+        <Text style={{ fontSize: 13 }}>{question}</Text>
+      )}
       <Switch
         id={id}
         checked={checked}
@@ -37,9 +40,6 @@ export function YesNoWidget({
         unCheckedChildren="No"
         onChange={(val) => onChange(val)}
       />
-      {question && (
-        <Text style={{ fontSize: 13 }}>{question}</Text>
-      )}
     </div>
   );
 }
