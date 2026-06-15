@@ -68,6 +68,7 @@ import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 
 import { fetchRecord, fetchActivity, patchRecord } from '@api/activityRecords';
+import { fetchProjectDetail } from '@api/projects';
 import { fetchFormDefinitionById } from '@api/formDefinitions';
 import {
   fetchWorkflowState,
@@ -542,6 +543,13 @@ export default function RecordEditPage() {
     enabled: !!record?.projectActivityId,
   });
 
+  const { data: project } = useQuery({
+    queryKey: ['project', activity?.projectId],
+    queryFn: () => fetchProjectDetail(activity!.projectId),
+    enabled: !!activity?.projectId,
+    staleTime: 300_000,
+  });
+
   const {
     data: formDef,
     isLoading: schemaLoading,
@@ -767,7 +775,7 @@ export default function RecordEditPage() {
             {
               title: (
                 <a onClick={() => navigate('/projects')}>
-                  {t('forms:record.breadcrumb.project')}
+                  {project?.name ?? t('forms:record.breadcrumb.project')}
                 </a>
               ),
             },
