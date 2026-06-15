@@ -489,7 +489,6 @@ export default function ProjectsPage() {
       key: actGroupNodeKey(project.id, typeCode),
       icon: ACTIVITY_TYPE_ICONS[typeCode] ?? <BranchesOutlined />,
       title: <ActivityGroupTitle typeCode={typeCode} count={typeActivities.length} />,
-      className: 'pia-group-node',
       isLeaf: false,
       children: typeActivities.map((activity) => {
         const hasRecords   = RECORD_TREE_TYPES.has(activity.activityTypeCode);
