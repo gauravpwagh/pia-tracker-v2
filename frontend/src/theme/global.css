@@ -90,6 +90,13 @@ button {
   }
 }
 
+/* ── Project tree: divider between activity-group nodes ──────────────────── */
+.pia-project-tree .pia-group-node {
+  border-top: 1px solid var(--ant-color-border-secondary);
+  margin-top: 2px;
+  padding-top: 2px !important;
+}
+
 /* No-print utility — hide elements when printing */
 @media print {
   .no-print {
