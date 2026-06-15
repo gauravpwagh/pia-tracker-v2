@@ -1,7 +1,14 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Badge, Button, Dropdown, Select, Space, Tooltip, Typography } from 'antd';
-import { BellOutlined, MoonOutlined, SunOutlined, LaptopOutlined } from '@ant-design/icons';
+import { Avatar, Badge, Button, Dropdown, Select, Space, Tooltip, Typography } from 'antd';
+import {
+  BellOutlined,
+  DownOutlined,
+  LaptopOutlined,
+  LogoutOutlined,
+  MoonOutlined,
+  SunOutlined,
+} from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useThemeStore } from '@stores/themeStore';
 import { useAuthStore } from '@stores/authStore';
@@ -11,6 +18,7 @@ import {
   markAllNotificationsRead,
   type NotificationDto,
 } from '@api/notifications';
+import { fetchZones } from '@api/projects';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
@@ -97,6 +105,21 @@ export function TopBar() {
 
   const unreadCount = notifData?.unreadCount ?? 0;
   const notifications = notifData?.notifications ?? [];
+
+  // ── Zones (cached — shared with ProjectsPage) ─────────────────────────────
+  const { data: zonesData } = useQuery({
+    queryKey: ['zones'],
+    queryFn: fetchZones,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Resolve display strings for the current user
+  const matchedUser = users.find((u) => u.id === currentUser?.userId);
+  const designationLabel = matchedUser?.designationShortLabel ?? currentUser?.designationCode ?? '';
+  const primaryZoneName = zonesData?.find((z) => z.id === currentUser?.primaryZoneId)?.shortName ?? '';
+  const initials = currentUser
+    ? currentUser.name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
+    : '';
 
   const notifDropdownItems = [
     {
@@ -239,17 +262,56 @@ export function TopBar() {
 
         {/* Current user display */}
         {currentUser ? (
-          <Space align="center" size={8}>
-            <Text style={{ fontSize: 13 }}>
-              {currentUser.name}
-              <Text type="secondary" style={{ fontSize: 12, marginLeft: 6 }}>
-                ({currentUser.designationCode})
-              </Text>
-            </Text>
-            <Button size="small" onClick={() => void logout()}>
-              Logout
-            </Button>
-          </Space>
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                {
+                  key: 'logout',
+                  icon: <LogoutOutlined />,
+                  label: 'Logout',
+                  danger: true,
+                  onClick: () => void logout(),
+                },
+              ],
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                cursor: 'pointer',
+                padding: '4px 8px',
+                borderRadius: 8,
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--ant-color-bg-text-hover)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+            >
+              <Avatar
+                size={34}
+                style={{
+                  background: 'var(--ant-color-primary)',
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  flexShrink: 0,
+                }}
+              >
+                {initials}
+              </Avatar>
+              <div style={{ lineHeight: 1.3, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ant-color-text)', whiteSpace: 'nowrap' }}>
+                  {currentUser.name}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--ant-color-text-secondary)', whiteSpace: 'nowrap' }}>
+                  {designationLabel}{primaryZoneName ? ` · ${primaryZoneName}` : ''}
+                </div>
+              </div>
+              <DownOutlined style={{ fontSize: 10, color: 'var(--ant-color-text-secondary)', flexShrink: 0 }} />
+            </div>
+          </Dropdown>
         ) : (
           <Text type="secondary" style={{ fontSize: 13 }}>
             Not logged in

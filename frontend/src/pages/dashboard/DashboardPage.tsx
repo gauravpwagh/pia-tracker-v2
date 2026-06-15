@@ -59,7 +59,8 @@ import { LandAcquisitionDashboard } from '@pages/projects/dashboards/LandAcquisi
 import { UtilityShiftingDashboard } from '@pages/projects/dashboards/UtilityShiftingDashboard';
 import { ForestClearanceDashboard } from '@pages/projects/dashboards/ForestClearanceDashboard';
 import { DrawingApprovalDashboard } from '@pages/projects/dashboards/DrawingApprovalDashboard';
-import { TenderOfficeDashboard } from '@pages/projects/dashboards/TenderOfficeDashboard';
+import { TemporaryOfficeSpaceDashboard } from '@pages/projects/dashboards/TemporaryOfficeSpaceDashboard';
+import { TenderPackagingDashboard } from '@pages/projects/dashboards/TenderPackagingDashboard';
 
 const { Title, Text } = Typography;
 
@@ -453,9 +454,9 @@ function ActivityDetailDashboard({ activityTypeCode, projectId }: ActivityDetail
   if (activityTypeCode === 'DRAWING_APPROVAL')
     return <DrawingApprovalDashboard projectId={projectId} />;
   if (activityTypeCode === 'TENDER_PACKAGING')
-    return <TenderOfficeDashboard projectId={projectId} activityTypeCode="TENDER_PACKAGING" />;
+    return <TenderPackagingDashboard projectId={projectId} />;
   if (activityTypeCode === 'TEMPORARY_OFFICE_SPACE')
-    return <TenderOfficeDashboard projectId={projectId} activityTypeCode="TEMPORARY_OFFICE_SPACE" />;
+    return <TemporaryOfficeSpaceDashboard projectId={projectId} />;
   return null;
 }
 

@@ -112,7 +112,7 @@ export default function InboxPage() {
   }
 
   if (isError) {
-    return <Alert type="error" message={t('inbox.loadFailed')} showIcon />;
+    return <div style={{ padding: '16px 24px' }}><Alert type="error" message={t('inbox.loadFailed')} showIcon /></div>;
   }
 
   const awaiting   = data?.awaiting   ?? [];
@@ -174,8 +174,8 @@ export default function InboxPage() {
   ];
 
   return (
-    <div>
-      <Title level={3} style={{ marginBottom: 16 }}>
+    <div style={{ padding: '16px 24px' }}>
+      <Title level={4} style={{ margin: '0 0 16px' }}>
         {t('sidebar.inbox')}
       </Title>
       <Tabs defaultActiveKey="awaiting" items={tabItems} />

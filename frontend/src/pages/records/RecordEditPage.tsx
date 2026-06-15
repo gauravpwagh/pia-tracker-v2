@@ -40,12 +40,11 @@
  * Send Back always opens a modal requiring a comment.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
-  Badge,
   Breadcrumb,
   Button,
   Col,
@@ -54,12 +53,17 @@ import {
   Row,
   Space,
   Spin,
-  Tabs,
   Tag,
   Tooltip,
   Typography,
 } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import {
+  CheckOutlined,
+  CloseOutlined,
+  LeftOutlined,
+  ReloadOutlined,
+  RightOutlined,
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 
@@ -94,15 +98,6 @@ const STATE_COLORS: Record<string, string> = {
   SENT_BACK_TO_NODAL: 'warning',
 };
 
-/** Dot colour for section tab labels. */
-const SECTION_DOT_COLORS: Record<string, string> = {
-  DRAFT: '#d9d9d9',
-  SUBMITTED_FOR_VERIFICATION: '#1677ff',
-  VERIFIED: '#52c41a',
-  AUTHENTICATED: '#722ed1',
-  SENT_BACK_TO_DYCE: '#fa8c16',
-  SENT_BACK_TO_NODAL: '#fa8c16',
-};
 
 const STATE_LABELS: Record<string, string> = {
   DRAFT:                        'Draft',
@@ -119,46 +114,130 @@ function RecordStateBadge({ state }: { state: string }) {
   return <Tag color={color}>{label}</Tag>;
 }
 
-// ── Section tabs sidebar ──────────────────────────────────────────────────────
+// ── Section progress sidebar ──────────────────────────────────────────────────
 
-interface SectionTabsProps {
+type StepStatus = 'wait' | 'process' | 'finish' | 'error';
+
+function hasValue(v: unknown): boolean {
+  if (v === null || v === undefined || v === '' || v === false) return false;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === 'object') return Object.keys(v as Record<string, unknown>).length > 0;
+  return true; // numbers (incl. 0), non-empty strings, true
+}
+
+function isSectionComplete(
+  sectionCode: string,
+  formData: Record<string, unknown>,
+): boolean {
+  const sectionData = formData[sectionCode];
+  if (!sectionData || typeof sectionData !== 'object') return false;
+  // A section is "done" when at least one field has a meaningful user-entered value.
+  // false, [], {} are treated as "not filled" since they are common RJSF defaults.
+  return Object.values(sectionData as Record<string, unknown>).some(hasValue);
+}
+
+function sectionStepStatus(
+  code: string,
+  activeSection: string,
+  inst: SectionWorkflowState | undefined,
+  formData: Record<string, unknown>,
+): StepStatus {
+  if (
+    inst?.currentStateCode === 'SENT_BACK_TO_DYCE' ||
+    inst?.currentStateCode === 'SENT_BACK_TO_NODAL'
+  ) return 'error';
+  if (isSectionComplete(code, formData)) return 'finish';
+  if (code === activeSection) return 'process';
+  if (
+    inst?.currentStateCode === 'SUBMITTED_FOR_VERIFICATION' ||
+    inst?.currentStateCode === 'VERIFIED' ||
+    inst?.currentStateCode === 'AUTHENTICATED'
+  ) return 'process';
+  return 'wait';
+}
+
+const STEP_COLORS: Record<StepStatus, { bg: string; border: string; color: string }> = {
+  wait:    { bg: 'transparent',  border: '#d9d9d9', color: '#bfbfbf' },
+  process: { bg: '#1677ff',      border: '#1677ff', color: '#fff'    },
+  finish:  { bg: '#52c41a',      border: '#52c41a', color: '#fff'    },
+  error:   { bg: '#ff4d4f',      border: '#ff4d4f', color: '#fff'    },
+};
+
+interface SectionStepsProps {
   sectionCodes: string[];
   activeSection: string;
   onSelect: (code: string) => void;
   sectionStates: Record<string, SectionWorkflowState>;
+  formData: Record<string, unknown>;
 }
 
-function SectionTabs({
-  sectionCodes,
-  activeSection,
-  onSelect,
-  sectionStates,
-}: SectionTabsProps) {
+function SectionSteps({ sectionCodes, activeSection, onSelect, sectionStates, formData }: SectionStepsProps) {
   if (sectionCodes.length === 0) return null;
+
   return (
-    <Tabs
-      tabPosition="left"
-      activeKey={activeSection}
-      onChange={onSelect}
-      style={{ height: '100%' }}
-      items={sectionCodes.map((code) => {
-        const inst = sectionStates[code];
-        const dotColor = inst
-          ? (SECTION_DOT_COLORS[inst.currentStateCode] ?? '#d9d9d9')
-          : '#d9d9d9';
-        return {
-          key: code,
-          label: (
-            <Flex align="center" gap={6}>
-              <Badge color={dotColor} />
-              <span style={{ textTransform: 'uppercase', fontSize: 11, letterSpacing: '0.04em' }}>
+    <div style={{ padding: '20px 16px' }}>
+      {sectionCodes.map((code, idx) => {
+        const inst   = sectionStates[code];
+        const status = sectionStepStatus(code, activeSection, inst, formData);
+        const colors = STEP_COLORS[status];
+        const isLast = idx === sectionCodes.length - 1;
+
+        return (
+          <div key={code} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+            {/* Row: icon + label */}
+            <div
+              role="button"
+              onClick={() => onSelect(code)}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', width: '100%' }}
+            >
+              {/* Circle icon */}
+              <div style={{
+                width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+                background: colors.bg,
+                border: `2px solid ${colors.border}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {status === 'finish' && <CheckOutlined style={{ fontSize: 11, color: colors.color }} />}
+                {status === 'error'  && <CloseOutlined style={{ fontSize: 11, color: colors.color }} />}
+                {status === 'process' && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: colors.color, lineHeight: 1 }}>
+                    {idx + 1}
+                  </span>
+                )}
+                {status === 'wait' && (
+                  <span style={{ fontSize: 11, color: colors.color, lineHeight: 1 }}>
+                    {idx + 1}
+                  </span>
+                )}
+              </div>
+
+              {/* Label */}
+              <span style={{
+                fontSize: 11,
+                fontWeight: status === 'process' ? 600 : 400,
+                color: status === 'process' ? 'var(--ant-color-text)' : 'var(--ant-color-text-secondary)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}>
                 {code.replace(/_/g, ' ')}
               </span>
-            </Flex>
-          ),
-        };
+            </div>
+
+            {/* Connector line */}
+            {!isLast && (
+              <div style={{
+                width: 2,
+                height: 20,
+                background: status === 'finish' ? '#52c41a' : '#f0f0f0',
+                marginLeft: 11,
+                marginTop: 2,
+                marginBottom: 2,
+              }} />
+            )}
+          </div>
+        );
       })}
-    />
+    </div>
   );
 }
 
@@ -369,6 +448,71 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
   );
 }
 
+// ── Utility Shifting: dynamic schema filter ───────────────────────────────────
+// Narrows the flat RJSF schema to only the fields relevant to the current
+// utility_type + executing_agency combination.
+
+const US_COMMON = [
+  'utility_type', 'executing_agency', 'location_description',
+  'chainage_from', 'chainage_to',
+  'work_order_no', 'work_completed_on', 'completion_cert_pdf',
+  'affected_track_length_km',
+  'remarks',
+];
+
+// Agency-conditional field groups
+const US_AGENCY_FIELDS: Record<string, string[]> = {
+  // Non-Railway: contractor identification
+  USER_DEPT:    ['contractor_name', 'work_order_date', 'estimate_position', 'fund_submission'],
+  OPEN_LINE:    ['contractor_name', 'work_order_date', 'estimate_position', 'fund_submission_by_construction'],
+  CONSTRUCTION: ['contractor_name', 'work_order_date', 'material_available', 'agency_available'],
+  RAILWAY:      [],
+};
+
+const US_TYPE_FIELDS: Record<string, string[]> = {
+  OVERHEAD_LINE:  ['pole_count', 'span_length_m'],
+  WATER_PIPELINE: ['pipe_diameter_mm', 'length_m'],
+  NALA:           ['nala_width_m', 'nala_length_m', 'revetment_type'],
+  TELECOM_CABLE:  ['cable_length_m', 'cable_type'],
+  GAS_PIPELINE:   ['pipe_diameter_mm', 'length_m'],
+};
+
+const US_TYPE_REQUIRED: Record<string, string[]> = {
+  OVERHEAD_LINE:  ['pole_count'],
+  WATER_PIPELINE: ['pipe_diameter_mm', 'length_m'],
+  NALA:           ['nala_width_m', 'nala_length_m'],
+  TELECOM_CABLE:  ['cable_length_m'],
+  GAS_PIPELINE:   ['pipe_diameter_mm', 'length_m'],
+};
+
+function filterUsSchema(
+  schema: RJSFSchema,
+  utilityType: string,
+  executingAgency: string,
+): RJSFSchema {
+  const agencyFields = US_AGENCY_FIELDS[executingAgency] ?? [];
+  const typeFields   = US_TYPE_FIELDS[utilityType] ?? [];
+  const allowed = new Set([
+    ...US_COMMON,
+    ...typeFields,
+    ...agencyFields,
+  ]);
+
+  const props = schema.properties;
+  const filteredProps = props
+    ? Object.fromEntries(Object.entries(props).filter(([k]) => allowed.has(k)))
+    : undefined;
+
+  const baseRequired = (schema.required as string[] | undefined) ?? [];
+  const required = [
+    ...baseRequired.filter((k) => allowed.has(k)),
+    ...(US_TYPE_REQUIRED[utilityType] ?? []),
+  ].filter((v, i, a) => a.indexOf(v) === i); // dedupe
+
+  const { allOf: _dropped, ...rest } = schema;
+  return { ...rest, properties: filteredProps, required };
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function RecordEditPage() {
@@ -530,6 +674,17 @@ export default function RecordEditPage() {
       : (formDef.uiSchemaJson as UiSchema | undefined)
     : undefined;
 
+  // ── Utility Shifting: narrow schema to fields relevant to the selected type
+  // utility_type is pre-populated in dataJson at record creation so it's
+  // available from the first open. Falls back to record.recordSubtype.
+  const effectiveSchema: RJSFSchema | undefined = useMemo(() => {
+    if (!sectionSchema || formDef?.activityTypeCode !== 'UTILITY_SHIFTING') return sectionSchema;
+    const utilityType     = (formData.utility_type     as string | undefined) ?? record?.recordSubtype ?? '';
+    const executingAgency = (formData.executing_agency as string | undefined) ?? '';
+    if (!utilityType) return sectionSchema;
+    return filterUsSchema(sectionSchema, utilityType, executingAgency);
+  }, [sectionSchema, formDef?.activityTypeCode, formData.utility_type, formData.executing_agency, record?.recordSubtype]);
+
   // ── Loading / error states ─────────────────────────────────────────────────
 
   if (recordLoading || schemaLoading) {
@@ -555,7 +710,7 @@ export default function RecordEditPage() {
     );
   }
 
-  if (schemaError || !formDef || !sectionSchema) {
+  if (schemaError || !formDef || !(effectiveSchema ?? sectionSchema)) {
     return (
       <Alert
         type="error"
@@ -565,10 +720,23 @@ export default function RecordEditPage() {
     );
   }
 
+  // ── Navigation helpers ─────────────────────────────────────────────────────
+
+  const sectionIndex   = hasSections ? sectionCodes.indexOf(activeSectionResolved) : -1;
+  const isFirstSection = !hasSections || sectionIndex <= 0;
+  const isLastSection  = !hasSections || sectionIndex === sectionCodes.length - 1;
+
+  const goBack = () => {
+    if (!isFirstSection) setActiveSection(sectionCodes[sectionIndex - 1]);
+  };
+  const goNext = () => {
+    if (!isLastSection) setActiveSection(sectionCodes[sectionIndex + 1]);
+  };
+
   // ── Column spans ───────────────────────────────────────────────────────────
 
-  const leftColSpan   = hasSections ? 4 : 0;
-  const centreColSpan = hasSections ? 14 : 18;
+  const leftColSpan   = hasSections ? 5 : 0;
+  const centreColSpan = hasSections ? 13 : 18;
   const rightColSpan  = 6;
 
   const sectionLabel = activeSectionResolved
@@ -642,7 +810,7 @@ export default function RecordEditPage() {
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         <Row gutter={0} style={{ flex: 1, overflow: 'hidden', margin: 0, width: '100%' }}>
 
-          {/* Left: section nav — scrolls independently */}
+          {/* Left: section progress steps — scrolls independently */}
           {hasSections && (
             <Col
               span={leftColSpan}
@@ -650,14 +818,14 @@ export default function RecordEditPage() {
                 height: '100%',
                 overflowY: 'auto',
                 borderRight: '1px solid var(--colorBorder)',
-                padding: '8px 0',
               }}
             >
-              <SectionTabs
+              <SectionSteps
                 sectionCodes={sectionCodes}
                 activeSection={activeSectionResolved}
                 onSelect={setActiveSection}
                 sectionStates={sectionStates}
+                formData={formData}
               />
             </Col>
           )}
@@ -669,7 +837,7 @@ export default function RecordEditPage() {
           >
             <RjsfForm
               ref={formRef}
-              schema={sectionSchema}
+              schema={(effectiveSchema ?? sectionSchema) as RJSFSchema}
               uiSchema={sectionUiSchema}
               formData={
                 hasSections && activeSectionResolved
@@ -712,6 +880,14 @@ export default function RecordEditPage() {
           borderTop: '1px solid var(--colorBorder)',
         }}
       >
+        {/* Back — hidden on first section */}
+        {hasSections && !isFirstSection && (
+          <Button icon={<LeftOutlined />} onClick={goBack}>
+            {t('common:actions.back')}
+          </Button>
+        )}
+
+        {/* Save draft — always present */}
         <Button
           onClick={() => void saveNow()}
           disabled={autosaveStatus === 'saving' || autosaveStatus === 'conflict'}
@@ -720,12 +896,22 @@ export default function RecordEditPage() {
           {t('forms:record.actions.saveDraft')}
         </Button>
 
-        <WorkflowActions
-          sectionState={activeSectionState}
-          sectionLabel={sectionLabel}
-          onAction={handleWorkflowAction}
-          loading={workflowMutation.isPending}
-        />
+        {/* Next — all sections except last */}
+        {hasSections && !isLastSection && (
+          <Button type="primary" icon={<RightOutlined />} iconPosition="end" onClick={goNext}>
+            {t('common:actions.next')}
+          </Button>
+        )}
+
+        {/* Workflow actions — last section only (or when no sections) */}
+        {(!hasSections || isLastSection) && (
+          <WorkflowActions
+            sectionState={activeSectionState}
+            sectionLabel={sectionLabel}
+            onAction={handleWorkflowAction}
+            loading={workflowMutation.isPending}
+          />
+        )}
 
         <div style={{ marginLeft: 'auto' }}>
           <AutosaveIndicator status={autosaveStatus} savedAt={savedAt} />

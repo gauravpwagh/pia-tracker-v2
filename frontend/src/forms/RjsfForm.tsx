@@ -20,6 +20,7 @@ import type { IChangeEvent, FormProps } from '@rjsf/core';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { customWidgets } from './widgets';
 import { PiaObjectFieldTemplate } from './PiaObjectFieldTemplate';
+import { ApprovalChainField } from './fields/ApprovalChainField';
 
 export interface RjsfFormHandle {
   /** Programmatically trigger form validation + submit. */
@@ -72,6 +73,7 @@ export const RjsfForm = forwardRef<RjsfFormHandle, RjsfFormProps>(function RjsfF
       formData={formData}
       validator={validator}
       widgets={customWidgets}
+      fields={{ approvalChain: ApprovalChainField }}
       templates={{ ObjectFieldTemplate: PiaObjectFieldTemplate }}
       onChange={handleChange}
       onSubmit={handleSubmit}

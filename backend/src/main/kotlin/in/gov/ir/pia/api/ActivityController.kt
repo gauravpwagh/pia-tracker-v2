@@ -76,24 +76,8 @@ class ActivityController(
         @PathVariable projectId: UUID,
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): List<ActivityDetailResponse> =
-        activityService.listForProject(projectId, principal).map { a ->
-            ActivityDetailResponse(
-                id = a.id,
-                projectId = a.projectId,
-                activityTypeCode = a.activityTypeCode,
-                name = a.name,
-                scopeNotes = a.scopeNotes,
-                targetCompletionDate = a.targetCompletionDate,
-                primaryDyceUserId = a.primaryDyceUserId,
-                status = a.status,
-                defaultFormDefinitionId = a.defaultFormDefinitionId,
-                metadataJson = a.metadataJson,
-                createdByUserId = a.createdByUserId,
-                createdAt = a.createdAt,
-                updatedAt = a.updatedAt,
-                version = a.version,
-            )
-        }
+        activityService.listForProject(projectId, principal)
+            .map { a -> activityService.toDetailResponsePublic(a) }
 
     /**
      * Creates a new activity on a project.
@@ -232,11 +216,13 @@ class ActivityController(
         @AuthenticationPrincipal principal: PiaPrincipal,
         response: HttpServletResponse,
     ): ActivityRecordDetailResponse {
+        // nginx gzip converts strong ETags ("0") to weak ETags (W/"0") per RFC 7232 §2.1.
+        // Strip the W/ prefix before parsing so both forms are accepted.
         val expectedVersion =
-            ifMatch.trim('"').toIntOrNull()
+            ifMatch.removePrefix("W/").trim('"').toIntOrNull()
                 ?: throw ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
-                    "If-Match header must be a quoted integer, e.g. \"3\"",
+                    "If-Match header must be a quoted integer, e.g. \"3\" or W/\"3\"",
                 )
         val updated = activityService.patchRecord(recordId, request, expectedVersion, principal)
         response.setHeader("ETag", "\"${updated.version}\"")

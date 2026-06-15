@@ -40,7 +40,8 @@
       "submitTooltip": "Submit this entry to the Nodal Dy CE/C for verification",
       "verifyTooltip": "Verify and forward to CE/C for authentication",
       "authenticateTooltip": "Authenticate this entry — this action is irreversible",
-      "sendBackTooltip": "Return this entry for correction with a comment"
+      "sendBackTooltip": "Return this entry for correction with a comment",
+      "editRecord": "Open the full edit form for this record"
     },
     "sendBackModal": {
       "title": "Send Back for Correction",

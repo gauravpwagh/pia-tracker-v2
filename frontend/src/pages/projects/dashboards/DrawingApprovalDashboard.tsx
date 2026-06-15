@@ -38,6 +38,7 @@ import {
   type DashboardRecordDto,
   type DrawingApproverCellDto,
 } from '@api/dashboard';
+import { fetchActivities } from '@api/projects';
 import { stateColor, stateLabel } from './shared';
 
 const { Text } = Typography;
@@ -220,6 +221,12 @@ export function DrawingApprovalDashboard({ projectId }: Props) {
     staleTime: 60_000,
   });
 
+  const activitiesQuery = useQuery({
+    queryKey: ['activities', projectId],
+    queryFn:  () => fetchActivities(projectId),
+    staleTime: 60_000,
+  });
+
   const matrixQuery = useQuery({
     queryKey: ['dashboardDrawingMatrix', projectId],
     queryFn:  () => fetchDrawingApproverMatrix(projectId),
@@ -232,7 +239,16 @@ export function DrawingApprovalDashboard({ projectId }: Props) {
   const typeRows  = useMemo(() => toTypeRows(records), [records]);
   const recRows   = useMemo(() => toRecordRows(records), [records]);
 
-  if (summaryQuery.isLoading || recordsQuery.isLoading || matrixQuery.isLoading) {
+  const scopeCount = useMemo(() => {
+    return (activitiesQuery.data ?? [])
+      .filter((a) => a.activityTypeCode === 'DRAWING_APPROVAL')
+      .reduce((sum, a) => {
+        const n = Number((a.metadataJson as Record<string, unknown>).total_count);
+        return sum + (isNaN(n) ? 0 : n);
+      }, 0);
+  }, [activitiesQuery.data]);
+
+  if (summaryQuery.isLoading || recordsQuery.isLoading || matrixQuery.isLoading || activitiesQuery.isLoading) {
     return <Skeleton active paragraph={{ rows: 4 }} style={{ marginTop: 8 }} />;
   }
   if (summaryQuery.isError || recordsQuery.isError) {
@@ -244,15 +260,30 @@ export function DrawingApprovalDashboard({ projectId }: Props) {
   const inApproval = (summary?.submittedCount ?? 0) + (summary?.verifiedCount ?? 0);
   const sentBack   = summary?.sentBackCount      ?? 0;
   const sla        = summary?.slaBreachCount     ?? 0;
+  const balance    = scopeCount > 0 ? scopeCount - total : null;
 
   return (
     <div style={{ marginTop: 8 }}>
       {/* ── KPI strip ──────────────────────────────────────────────────────── */}
       <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+        {scopeCount > 0 && (
+          <Col span={8}>
+            <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Required (scope)</Text>}
+              value={scopeCount} valueStyle={{ fontSize: 17 }} prefix={<FileOutlined />} />
+          </Col>
+        )}
         <Col span={8}>
           <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Total</Text>}
             value={total} valueStyle={{ fontSize: 17 }} prefix={<FileOutlined />} />
         </Col>
+        {balance !== null && (
+          <Col span={8}>
+            <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Balance</Text>}
+              value={balance}
+              valueStyle={{ fontSize: 17, color: balance > 0 ? '#fa8c16' : undefined }}
+              prefix={<ClockCircleOutlined />} />
+          </Col>
+        )}
         <Col span={8}>
           <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Approved</Text>}
             value={authed} valueStyle={{ fontSize: 17, color: '#52c41a' }}

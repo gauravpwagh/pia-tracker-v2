@@ -26,6 +26,7 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   ExclamationCircleOutlined,
+  ExpandAltOutlined,
   FileOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
@@ -37,6 +38,7 @@ import {
   type DashboardRecordDto,
   type ForestStageSummaryDto,
 } from '@api/dashboard';
+import { fetchActivities } from '@api/projects';
 import { parseNum, stateColor, stateLabel } from './shared';
 
 const { Text } = Typography;
@@ -148,12 +150,30 @@ export function ForestClearanceDashboard({ projectId }: Props) {
     staleTime: 60_000,
   });
 
+  // Fetch FC activities to read scope/target area from metadataJson
+  const activitiesQuery = useQuery({
+    queryKey: ['activities', projectId],
+    queryFn:  () => fetchActivities(projectId),
+    staleTime: 60_000,
+  });
+
   const summary = summaryQuery.data?.summaries.find((s) => s.activityTypeCode === 'FOREST_CLEARANCE');
   const records = recordsQuery.data ?? [];
   const stages  = stageQuery.data?.stages ?? [];
   const rows    = useMemo(() => toRows(records), [records]);
 
-  if (summaryQuery.isLoading || recordsQuery.isLoading || stageQuery.isLoading) {
+  // Scope area from activity metadata (planned total forest area to clear)
+  const scopeAreaHa = useMemo(() => {
+    const fcActivities = (activitiesQuery.data ?? []).filter(
+      (a) => a.activityTypeCode === 'FOREST_CLEARANCE',
+    );
+    return fcActivities.reduce((sum, a) => {
+      const m = (a.metadataJson ?? {}) as Record<string, unknown>;
+      return sum + parseNum(m.forest_area_hectares);
+    }, 0);
+  }, [activitiesQuery.data]);
+
+  if (summaryQuery.isLoading || recordsQuery.isLoading || stageQuery.isLoading || activitiesQuery.isLoading) {
     return <Skeleton active paragraph={{ rows: 4 }} style={{ marginTop: 8 }} />;
   }
   if (summaryQuery.isError || recordsQuery.isError) {
@@ -169,6 +189,16 @@ export function ForestClearanceDashboard({ projectId }: Props) {
     <div style={{ marginTop: 8 }}>
       {/* ── KPI strip ──────────────────────────────────────────────────────── */}
       <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+        {scopeAreaHa > 0 && (
+          <Col span={12}>
+            <Statistic
+              title={<Text type="secondary" style={{ fontSize: 11 }}>Scope Area (ha)</Text>}
+              value={scopeAreaHa.toFixed(2)}
+              valueStyle={{ fontSize: 17 }}
+              prefix={<ExpandAltOutlined />}
+            />
+          </Col>
+        )}
         <Col span={12}>
           <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Total Cases</Text>}
             value={total} valueStyle={{ fontSize: 17 }} prefix={<FileOutlined />} />

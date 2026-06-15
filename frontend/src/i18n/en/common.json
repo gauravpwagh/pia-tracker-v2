@@ -22,7 +22,9 @@
     "search": "Search",
     "filter": "Filter",
     "reset": "Reset",
-    "clearFilters": "Clear Filters"
+    "clearFilters": "Clear Filters",
+    "back": "Back",
+    "next": "Next"
   },
   "states": {
     "draft": "Draft",

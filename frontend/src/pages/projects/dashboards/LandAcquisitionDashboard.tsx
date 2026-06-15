@@ -1,9 +1,12 @@
 /**
- * Land Acquisition per-activity dashboard (dashboards.md §4).
+ * Land Acquisition per-project dashboard.
  *
- * KPI strip   — total area, acquired area, balance, records count, SLA breaches.
- * Ownership chart — private/govt/forest hectares × acquired/balance.
- * Villages table — per-record row with chainage, area, state, age.
+ * Scope  → activity.metadataJson  (planned totals: area, ownership breakdown, est. villages)
+ * Progress → record.dataJson      (each record = one village/section progress update)
+ *
+ * KPI strip   — scope area, acquired area, balance, est. villages, records count, SLA breaches.
+ * Ownership chart — private/govt/forest scope vs acquired.
+ * Villages table  — per-record row with village name, chainage, area, state, days.
  */
 
 import { useMemo } from 'react';
@@ -26,6 +29,7 @@ import {
   ExclamationCircleOutlined,
   ExpandAltOutlined,
   FileOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
@@ -34,6 +38,7 @@ import {
   fetchDashboardRecords,
   type DashboardRecordDto,
 } from '@api/dashboard';
+import { fetchActivities } from '@api/projects';
 import { parseNum, stateColor, stateLabel } from './shared';
 
 const { Text } = Typography;
@@ -100,42 +105,53 @@ export function LandAcquisitionDashboard({ projectId }: Props) {
     staleTime: 60_000,
   });
 
+  // Fetch LA activities to read scope/target from metadataJson
+  const activitiesQuery = useQuery({
+    queryKey: ['activities', projectId],
+    queryFn:  () => fetchActivities(projectId),
+    staleTime: 60_000,
+  });
+
   const summary  = summaryQuery.data?.summaries.find((s) => s.activityTypeCode === 'LAND_ACQUISITION');
   const records  = recordsQuery.data ?? [];
   const rows     = useMemo(() => toRows(records), [records]);
 
-  // Aggregate hectares — area totals are activity-level fields (stored in
-  // land_acquisition_details), so deduplicate by projectActivityId to avoid
-  // counting the same activity's area once per record.
-  const { totalHa, acquiredHa, privateHa, govtHa, forestHa,
-          acqPrivate, acqGovt, acqForest } = useMemo(() => {
-    let total = 0, acquired = 0, priv = 0, govt = 0, forest = 0;
-    let aqPriv = 0, aqGovt = 0, aqForest = 0;
-    const seenActivity = new Set<string>();
-    for (const r of records) {
-      const d      = r.dataJson;
-      const actId  = r.projectActivityId ?? r.id; // fallback to record id if no parent
-      const isNew  = !seenActivity.has(actId);
-      if (isNew) {
-        seenActivity.add(actId);
-        total  += parseNum(d.area_hectares_total);
-        priv   += parseNum(d.area_hectares_private);
-        govt   += parseNum(d.area_hectares_govt);
-        forest += parseNum(d.area_hectares_forest);
-      }
-      // Acquired: count only authenticated records (one record = one village/section)
-      if (r.recordState === 'AUTHENTICATED') {
-        acquired += parseNum(d.area_hectares_total);
-        aqPriv   += parseNum(d.area_hectares_private);
-        aqGovt   += parseNum(d.area_hectares_govt);
-        aqForest += parseNum(d.area_hectares_forest);
-      }
+  // ── Scope totals from activity metadata ──────────────────────────────────────
+  // activity.metadataJson = planned/target values (scope)
+  const { scopeTotalHa, scopePrivateHa, scopeGovtHa, scopeForestHa, estVillages } = useMemo(() => {
+    const laActivities = (activitiesQuery.data ?? []).filter(
+      (a) => a.activityTypeCode === 'LAND_ACQUISITION',
+    );
+    let total = 0, priv = 0, govt = 0, forest = 0, villages = 0;
+    for (const a of laActivities) {
+      const m = (a.metadataJson ?? {}) as Record<string, unknown>;
+      total    += parseNum(m.area_hectares_total);
+      priv     += parseNum(m.area_hectares_private);
+      govt     += parseNum(m.area_hectares_govt);
+      forest   += parseNum(m.area_hectares_forest);
+      villages += parseNum(m.villages_estimated_count);
     }
-    return { totalHa: total, acquiredHa: acquired, privateHa: priv, govtHa: govt, forestHa: forest,
-             acqPrivate: aqPriv, acqGovt: aqGovt, acqForest: aqForest };
+    return { scopeTotalHa: total, scopePrivateHa: priv, scopeGovtHa: govt,
+             scopeForestHa: forest, estVillages: villages };
+  }, [activitiesQuery.data]);
+
+  // ── Progress totals from record data ─────────────────────────────────────────
+  // record.dataJson = actual progress per village/section; no dedup — each
+  // record is an independent progress entry for a distinct village/section.
+  const { acquiredHa, acqPrivate, acqGovt, acqForest } = useMemo(() => {
+    let acquired = 0, aqPriv = 0, aqGovt = 0, aqForest = 0;
+    for (const r of records) {
+      if (r.recordState !== 'AUTHENTICATED') continue;
+      const d = r.dataJson;
+      acquired += parseNum(d.area_hectares_total);
+      aqPriv   += parseNum(d.area_hectares_private);
+      aqGovt   += parseNum(d.area_hectares_govt);
+      aqForest += parseNum(d.area_hectares_forest);
+    }
+    return { acquiredHa: acquired, acqPrivate: aqPriv, acqGovt: aqGovt, acqForest: aqForest };
   }, [records]);
 
-  const balanceHa = totalHa - acquiredHa;
+  const balanceHa = scopeTotalHa - acquiredHa;
 
   const ownershipOption = useMemo(() => ({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -145,72 +161,101 @@ export function LandAcquisitionDashboard({ projectId }: Props) {
     yAxis:  { type: 'category', data: ['Balance', 'Acquired'], axisLabel: { fontSize: 10 } },
     series: [
       { name: 'Private', type: 'bar', stack: 'total', color: '#1677ff',
-        data: [+(privateHa - acqPrivate).toFixed(2), +acqPrivate.toFixed(2)] },
+        data: [+(scopePrivateHa - acqPrivate).toFixed(2), +acqPrivate.toFixed(2)] },
       { name: 'Govt',    type: 'bar', stack: 'total', color: '#52c41a',
-        data: [+(govtHa - acqGovt).toFixed(2),       +acqGovt.toFixed(2)] },
+        data: [+(scopeGovtHa - acqGovt).toFixed(2),       +acqGovt.toFixed(2)] },
       { name: 'Forest',  type: 'bar', stack: 'total', color: '#389e0d',
-        data: [+(forestHa - acqForest).toFixed(2),   +acqForest.toFixed(2)] },
+        data: [+(scopeForestHa - acqForest).toFixed(2),   +acqForest.toFixed(2)] },
     ],
-  }), [privateHa, govtHa, forestHa, acqPrivate, acqGovt, acqForest]);
+  }), [scopePrivateHa, scopeGovtHa, scopeForestHa, acqPrivate, acqGovt, acqForest]);
 
-  if (summaryQuery.isLoading || recordsQuery.isLoading) {
+  if (summaryQuery.isLoading || recordsQuery.isLoading || activitiesQuery.isLoading) {
     return <Skeleton active paragraph={{ rows: 4 }} style={{ marginTop: 8 }} />;
   }
   if (summaryQuery.isError || recordsQuery.isError) {
     return <Alert type="error" message="Failed to load Land Acquisition dashboard" showIcon style={{ marginTop: 8 }} />;
   }
 
-  const total    = summary?.totalRecords      ?? 0;
-  const authed   = summary?.authenticatedCount ?? 0;
-  const pending  = total - authed;
-  const sla      = summary?.slaBreachCount    ?? 0;
+  const total   = summary?.totalRecords      ?? 0;
+  const authed  = summary?.authenticatedCount ?? 0;
+  const pending = total - authed;
+  const sla     = summary?.slaBreachCount    ?? 0;
 
   return (
     <div style={{ marginTop: 8 }}>
       {/* ── KPI strip ──────────────────────────────────────────────────────── */}
       <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
         <Col span={8}>
-          <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Total Area (ha)</Text>}
-            value={totalHa > 0 ? totalHa.toFixed(2) : '—'} valueStyle={{ fontSize: 17 }} />
+          <Statistic
+            title={<Text type="secondary" style={{ fontSize: 11 }}>Scope Area (ha)</Text>}
+            value={scopeTotalHa > 0 ? scopeTotalHa.toFixed(2) : '—'}
+            valueStyle={{ fontSize: 17 }}
+          />
         </Col>
         <Col span={8}>
-          <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Acquired (ha)</Text>}
+          <Statistic
+            title={<Text type="secondary" style={{ fontSize: 11 }}>Acquired (ha)</Text>}
             value={acquiredHa > 0 ? acquiredHa.toFixed(2) : '—'}
             valueStyle={{ fontSize: 17, color: '#52c41a' }}
-            prefix={<CheckCircleOutlined />} />
+            prefix={<CheckCircleOutlined />}
+          />
         </Col>
         <Col span={8}>
-          <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Balance (ha)</Text>}
-            value={balanceHa > 0 ? balanceHa.toFixed(2) : '—'}
+          <Statistic
+            title={<Text type="secondary" style={{ fontSize: 11 }}>Balance (ha)</Text>}
+            value={scopeTotalHa > 0 ? balanceHa.toFixed(2) : '—'}
             valueStyle={{ fontSize: 17, color: balanceHa > 0 ? '#fa8c16' : undefined }}
-            prefix={<ExpandAltOutlined />} />
+            prefix={<ExpandAltOutlined />}
+          />
+        </Col>
+        {estVillages > 0 && (
+          <Col span={8}>
+            <Statistic
+              title={<Text type="secondary" style={{ fontSize: 11 }}>Est. Villages</Text>}
+              value={estVillages}
+              valueStyle={{ fontSize: 17 }}
+              prefix={<TeamOutlined />}
+            />
+          </Col>
+        )}
+        <Col span={8}>
+          <Statistic
+            title={<Text type="secondary" style={{ fontSize: 11 }}>Records</Text>}
+            value={total}
+            valueStyle={{ fontSize: 17 }}
+            prefix={<FileOutlined />}
+          />
         </Col>
         <Col span={8}>
-          <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Records</Text>}
-            value={total} valueStyle={{ fontSize: 17 }} prefix={<FileOutlined />} />
+          <Statistic
+            title={<Text type="secondary" style={{ fontSize: 11 }}>Authenticated</Text>}
+            value={authed}
+            valueStyle={{ fontSize: 17, color: '#52c41a' }}
+            prefix={<CheckCircleOutlined />}
+          />
         </Col>
         <Col span={8}>
-          <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Authenticated</Text>}
-            value={authed} valueStyle={{ fontSize: 17, color: '#52c41a' }}
-            prefix={<CheckCircleOutlined />} />
-        </Col>
-        <Col span={8}>
-          <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>SLA Breaches</Text>}
+          <Statistic
+            title={<Text type="secondary" style={{ fontSize: 11 }}>SLA Breaches</Text>}
             value={sla}
             valueStyle={{ fontSize: 17, color: sla > 0 ? '#ff4d4f' : undefined }}
-            prefix={<ExclamationCircleOutlined />} />
+            prefix={<ExclamationCircleOutlined />}
+          />
         </Col>
         {pending > 0 && (
           <Col span={8}>
-            <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Pending</Text>}
-              value={pending} valueStyle={{ fontSize: 17, color: '#fa8c16' }}
-              prefix={<ClockCircleOutlined />} />
+            <Statistic
+              title={<Text type="secondary" style={{ fontSize: 11 }}>Pending</Text>}
+              value={pending}
+              valueStyle={{ fontSize: 17, color: '#fa8c16' }}
+              prefix={<ClockCircleOutlined />}
+            />
           </Col>
         )}
       </Row>
 
       {/* ── Ownership chart ─────────────────────────────────────────────────── */}
-      {totalHa > 0 && (
+      {scopeTotalHa > 0 && (
         <Card size="small" title="Acquired vs Balance — by ownership (ha)"
           style={{ marginBottom: 12 }} styles={{ body: { padding: '8px 12px' } }}>
           <ReactECharts option={ownershipOption} style={{ height: 150 }} notMerge />

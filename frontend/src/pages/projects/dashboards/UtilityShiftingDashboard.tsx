@@ -26,6 +26,7 @@ import {
   ClockCircleOutlined,
   ExclamationCircleOutlined,
   FileOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
@@ -35,6 +36,7 @@ import {
   fetchUtilityBreakdown,
   type DashboardRecordDto,
 } from '@api/dashboard';
+import { fetchActivities } from '@api/projects';
 import { stateColor, stateLabel } from './shared';
 
 const { Text } = Typography;
@@ -117,10 +119,45 @@ export function UtilityShiftingDashboard({ projectId }: Props) {
     staleTime: 60_000,
   });
 
+  // Fetch US activities to read scope count from metadataJson
+  const activitiesQuery = useQuery({
+    queryKey: ['activities', projectId],
+    queryFn:  () => fetchActivities(projectId),
+    staleTime: 60_000,
+  });
+
   const summary   = summaryQuery.data?.summaries.find((s) => s.activityTypeCode === 'UTILITY_SHIFTING');
   const records   = recordsQuery.data ?? [];
   const breakdown = breakdownQuery.data;
   const rows      = useMemo(() => toRows(records), [records]);
+
+  // Scope totals from all US activity metadata
+  const { scopeCount, scopeTrackKm } = useMemo(() => {
+    const usActivities = (activitiesQuery.data ?? []).filter(
+      (a) => a.activityTypeCode === 'UTILITY_SHIFTING',
+    );
+    return usActivities.reduce(
+      (acc, a) => {
+        const m = (a.metadataJson ?? {}) as Record<string, unknown>;
+        const n = Number(m.total_count);
+        const t = Number(m.total_track_length_km);
+        return {
+          scopeCount:   acc.scopeCount   + (isNaN(n) ? 0 : n),
+          scopeTrackKm: acc.scopeTrackKm + (isNaN(t) ? 0 : t),
+        };
+      },
+      { scopeCount: 0, scopeTrackKm: 0 },
+    );
+  }, [activitiesQuery.data]);
+
+  // Track length progress: sum across all records (not just authenticated)
+  // so any entered progress is visible, regardless of workflow state.
+  const shiftedTrackKm = useMemo(() => {
+    return records.reduce((sum, r) => {
+      const v = Number((r.dataJson as Record<string, unknown>).affected_track_length_km);
+      return sum + (isNaN(v) ? 0 : v);
+    }, 0);
+  }, [records]);
 
   // By-type bar chart from breakdown (authoritative counts)
   const typeBarOption = useMemo(() => {
@@ -162,25 +199,37 @@ export function UtilityShiftingDashboard({ projectId }: Props) {
     }],
   }), [agencyData]);
 
-  if (summaryQuery.isLoading || recordsQuery.isLoading || breakdownQuery.isLoading) {
+  if (summaryQuery.isLoading || recordsQuery.isLoading || breakdownQuery.isLoading || activitiesQuery.isLoading) {
     return <Skeleton active paragraph={{ rows: 4 }} style={{ marginTop: 8 }} />;
   }
   if (summaryQuery.isError || recordsQuery.isError) {
     return <Alert type="error" message="Failed to load Utility Shifting dashboard" showIcon style={{ marginTop: 8 }} />;
   }
 
-  const total   = summary?.totalRecords       ?? 0;
-  const authed  = summary?.authenticatedCount  ?? 0;
-  const pending = total - authed;
-  const sla     = summary?.slaBreachCount     ?? 0;
-  const subtypes = breakdown?.subtypes ?? [];
+  const total        = summary?.totalRecords      ?? 0;
+  const authed       = summary?.authenticatedCount ?? 0;
+  const balance      = scopeCount > 0 ? scopeCount - authed : total - authed;
+  const trackBalance = scopeTrackKm > 0 ? +(scopeTrackKm - shiftedTrackKm).toFixed(3) : null;
+  const sla          = summary?.slaBreachCount    ?? 0;
+  const subtypes     = breakdown?.subtypes ?? [];
 
   return (
     <div style={{ marginTop: 8 }}>
       {/* ── KPI strip ──────────────────────────────────────────────────────── */}
       <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+        {/* ── Utilities ── */}
+        {scopeCount > 0 && (
+          <Col span={12}>
+            <Statistic
+              title={<Text type="secondary" style={{ fontSize: 11 }}>Scope (utilities)</Text>}
+              value={scopeCount}
+              valueStyle={{ fontSize: 17 }}
+              prefix={<ToolOutlined />}
+            />
+          </Col>
+        )}
         <Col span={12}>
-          <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Total Items</Text>}
+          <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Records</Text>}
             value={total} valueStyle={{ fontSize: 17 }} prefix={<FileOutlined />} />
         </Col>
         <Col span={12}>
@@ -189,10 +238,45 @@ export function UtilityShiftingDashboard({ projectId }: Props) {
             prefix={<CheckCircleOutlined />} />
         </Col>
         <Col span={12}>
-          <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>Pending</Text>}
-            value={pending} valueStyle={{ fontSize: 17, color: pending > 0 ? '#fa8c16' : undefined }}
-            prefix={<ClockCircleOutlined />} />
+          <Statistic
+            title={<Text type="secondary" style={{ fontSize: 11 }}>Balance (utilities)</Text>}
+            value={balance}
+            valueStyle={{ fontSize: 17, color: balance > 0 ? '#fa8c16' : undefined }}
+            prefix={<ClockCircleOutlined />}
+          />
         </Col>
+
+        {/* ── Track length ── */}
+        <Col span={12}>
+          <Statistic
+            title={<Text type="secondary" style={{ fontSize: 11 }}>Scope Track (km)</Text>}
+            value={scopeTrackKm > 0 ? scopeTrackKm : '—'}
+            precision={scopeTrackKm > 0 ? 3 : undefined}
+            valueStyle={{ fontSize: 17 }}
+            suffix={scopeTrackKm > 0 ? 'km' : undefined}
+          />
+        </Col>
+        <Col span={12}>
+          <Statistic
+            title={<Text type="secondary" style={{ fontSize: 11 }}>Track Recorded (km)</Text>}
+            value={shiftedTrackKm > 0 ? shiftedTrackKm : '—'}
+            precision={shiftedTrackKm > 0 ? 3 : undefined}
+            valueStyle={{ fontSize: 17, color: shiftedTrackKm > 0 ? '#52c41a' : undefined }}
+            suffix={shiftedTrackKm > 0 ? 'km' : undefined}
+          />
+        </Col>
+        {trackBalance !== null && (
+          <Col span={12}>
+            <Statistic
+              title={<Text type="secondary" style={{ fontSize: 11 }}>Track Remaining (km)</Text>}
+              value={trackBalance}
+              precision={3}
+              valueStyle={{ fontSize: 17, color: trackBalance > 0 ? '#fa8c16' : undefined }}
+              suffix="km"
+            />
+          </Col>
+        )}
+
         <Col span={12}>
           <Statistic title={<Text type="secondary" style={{ fontSize: 11 }}>SLA Breaches</Text>}
             value={sla} valueStyle={{ fontSize: 17, color: sla > 0 ? '#ff4d4f' : undefined }}

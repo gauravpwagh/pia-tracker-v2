@@ -170,6 +170,11 @@ export async function fetchActivities(projectId: string): Promise<ActivityDetail
   return handleResponse<ActivityDetailResponse[]>(res);
 }
 
+export async function fetchActivityById(activityId: string): Promise<ActivityDetailResponse> {
+  const res = await fetch(`${BASE}/activities/${activityId}`, { credentials: 'include' });
+  return handleResponse<ActivityDetailResponse>(res);
+}
+
 export interface CreateActivityRequest {
   activityTypeCode: string;
   name: string;

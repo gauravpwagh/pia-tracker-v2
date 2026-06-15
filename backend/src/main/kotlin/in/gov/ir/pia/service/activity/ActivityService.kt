@@ -58,6 +58,8 @@ data class CreateActivityRecordRequest(
 data class PatchActivityRecordRequest(
     /** Full replacement of the record's data_json. No partial-merge; send the complete current form state. */
     val dataJson: JsonNode,
+    /** Optional display name update. Null = leave name unchanged. */
+    val name: String? = null,
 )
 
 /**
@@ -677,15 +679,17 @@ class ActivityService(
             jdbc.update(
                 """
                 UPDATE activity_records
-                   SET data_json           = ?::jsonb,
+                   SET data_json              = ?::jsonb,
                        schema_version_at_save = ?,
-                       updated_by_user_id  = ?,
-                       updated_at          = now(),
-                       version             = version + 1
+                       name                   = COALESCE(?, name),
+                       updated_by_user_id     = ?,
+                       updated_at             = now(),
+                       version                = version + 1
                  WHERE id = ? AND version = ? AND is_deleted = false
                 """.trimIndent(),
                 dataJsonString,
-                existing.schemaVersionAtSave, // keep the version-at-save from creation; Phase 1.10 may bump it
+                existing.schemaVersionAtSave,
+                request.name,   // null → COALESCE leaves existing name intact
                 principal.userId,
                 recordId,
                 expectedVersion,
@@ -934,6 +938,8 @@ class ActivityService(
             "UTILITY_SHIFTING" ->
                 "utility_shifting_details" to
                     listOf(
+                        // Scope (activity-level)
+                        "total_count", "total_track_length_km",
                         "utility_type", "owner_agency", "executing_agency",
                         "chainage_from", "chainage_to",
                         "estimated_cost", "sanctioned_cost",
@@ -956,13 +962,14 @@ class ActivityService(
                     )
             "DRAWING_APPROVAL" ->
                 "drawing_approval_details" to
-                    listOf("drawing_type", "drawing_number")
+                    listOf("total_count", "drawing_type", "drawing_number")
             "TENDER_PACKAGING" ->
                 "tender_packaging_details" to
-                    listOf("package_name", "epc_document_prepared", "tender_finalized")
+                    listOf("total_count", "package_name", "epc_document_prepared", "tender_finalized")
             "TEMPORARY_OFFICE_SPACE" ->
                 "temporary_office_space_details" to
                     listOf(
+                        "total_count",
                         "details_required", "count", "structure_type",
                         "new_agency_available", "new_tdc",
                         "old_possession_given", "old_tdc",
@@ -1075,7 +1082,9 @@ class ActivityService(
             "UTILITY_SHIFTING" -> jdbc.update(
                 """
                 INSERT INTO utility_shifting_details (
-                    activity_id, utility_type, owner_agency, executing_agency,
+                    activity_id,
+                    total_count, total_track_length_km,
+                    utility_type, owner_agency, executing_agency,
                     chainage_from, chainage_to,
                     estimated_cost, sanctioned_cost,
                     work_start_date, expected_completion_date, actual_completion_date,
@@ -1088,7 +1097,9 @@ class ActivityService(
                     utility_description,
                     contractor_name, work_order_no, work_order_date
                 ) VALUES (
-                    ?, ?, ?, ?,
+                    ?,
+                    ?, ?,
+                    ?, ?, ?,
                     ?, ?,
                     ?, ?,
                     ?, ?, ?,
@@ -1102,6 +1113,8 @@ class ActivityService(
                     ?, ?, ?
                 )
                 ON CONFLICT (activity_id) DO UPDATE SET
+                    total_count               = EXCLUDED.total_count,
+                    total_track_length_km     = EXCLUDED.total_track_length_km,
                     utility_type              = EXCLUDED.utility_type,
                     owner_agency              = EXCLUDED.owner_agency,
                     executing_agency          = EXCLUDED.executing_agency,
@@ -1133,6 +1146,7 @@ class ActivityService(
                     work_order_date           = EXCLUDED.work_order_date
                 """.trimIndent(),
                 activityId,
+                int("total_count"), dec("total_track_length_km"),
                 str("utility_type"), str("owner_agency"), str("executing_agency"),
                 str("chainage_from"), str("chainage_to"),
                 dec("estimated_cost"), dec("sanctioned_cost"),
@@ -1149,27 +1163,31 @@ class ActivityService(
             "DRAWING_APPROVAL" -> jdbc.update(
                 """
                 INSERT INTO drawing_approval_details
-                    (activity_id, drawing_type, drawing_number)
-                VALUES (?, ?, ?)
+                    (activity_id, total_count, drawing_type, drawing_number)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT (activity_id) DO UPDATE SET
+                    total_count    = EXCLUDED.total_count,
                     drawing_type   = EXCLUDED.drawing_type,
                     drawing_number = EXCLUDED.drawing_number
                 """.trimIndent(),
                 activityId,
+                int("total_count"),
                 str("drawing_type"),
                 str("drawing_number"),
             )
             "TENDER_PACKAGING" -> jdbc.update(
                 """
                 INSERT INTO tender_packaging_details
-                    (activity_id, package_name, epc_document_prepared, tender_finalized)
-                VALUES (?, ?, ?, ?)
+                    (activity_id, total_count, package_name, epc_document_prepared, tender_finalized)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (activity_id) DO UPDATE SET
+                    total_count           = EXCLUDED.total_count,
                     package_name          = EXCLUDED.package_name,
                     epc_document_prepared = EXCLUDED.epc_document_prepared,
                     tender_finalized      = EXCLUDED.tender_finalized
                 """.trimIndent(),
                 activityId,
+                int("total_count"),
                 str("package_name"),
                 bool("epc_document_prepared"),
                 bool("tender_finalized"),
@@ -1177,12 +1195,14 @@ class ActivityService(
             "TEMPORARY_OFFICE_SPACE" -> jdbc.update(
                 """
                 INSERT INTO temporary_office_space_details
-                    (activity_id, details_required, count, structure_type,
+                    (activity_id, total_count,
+                     details_required, count, structure_type,
                      new_agency_available, new_tdc,
                      old_possession_given, old_tdc,
                      hiring_rental_agreement, hiring_tdc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (activity_id) DO UPDATE SET
+                    total_count             = EXCLUDED.total_count,
                     details_required        = EXCLUDED.details_required,
                     count                   = EXCLUDED.count,
                     structure_type          = EXCLUDED.structure_type,
@@ -1194,6 +1214,7 @@ class ActivityService(
                     hiring_tdc              = EXCLUDED.hiring_tdc
                 """.trimIndent(),
                 activityId,
+                int("total_count"),
                 bool("details_required"),
                 int("count"),
                 str("structure_type"),
@@ -1464,6 +1485,9 @@ class ActivityService(
      * dedicated detail table.  When null, falls back to the entity's [metadataJson]
      * JSONB column (kept for backwards compatibility with list endpoints).
      */
+    fun toDetailResponsePublic(a: ProjectActivity): ActivityDetailResponse =
+        a.toDetailResponse(readDetails(a.id, a.activityTypeCode))
+
     private fun ProjectActivity.toDetailResponse(metaOverride: JsonNode? = null): ActivityDetailResponse =
         ActivityDetailResponse(
             id = id,

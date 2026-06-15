@@ -150,6 +150,9 @@ function recordIdFromKey(key: string) { return key.replace('record:', ''); }
 const RECORD_TREE_TYPES = new Set([
   'LAND_ACQUISITION',
   'FOREST_CLEARANCE',
+  'UTILITY_SHIFTING',
+  'TEMPORARY_OFFICE_SPACE',
+  'TENDER_PACKAGING',
   'DRAWING_APPROVAL',
 ]);
 
@@ -198,6 +201,7 @@ function ProjectNodeTitle({
     subtitleParts.push(`${project.lengthKm} km`);
   }
   if (zoneShortName) subtitleParts.push(zoneShortName);
+  subtitleParts.push(dayjs(project.createdAt).format('D MMM YYYY'));
   const subtitle = subtitleParts.join(' · ');
 
   return (
@@ -670,19 +674,6 @@ export default function ProjectsPage() {
           activityId={activityId}
           canEdit={currentUser?.permissions.includes('ACTIVITY.UPDATE.OWN') ?? false}
           onClose={handleClosePane}
-          onStatusChanged={(id, newStatus) => {
-            setActivityMap((prev) => {
-              const next = { ...prev };
-              for (const [pId, acts] of Object.entries(next)) {
-                const idx = acts.findIndex((a) => a.id === id);
-                if (idx !== -1) {
-                  next[pId] = acts.map((a) => a.id === id ? { ...a, status: newStatus } : a);
-                  break;
-                }
-              }
-              return next;
-            });
-          }}
           onRecordCreated={(record) => {
             // Add to recordMap so tree shows it immediately
             setRecordMap((prev) => ({
@@ -744,7 +735,7 @@ export default function ProjectsPage() {
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10 }}>
 
         {/* ── Fixed top strip (shrinks to content) ─────────────────────────── */}
-        <div style={{ flexShrink: 0 }}>
+        <div style={{ flexShrink: 0, padding: '16px 24px 0' }}>
           {/* Title row */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
             <div>
@@ -828,7 +819,7 @@ export default function ProjectsPage() {
 
         {/* ── Expanding main section — fills all remaining viewport height ───── */}
         {/* min-height:0 is required for flex children to shrink below content size */}
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12 }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12, padding: '0 24px 16px' }}>
 
           {/* Tree / Table pane — independent vertical scroll */}
           <div style={{

@@ -50,6 +50,7 @@ import {
 import { fetchUsers, fetchUsersByDesignation, type UserSummary } from '@api/auth';
 import type { PrincipalInfo } from '@api/auth';
 import ActivityCreateWizard from './ActivityCreateWizard';
+import dayjs from 'dayjs';
 
 const { Text, Title } = Typography;
 
@@ -526,17 +527,31 @@ export function ProjectDetailPanel({
                   {project.projectType.replace(/_/g, ' ')}
                 </Descriptions.Item>
               )}
-              {project.targetCompletionYear && (
-                <Descriptions.Item label="Target year">
-                  {project.targetCompletionYear}
-                </Descriptions.Item>
-              )}
               {(project.chainageFromKm != null || project.chainageToKm != null) && (
                 <Descriptions.Item label="Chainage">
                   {project.chainageFromKm ?? '?'} – {project.chainageToKm ?? '?'} km
                   {project.lengthKm != null && ` (${project.lengthKm} km)`}
                 </Descriptions.Item>
               )}
+              {project.targetCompletionYear && (
+                <Descriptions.Item label="Target year">
+                  {project.targetCompletionYear}
+                </Descriptions.Item>
+              )}
+              {project.recommendedByBoardOn && (
+                <Descriptions.Item label="Board recommendation">
+                  {dayjs(project.recommendedByBoardOn).format('D MMM YYYY')}
+                </Descriptions.Item>
+              )}
+              <Descriptions.Item label="Created">
+                {dayjs(project.createdAt).format('D MMM YYYY, HH:mm')}
+                {project.createdByUserId && userById[project.createdByUserId]
+                  ? ` by ${userById[project.createdByUserId]}`
+                  : ''}
+              </Descriptions.Item>
+              <Descriptions.Item label="Last updated">
+                {dayjs(project.updatedAt).format('D MMM YYYY, HH:mm')}
+              </Descriptions.Item>
             </Descriptions>
 
             <StateGuide state={project.lifecycleState} />

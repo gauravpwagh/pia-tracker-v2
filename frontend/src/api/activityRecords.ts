@@ -117,11 +117,16 @@ export async function createRecord(
 export async function patchRecord(
   recordId: string,
   dataJson: Record<string, unknown>,
+  /** Pass a string to update the record name, undefined to leave it unchanged. */
+  name?: string | null,
 ): Promise<ActivityRecordDetail> {
   const etag = getETag(recordId);
   if (etag === undefined) {
     throw new Error(`No ETag cached for record ${recordId}. Fetch the record first.`);
   }
+
+  const payload: Record<string, unknown> = { dataJson };
+  if (name !== undefined) payload.name = name || null;
 
   const res = await fetch(`${BASE}/activity-records/${recordId}`, {
     method: 'PATCH',
@@ -130,7 +135,7 @@ export async function patchRecord(
       'Content-Type': 'application/json',
       'If-Match': etag,
     },
-    body: JSON.stringify({ dataJson }),
+    body: JSON.stringify(payload),
   });
 
   const updated = await handleResponse<ActivityRecordDetail>(res);

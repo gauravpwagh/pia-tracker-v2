@@ -23,7 +23,7 @@ import {
   Input,
   Modal,
   notification,
-  Popconfirm,
+  Select,
   Skeleton,
   Space,
   Tag,
@@ -33,15 +33,12 @@ import { ActivityMetadataForm, ActivityMetadataView, getMetadataDefaults } from 
 import {
   AuditOutlined,
   BranchesOutlined,
-  CheckCircleOutlined,
   CloseOutlined,
   ClusterOutlined,
   EditOutlined,
   HomeOutlined,
   PlusOutlined,
-  SafetyOutlined,
   SaveOutlined,
-  SendOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import {
@@ -51,13 +48,9 @@ import {
 } from '@api/projects';
 import {
   createRecord,
+  patchRecord,
   type ActivityRecordDetail,
 } from '@api/activityRecords';
-import {
-  fetchActivityWorkflowState,
-  performActivityAction,
-  type SectionWorkflowState,
-} from '@api/workflow';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -83,7 +76,7 @@ const ACTIVITY_TYPE_LABELS: Record<string, string> = {
 const SCOPE_NOTE_PLACEHOLDERS: Record<string, string> = {
   LAND_ACQUISITION:       'Villages, survey numbers, district, total area (ha), acquisition stage (Section 11 / Award / Possession)…',
   FOREST_CLEARANCE:       'Forest division, area (ha), FC-I / FC-II stage, wildlife zone considerations, compensatory afforestation details…',
-  UTILITY_SHIFTING:       'Utility type (OHE / signalling / water / telecom), chainage range, executing agency, estimated cost…',
+  UTILITY_SHIFTING:       'Brief description of what needs to be shifted — type, stretch, agencies involved. Detailed scope goes in the metadata fields below.',
   DRAWING_APPROVAL:       'Drawing type, DPR reference, design standard, approving authority, revision notes…',
   TENDER_PACKAGING:       'Package scope, estimated cost range, tender type (open / limited), current stage…',
   TEMPORARY_OFFICE_SPACE: 'Location, area required (sqm), type (rented / railway land), facilities needed, estimated rent…',
@@ -133,21 +126,22 @@ interface ActivityDetailPanelProps {
   activityId: string;
   canEdit: boolean;         // true when caller has ACTIVITY.UPDATE.OWN
   onClose: () => void;
-  onStatusChanged?: (activityId: string, newStatus: string) => void;
   /** Called after a new record is created so the parent can add it to the tree. */
   onRecordCreated?: (record: ActivityRecordDetail) => void;
 }
 
 /** Activity types that support manual record creation. */
-const RECORD_CREATABLE_TYPES = new Set(['LAND_ACQUISITION', 'FOREST_CLEARANCE']);
+const RECORD_CREATABLE_TYPES = new Set(['LAND_ACQUISITION', 'FOREST_CLEARANCE', 'UTILITY_SHIFTING', 'TEMPORARY_OFFICE_SPACE', 'TENDER_PACKAGING', 'DRAWING_APPROVAL']);
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
-export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChanged, onRecordCreated }: ActivityDetailPanelProps) {
+export function ActivityDetailPanel({ activityId, canEdit, onClose, onRecordCreated }: ActivityDetailPanelProps) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [addRecordOpen, setAddRecordOpen] = useState(false);
   const [newRecordName, setNewRecordName] = useState('');
+  const [newRecordSubtype, setNewRecordSubtype] = useState<string | undefined>(undefined);
+  const [newRecordMetadata, setNewRecordMetadata] = useState<Record<string, unknown>>({});
   useAuthStore(); // kept to trigger re-render on auth change
   const [notifApi, notifCtx] = notification.useNotification();
   const [form] = Form.useForm<EditValues>();
@@ -175,11 +169,42 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
   });
 
   const createRecordMutation = useMutation({
-    mutationFn: (name: string) => createRecord(activityId, undefined, name || undefined),
+    mutationFn: async () => {
+      const isUs      = activity?.activityTypeCode === 'UTILITY_SHIFTING';
+      const isDrawing = activity?.activityTypeCode === 'DRAWING_APPROVAL';
+
+      // For US records, subtype = utility type; for Drawing, subtype = drawing type
+      const subtype = (isUs || isDrawing) ? newRecordSubtype : undefined;
+      const record = await createRecord(activityId, subtype, newRecordName || undefined);
+
+      // For US: pre-populate utility_type in dataJson so RJSF form filters correctly on first open
+      if (isUs && newRecordSubtype) {
+        await patchRecord(record.id, { utility_type: newRecordSubtype });
+      }
+
+      // For LA/FC: if user filled scope metadata, persist it to the activity
+      if (!isUs && activity) {
+        const metaValues = Object.fromEntries(
+          Object.entries(newRecordMetadata).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+        );
+        if (Object.keys(metaValues).length > 0) {
+          await updateActivity(activityId, {
+            name: activity.name,
+            scopeNotes: activity.scopeNotes ?? undefined,
+            targetCompletionDate: activity.targetCompletionDate ?? undefined,
+            metadataJson: { ...(activity.metadataJson as Record<string, unknown> ?? {}), ...metaValues },
+          });
+          void queryClient.invalidateQueries({ queryKey: ['activity', activityId] });
+        }
+      }
+      return record;
+    },
     onSuccess: (record) => {
       void queryClient.invalidateQueries({ queryKey: ['records', activityId] });
       setAddRecordOpen(false);
       setNewRecordName('');
+      setNewRecordSubtype(undefined);
+      setNewRecordMetadata({});
       onRecordCreated?.(record);
     },
     onError: (err: Error) => {
@@ -187,33 +212,8 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
     },
   });
 
-  const activityWorkflowMutation = useMutation({
-    mutationFn: ({ action, comment }: { action: 'submit' | 'verify' | 'authenticate' | 'send-back' | 'resubmit' | 're-verify'; comment?: string }) =>
-      performActivityAction(activityId, action, comment),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(['activityWorkflow', activityId], updated);
-      void queryClient.invalidateQueries({ queryKey: ['activity', activityId] });
-      onStatusChanged?.(activityId, updated.currentStateCode);
-      notifApi.success({ message: 'Activity updated', duration: 2 });
-    },
-    onError: (err: Error) => {
-      notifApi.error({ message: 'Action failed', description: err.message, duration: 5 });
-    },
-  });
-
-  const activityWorkflowQuery = useQuery<SectionWorkflowState>({
-    queryKey: ['activityWorkflow', activityId],
-    queryFn: () => fetchActivityWorkflowState(activityId),
-    staleTime: 30_000,
-  });
-
   const activity = activityQuery.data;
-  const activityWorkflow = activityWorkflowQuery.data;
-
-  // Available actions are determined by the activity's own workflow state
-  const availableActions = activityWorkflow?.availableActions ?? [];
-  const currentStateCode = activityWorkflow?.currentStateCode ?? 'DRAFT';
-  const isTerminal       = activityWorkflow?.isTerminal ?? false;
+  const isTerminal = activity?.status === 'AUTHENTICATED';
 
   const startEditing = () => {
     if (!activity) return;
@@ -404,85 +404,6 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
               )}
             </div>
 
-            {/* ── Activity-level workflow actions ────────────────────────── */}
-            {!isTerminal && availableActions.length > 0 && (
-              <div>
-                <Divider orientation="left" orientationMargin={0}
-                  style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
-                  Workflow
-                </Divider>
-                <Tag style={{ marginBottom: 10, fontSize: 12 }}
-                  color={
-                    currentStateCode === 'DRAFT' ? 'default' :
-                    currentStateCode === 'SUBMITTED_FOR_VERIFICATION' ? 'blue' :
-                    currentStateCode === 'VERIFIED' ? 'cyan' :
-                    currentStateCode === 'SENT_BACK_TO_DYCE' ? 'orange' :
-                    currentStateCode === 'SENT_BACK_TO_NODAL' ? 'orange' : 'default'
-                  }
-                >
-                  {STATUS_LABELS[currentStateCode] ?? currentStateCode.replace(/_/g, ' ')}
-                </Tag>
-                <Space direction="vertical" style={{ width: '100%' }} size={8}>
-                  {availableActions.includes('submit') && (
-                    <Button type="primary" icon={<SendOutlined />} block
-                      loading={activityWorkflowMutation.isPending}
-                      onClick={() => activityWorkflowMutation.mutate({ action: 'submit' })}>
-                      Submit for Verification
-                    </Button>
-                  )}
-                  {availableActions.includes('resubmit') && (
-                    <Button icon={<SendOutlined />} block
-                      loading={activityWorkflowMutation.isPending}
-                      onClick={() => activityWorkflowMutation.mutate({ action: 'resubmit' })}>
-                      Resubmit
-                    </Button>
-                  )}
-                  {availableActions.includes('verify') && (
-                    <Button type="primary" icon={<CheckCircleOutlined />} block
-                      loading={activityWorkflowMutation.isPending}
-                      onClick={() => activityWorkflowMutation.mutate({ action: 'verify' })}>
-                      Submit for Authentication
-                    </Button>
-                  )}
-                  {availableActions.includes('re_verify') && (
-                    <Button icon={<CheckCircleOutlined />} block
-                      loading={activityWorkflowMutation.isPending}
-                      onClick={() => activityWorkflowMutation.mutate({ action: 're-verify' })}>
-                      Re-verify
-                    </Button>
-                  )}
-                  {availableActions.includes('authenticate') && (
-                    <Popconfirm
-                      title="Authenticate this activity?"
-                      description="Authentication is irreversible."
-                      okText="Authenticate" cancelText="Cancel"
-                      onConfirm={() => activityWorkflowMutation.mutate({ action: 'authenticate' })}>
-                      <Button type="primary" icon={<SafetyOutlined />} block
-                        loading={activityWorkflowMutation.isPending}>
-                        Authenticate
-                      </Button>
-                    </Popconfirm>
-                  )}
-                  {availableActions.includes('send_back') && (
-                    <Button danger icon={<SendOutlined />} block
-                      loading={activityWorkflowMutation.isPending}
-                      onClick={() => activityWorkflowMutation.mutate({ action: 'send-back' })}>
-                      Send Back
-                    </Button>
-                  )}
-                </Space>
-              </div>
-            )}
-            {isTerminal && (
-              <div>
-                <Divider orientation="left" orientationMargin={0}
-                  style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 10px' }}>
-                  Workflow
-                </Divider>
-                <Tag color="purple" style={{ fontSize: 12 }}>Authenticated</Tag>
-              </div>
-            )}
-
             {/* Records are shown as tree children — expand the activity node in the left tree. */}
           </Space>
         )}
@@ -535,30 +456,134 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onStatusChan
       <Modal
         title="Add Record"
         open={addRecordOpen}
-        onOk={() => createRecordMutation.mutate(newRecordName)}
-        onCancel={() => { setAddRecordOpen(false); setNewRecordName(''); }}
+        onOk={() => createRecordMutation.mutate()}
+        okButtonProps={{
+          disabled: (activity?.activityTypeCode === 'UTILITY_SHIFTING' || activity?.activityTypeCode === 'DRAWING_APPROVAL') && !newRecordSubtype,
+        }}
+        onCancel={() => {
+          setAddRecordOpen(false);
+          setNewRecordName('');
+          setNewRecordSubtype(undefined);
+          setNewRecordMetadata({});
+        }}
         okText="Add"
         confirmLoading={createRecordMutation.isPending}
         destroyOnClose
+        width={520}
       >
         <Form layout="vertical" style={{ marginTop: 16 }}>
+          {/* Utility Shifting: utility type is the primary discriminator */}
+          {activity?.activityTypeCode === 'UTILITY_SHIFTING' && (
+            <Form.Item
+              label="Utility Type"
+              required
+              extra="Determines which fields appear in the progress form"
+            >
+              <Select
+                autoFocus
+                placeholder="Select utility type…"
+                style={{ width: '100%' }}
+                value={newRecordSubtype}
+                onChange={(v) => setNewRecordSubtype(v as string)}
+                options={[
+                  { value: 'OVERHEAD_LINE',  label: 'Overhead Line (OHT)' },
+                  { value: 'WATER_PIPELINE', label: 'Water Pipeline' },
+                  { value: 'NALA',           label: 'Nala / Drainage Channel' },
+                  { value: 'TELECOM_CABLE',  label: 'Telecom / Fibre Cable' },
+                  { value: 'GAS_PIPELINE',   label: 'Gas Pipeline' },
+                ]}
+              />
+            </Form.Item>
+          )}
+
+          {/* Drawing Approval: drawing type determines the form */}
+          {activity?.activityTypeCode === 'DRAWING_APPROVAL' && (
+            <Form.Item
+              label="Drawing Type"
+              required
+              extra="Determines the approval chain and form for this drawing"
+            >
+              <Select
+                autoFocus
+                placeholder="Select drawing type…"
+                style={{ width: '100%' }}
+                showSearch
+                optionFilterProp="label"
+                value={newRecordSubtype}
+                onChange={(v) => setNewRecordSubtype(v as string)}
+                options={[
+                  { value: 'ESP',                   label: 'ESP — Earth Slope Profile' },
+                  { value: 'SIP',                   label: 'SIP — Section Improvement Plan' },
+                  { value: 'ST_LT_TOC',             label: 'ST / LT / TOC' },
+                  { value: 'SWR',                   label: 'SWR — Site Working Report' },
+                  { value: 'SWRD',                  label: 'SWRD' },
+                  { value: 'FAT',                   label: 'FAT — Final Alignment Transect' },
+                  { value: 'SAT',                   label: 'SAT — Site Assessment Template' },
+                  { value: 'RSP',                   label: 'RSP — Route Survey Plan' },
+                  { value: 'CABLE_ROUTE_PLAN',      label: 'Cable Route Plan' },
+                  { value: 'LOP',                   label: 'LOP — Layout of Project' },
+                  { value: 'PROJECT_SHEET',         label: 'Project Sheet' },
+                  { value: 'GAD_MEGA',              label: 'GAD — Mega Bridge' },
+                  { value: 'GAD_MAJOR',             label: 'GAD — Major Bridge' },
+                  { value: 'GAD_MINOR',             label: 'GAD — Minor Bridge' },
+                  { value: 'LWR_PLAN',              label: 'LWR Plan' },
+                  { value: 'CURVE_DETAILS',         label: 'Curve Details' },
+                  { value: 'GRADE_CONDONATION',     label: 'Grade Condonation' },
+                  { value: 'BRIDGE_MINOR_SANCTION', label: 'Bridge Minor Sanction' },
+                  { value: 'YARD_DISPENSATION',     label: 'Yard Dispensation' },
+                  { value: 'YARD_MINOR_SANCTION',   label: 'Yard Minor Sanction' },
+                  { value: 'STATION_BUILDING_GAD',  label: 'Station Building GAD' },
+                  { value: 'FOB_GAD_TAD',           label: 'FOB GAD / TAD' },
+                  { value: 'TUNNEL_DESIGN',         label: 'Tunnel Design' },
+                ]}
+              />
+            </Form.Item>
+          )}
+
           <Form.Item
             label="Record name"
-            extra="A short label to identify this record, e.g. 'Ambala Village' or 'Section 3'"
+            extra={
+              activity?.activityTypeCode === 'UTILITY_SHIFTING'
+                ? 'Optional — e.g. "OHT Km 134", "Water Main Section A"'
+                : activity?.activityTypeCode === 'DRAWING_APPROVAL'
+                ? 'Optional — e.g. "ESP Km 132–145", "GAD Minor Bridge"'
+                : 'A short label to identify this record, e.g. "Ambala Village" or "Section 3"'
+            }
           >
             <Input
-              autoFocus
-              placeholder="e.g. Ambala Village, Section 3…"
+              autoFocus={activity?.activityTypeCode !== 'UTILITY_SHIFTING' && activity?.activityTypeCode !== 'DRAWING_APPROVAL'}
+              placeholder={
+                activity?.activityTypeCode === 'UTILITY_SHIFTING'
+                  ? 'e.g. OHT Km 134, Water Main A…'
+                  : activity?.activityTypeCode === 'DRAWING_APPROVAL'
+                  ? 'e.g. ESP Km 132–145, GAD Minor Bridge…'
+                  : 'e.g. Ambala Village, Section 3…'
+              }
               value={newRecordName}
               onChange={(e) => setNewRecordName(e.target.value)}
               onPressEnter={() => {
-                if (!createRecordMutation.isPending) {
-                  createRecordMutation.mutate(newRecordName);
-                }
+                if (!createRecordMutation.isPending) createRecordMutation.mutate();
               }}
             />
           </Form.Item>
         </Form>
+
+        {/* LA / FC: scope details saved to activity metadataJson */}
+        {activity && activity.activityTypeCode !== 'UTILITY_SHIFTING' && activity.activityTypeCode !== 'DRAWING_APPROVAL' && (
+          <>
+            <Divider orientation="left" orientationMargin={0}
+              style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', margin: '4px 0 12px' }}>
+              {typeLabel} details
+            </Divider>
+            <Form layout="vertical">
+              <ActivityMetadataForm
+                activityTypeCode={activity.activityTypeCode}
+                values={{ ...(activity.metadataJson as Record<string, unknown> ?? {}), ...newRecordMetadata }}
+                onChange={(key, value) => setNewRecordMetadata((prev) => ({ ...prev, [key]: value }))}
+              />
+            </Form>
+          </>
+        )}
       </Modal>
     </div>
   );

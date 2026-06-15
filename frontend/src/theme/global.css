@@ -75,6 +75,21 @@ button {
   width: 100%;
 }
 
+/* ── Project tree: selected node highlight ────────────────────────────────── */
+/* Override the default blue wash so text colours remain readable */
+.pia-project-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+  background: color-mix(in srgb, var(--ant-color-primary) 10%, transparent) !important;
+  border-left: 3px solid var(--ant-color-primary);
+  border-radius: 6px !important;
+}
+
+/* Fallback for browsers that don't support color-mix (Safari <16.4, Firefox <113) */
+@supports not (color: color-mix(in srgb, red 10%, white)) {
+  .pia-project-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+    background: rgba(22, 119, 255, 0.10) !important;
+  }
+}
+
 /* No-print utility — hide elements when printing */
 @media print {
   .no-print {

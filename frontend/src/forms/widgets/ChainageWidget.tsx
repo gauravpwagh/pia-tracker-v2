@@ -11,6 +11,7 @@
  * on the form definition; this widget handles only the UX decomposition.
  */
 
+import { useEffect, useState } from 'react';
 import { InputNumber, Space, Typography } from 'antd';
 import type { WidgetProps } from '@rjsf/utils';
 
@@ -39,18 +40,27 @@ export function ChainageWidget({
   required,
   schema,
 }: WidgetProps) {
-  const { km, m } = parse(typeof value === 'string' ? value : undefined);
+  const initial = parse(typeof value === 'string' ? value : undefined);
+  const [km, setKm] = useState<number | null>(initial.km);
+  const [m, setM] = useState<number | null>(initial.m);
   const title = (schema.title as string | undefined) ?? label;
 
-  const handleKm = (km: number | null) => {
-    const parsed = parse(typeof value === 'string' ? value : undefined);
-    onChange(format(km, parsed.m));
+  // Keep local state in sync when value is reset externally (e.g. form initialisation)
+  useEffect(() => {
+    const p = parse(typeof value === 'string' ? value : undefined);
+    setKm(p.km);
+    setM(p.m);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const emit = (newKm: number | null, newM: number | null) => {
+    const str = format(newKm, newM);
+    // Emit undefined when incomplete so RJSF treats the field as empty (not '')
+    onChange(str || undefined);
   };
 
-  const handleM = (m: number | null) => {
-    const parsed = parse(typeof value === 'string' ? value : undefined);
-    onChange(format(parsed.km, m));
-  };
+  const handleKm = (v: number | null) => { setKm(v); emit(v, m); };
+  const handleM  = (v: number | null) => { setM(v);  emit(km, v); };
 
   return (
     <div>
