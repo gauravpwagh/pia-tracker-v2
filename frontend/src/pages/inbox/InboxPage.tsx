@@ -50,7 +50,7 @@ function useColumns(t: ReturnType<typeof useTranslation>['t']): ColumnsType<Inbo
       dataIndex: 'projectName',
       key: 'projectName',
       render: (name: string, row: InboxItem) => (
-        <a onClick={() => navigate(`/records/${row.recordId}/edit`)}>
+        <a onClick={() => navigate(`/records/${row.recordId}/edit`, { state: { returnPath: '/inbox' } })}>
           {name}
         </a>
       ),

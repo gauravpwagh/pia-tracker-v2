@@ -278,7 +278,7 @@ export function RecordDetailPanel({
               size="small"
               type="primary"
               icon={<EditOutlined />}
-              onClick={() => navigate(`/records/${recordId}/edit`)}
+              onClick={() => navigate(`/records/${recordId}/edit`, { state: { returnPath: window.location.pathname } })}
               style={{ flexShrink: 0 }}
             >
               Edit form

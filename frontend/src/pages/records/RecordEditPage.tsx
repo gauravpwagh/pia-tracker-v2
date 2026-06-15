@@ -753,6 +753,15 @@ export default function RecordEditPage() {
 
       {/* ── Header (fixed height, never scrolls) ── */}
       <div style={{ flexShrink: 0, padding: '12px 24px 0', borderBottom: '1px solid var(--colorBorder)', background: 'var(--colorBgContainer)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <Button
+            size="small"
+            icon={<LeftOutlined />}
+            onClick={() => navigate(returnPath)}
+          >
+            {returnPath === '/inbox' ? 'Inbox' : 'Projects'}
+          </Button>
+        </div>
         <Breadcrumb
           items={[
             {
