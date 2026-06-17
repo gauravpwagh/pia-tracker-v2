@@ -43,18 +43,22 @@ import type { ColumnsType } from 'antd/es/table';
 import type { DataNode } from 'antd/es/tree';
 import {
   AppstoreOutlined,
-  AuditOutlined,
-  BranchesOutlined,
-  ClusterOutlined,
   ExportOutlined,
-  FileTextOutlined,
-  FolderOutlined,
-  HomeOutlined,
   MoreOutlined,
   PlusOutlined,
-  ThunderboltOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
+import {
+  IconBuildingBridge2,
+  IconFileDescription,
+  IconFileInvoice,
+  IconHomeCog,
+  IconMapPinDollar,
+  IconRoute,
+  IconRuler2,
+  IconTools,
+  IconTrees,
+} from '@tabler/icons-react';
 import {
   fetchActivities,
   fetchProjects,
@@ -114,11 +118,20 @@ const ACTIVITY_STATUS_LABELS: Record<string, string> = {
 
 // ── Activity type → icon / label ─────────────────────────────────────────────
 
+const TABLER_SIZE = 15;
+
+/** Wraps a Tabler icon so Ant Design Tree/Menu treats it like an anticon element. */
+function treeIcon(icon: React.ReactNode) {
+  return <span className="anticon">{icon}</span>;
+}
+
 const ACTIVITY_TYPE_ICONS: Record<string, React.ReactNode> = {
-  LAND_ACQUISITION: <HomeOutlined />,
-  FOREST_CLEARANCE: <ClusterOutlined />,
-  UTILITY_SHIFTING: <ThunderboltOutlined />,
-  DRAWING_APPROVAL: <AuditOutlined />,
+  LAND_ACQUISITION:       treeIcon(<IconMapPinDollar size={TABLER_SIZE} />),
+  FOREST_CLEARANCE:       treeIcon(<IconTrees size={TABLER_SIZE} />),
+  UTILITY_SHIFTING:       treeIcon(<IconTools size={TABLER_SIZE} />),
+  DRAWING_APPROVAL:       treeIcon(<IconRuler2 size={TABLER_SIZE} />),
+  TENDER_PACKAGING:       treeIcon(<IconFileInvoice size={TABLER_SIZE} />),
+  TEMPORARY_OFFICE_SPACE: treeIcon(<IconHomeCog size={TABLER_SIZE} />),
 };
 
 const ACTIVITY_TYPE_LABELS: Record<string, string> = {
@@ -487,7 +500,7 @@ export default function ProjectsPage() {
 
     const groupChildren: DataNode[] = Object.entries(byType).map(([typeCode, typeActivities]) => ({
       key: actGroupNodeKey(project.id, typeCode),
-      icon: ACTIVITY_TYPE_ICONS[typeCode] ?? <BranchesOutlined />,
+      icon: ACTIVITY_TYPE_ICONS[typeCode] ?? treeIcon(<IconRoute size={TABLER_SIZE} />),
       title: <ActivityGroupTitle typeCode={typeCode} count={typeActivities.length} />,
       isLeaf: false,
       children: typeActivities.map((activity) => {
@@ -495,7 +508,7 @@ export default function ProjectsPage() {
         const loadedRecs   = recordMap[activity.id];
         const recChildren: DataNode[] = (loadedRecs ?? []).map((r, idx) => ({
           key:    recordNodeKey(r.id),
-          icon:   <FileTextOutlined style={{ fontSize: 11 }} />,
+          icon:   treeIcon(<IconFileDescription size={12} />),
           title:  <RecordNodeTitle record={r} index={idx} />,
           isLeaf: true,
         }));
@@ -511,7 +524,7 @@ export default function ProjectsPage() {
 
     return {
       key: projectNodeKey(project.id),
-      icon: <FolderOutlined />,
+      icon: treeIcon(<IconBuildingBridge2 size={TABLER_SIZE} />),
       title: (
         <ProjectNodeTitle
           project={project}

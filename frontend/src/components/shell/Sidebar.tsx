@@ -4,14 +4,21 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import {
-  HomeOutlined,
-  InboxOutlined,
-  AppstoreOutlined,
-  BarChartOutlined,
-  SettingOutlined,
-} from '@ant-design/icons';
+  IconBuildingBridge2,
+  IconInbox,
+  IconLayoutDashboard,
+  IconReportAnalytics,
+  IconShieldCog,
+} from '@tabler/icons-react';
 import { useAuthStore } from '@stores/authStore';
 import { fetchInbox } from '@api/inbox';
+
+const NAV_ICON_SIZE = 16;
+
+/** Wraps a Tabler icon so Ant Design Menu treats it like an anticon element. */
+function navIcon(icon: React.ReactNode) {
+  return <span className="anticon">{icon}</span>;
+}
 
 /**
  * Sidebar — shell left nav.
@@ -33,7 +40,6 @@ export function Sidebar() {
     queryFn: fetchInbox,
     staleTime: 60_000,
     refetchOnWindowFocus: true,
-    // Only fetch when a user is logged in
     enabled: !!currentUser,
   });
   const awaitingCount = inboxData?.awaiting.length ?? 0;
@@ -52,10 +58,10 @@ export function Sidebar() {
   // ── Menu items ─────────────────────────────────────────────────────────────
   const items = useMemo(() => {
     const base = [
-      { key: 'dashboard', icon: <HomeOutlined />, label: t('sidebar.dashboard') },
+      { key: 'dashboard', icon: navIcon(<IconLayoutDashboard size={NAV_ICON_SIZE} />), label: t('sidebar.dashboard') },
       {
         key: 'inbox',
-        icon: <InboxOutlined />,
+        icon: navIcon(<IconInbox size={NAV_ICON_SIZE} />),
         label: (
           <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             {t('sidebar.inbox')}
@@ -63,8 +69,8 @@ export function Sidebar() {
           </span>
         ),
       },
-      { key: 'projects', icon: <AppstoreOutlined />, label: t('sidebar.projects') },
-      { key: 'reports', icon: <BarChartOutlined />, label: t('sidebar.reports') },
+      { key: 'projects', icon: navIcon(<IconBuildingBridge2 size={NAV_ICON_SIZE} />), label: t('sidebar.projects') },
+      { key: 'reports', icon: navIcon(<IconReportAnalytics size={NAV_ICON_SIZE} />), label: t('sidebar.reports') },
     ];
 
     if (isAdmin) {
@@ -72,7 +78,7 @@ export function Sidebar() {
         { type: 'divider' } as never,
         {
           key: 'admin',
-          icon: <SettingOutlined />,
+          icon: navIcon(<IconShieldCog size={NAV_ICON_SIZE} />),
           label: t('sidebar.admin'),
           children: [
             { key: 'admin/users', label: t('sidebar.adminUsers') },
