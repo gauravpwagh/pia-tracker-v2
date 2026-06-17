@@ -11,6 +11,12 @@ interface AttachmentRepository : JpaRepository<Attachment, UUID> {
         entityId: UUID,
     ): List<Attachment>
 
+    /** Stale PENDING rows — upload was initiated but never confirmed (tab closed, etc.). */
+    fun findByScanStatusAndCreatedAtBefore(
+        scanStatus: String,
+        cutoff: java.time.Instant,
+    ): List<Attachment>
+
     /** All non-deleted attachments uploaded by a user on a specific entity. */
     fun findByEntityTypeAndEntityIdAndUploadedByUserId(
         entityType: String,

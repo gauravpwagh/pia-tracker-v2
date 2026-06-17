@@ -1,44 +1,59 @@
 /**
- * AttachmentWidget — RJSF custom widget stub for file attachments.
+ * AttachmentWidget — RJSF custom widget for file attachments.
  *
- * Phase 1.9: renders a disabled "Attach file" button as a placeholder.
- * Real MinIO upload + ClamAV integration ships in Phase 2.1.
+ * Schema field type: `string` with `"ui:widget": "attachment"`.
  *
- * The schema field type is `string` with `"ui:widget": "attachment"`.
- * When an attachment is uploaded, the widget stores the MinIO object key
- * (a UUID string) as the field value.
+ * Supported ui:options:
+ *   accept       — comma-separated MIME types (defaults to all allowed types)
+ *   uploadLabel  — button label (default: "Attach file")
+ *   uploadHint   — hint below button (e.g. "PDF · KMZ · max 10 GB")
+ *   entityType   — required: entity type for the attachment API
+ *   entityId     — required: entity UUID for the attachment API
  */
 
-import { Button, Typography } from 'antd';
-import { PaperClipOutlined } from '@ant-design/icons';
+import { Typography } from 'antd';
 import type { WidgetProps } from '@rjsf/utils';
+import { AttachmentPanel, ACCEPT_ALL } from '@components/attachments/AttachmentPanel';
 
 const { Text } = Typography;
 
-export function AttachmentWidget({ value, label, schema, required }: WidgetProps) {
+export function AttachmentWidget({ label, schema, required, uiSchema, formContext }: WidgetProps) {
   const title = (schema.title as string | undefined) ?? label;
+  const opts = (uiSchema?.['ui:options'] ?? {}) as Record<string, string>;
+
+  // entityType / entityId come from ui:options or formContext (set by the form renderer)
+  const entityType =
+    opts.entityType ?? (formContext as Record<string, string> | undefined)?.entityType ?? '';
+  const entityId =
+    opts.entityId ?? (formContext as Record<string, string> | undefined)?.entityId ?? '';
+
+  const accept = opts.accept ?? ACCEPT_ALL;
+  const uploadLabel = opts.uploadLabel ?? 'Attach file';
+  const uploadHint = opts.uploadHint;
 
   return (
     <div>
       {title && (
-        <div style={{ marginBottom: 4 }}>
+        <div style={{ marginBottom: 6 }}>
           <Text strong>
             {title}
             {required && <Text type="danger"> *</Text>}
           </Text>
         </div>
       )}
-      {value ? (
-        <Text type="secondary" style={{ fontFamily: 'monospace' }}>
-          <PaperClipOutlined /> {String(value)}
-        </Text>
+      {entityId ? (
+        <AttachmentPanel
+          entityType={entityType}
+          entityId={entityId}
+          canUpload
+          accept={accept}
+          uploadLabel={uploadLabel}
+          uploadHint={uploadHint}
+        />
       ) : (
-        <Button icon={<PaperClipOutlined />} disabled>
-          Attach file
-          <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-            (available in a later phase)
-          </Text>
-        </Button>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          Save the form first to attach files.
+        </Text>
       )}
     </div>
   );

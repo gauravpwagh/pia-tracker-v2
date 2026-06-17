@@ -35,10 +35,12 @@ export interface RjsfFormProps {
   onSubmit?: (data: Record<string, unknown>) => void;
   disabled?: boolean;
   readonly?: boolean;
+  /** Passed through to every widget via RJSF formContext (e.g. entityType, entityId). */
+  formContext?: Record<string, unknown>;
 }
 
 export const RjsfForm = forwardRef<RjsfFormHandle, RjsfFormProps>(function RjsfForm(
-  { schema, uiSchema, formData, onChange, onSubmit, disabled, readonly },
+  { schema, uiSchema, formData, onChange, onSubmit, disabled, readonly, formContext },
   ref,
 ) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -77,6 +79,7 @@ export const RjsfForm = forwardRef<RjsfFormHandle, RjsfFormProps>(function RjsfF
       templates={{ ObjectFieldTemplate: PiaObjectFieldTemplate }}
       onChange={handleChange}
       onSubmit={handleSubmit}
+      formContext={formContext}
       liveValidate={false}
       disabled={disabled}
       readonly={readonly}

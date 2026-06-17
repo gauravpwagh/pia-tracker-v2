@@ -54,7 +54,14 @@ import { fetchWorkflowState, performWorkflowAction, type SectionWorkflowState, t
 import { useAuthStore } from '@stores/authStore';
 import { CommentPanel } from '@components/comments/CommentPanel';
 import { HistoryPanel } from '@components/comments/HistoryPanel';
-import { AttachmentPanel } from '@components/attachments/AttachmentPanel';
+import {
+  AttachmentPanel,
+  ACCEPT_DOCUMENTS,
+  ACCEPT_GEOGRAPHIC,
+  ACCEPT_IMAGES,
+  ACCEPT_VIDEO,
+  ACCEPT_ALL,
+} from '@components/attachments/AttachmentPanel';
 import { ActivityMetadataForm, ActivityMetadataView } from './ActivityMetadataForm';
 
 const { Text } = Typography;
@@ -96,6 +103,53 @@ const DIVIDER_STYLE: React.CSSProperties = {
   letterSpacing: '0.05em',
 };
 
+// ── Per-activity-type attachment config ───────────────────────────────────────
+
+interface AttachmentConfig {
+  accept: string;
+  uploadHint: string;
+}
+
+const ATTACHMENT_CONFIG: Record<string, AttachmentConfig> = {
+  LAND_ACQUISITION: {
+    accept: ACCEPT_DOCUMENTS,
+    uploadHint: 'PDF · Word · Excel · max 10 GB',
+  },
+  FOREST_CLEARANCE: {
+    accept: [ACCEPT_DOCUMENTS, ACCEPT_IMAGES, ACCEPT_GEOGRAPHIC].join(','),
+    uploadHint: 'PDF · Word · KMZ/KML · GeoTIFF · max 10 GB',
+  },
+  UTILITY_SHIFTING: {
+    accept: [ACCEPT_DOCUMENTS, ACCEPT_IMAGES].join(','),
+    uploadHint: 'PDF · Word · Images · max 10 GB',
+  },
+  DRAWING_APPROVAL: {
+    accept: [ACCEPT_DOCUMENTS, ACCEPT_IMAGES, ACCEPT_GEOGRAPHIC].join(','),
+    uploadHint: 'PDF · Word · DWG/GeoTIFF · KMZ · max 10 GB',
+  },
+  TENDER_PACKAGING: {
+    accept: ACCEPT_DOCUMENTS,
+    uploadHint: 'PDF · Word · Excel · max 10 GB',
+  },
+  TEMPORARY_OFFICE_SPACE: {
+    accept: [ACCEPT_DOCUMENTS, ACCEPT_IMAGES].join(','),
+    uploadHint: 'PDF · Word · Images · max 10 GB',
+  },
+};
+
+const DGPS_TYPES = [ACCEPT_GEOGRAPHIC, ACCEPT_IMAGES, ACCEPT_VIDEO].join(',');
+const DEFAULT_ATTACHMENT_CONFIG: AttachmentConfig = {
+  accept: ACCEPT_ALL,
+  uploadHint: 'PDF · KMZ · GeoTIFF · Video · max 10 GB',
+};
+
+function attachmentConfigFor(activityTypeCode: string): AttachmentConfig {
+  if (activityTypeCode.startsWith('DGPS') || activityTypeCode.includes('SURVEY')) {
+    return { accept: DGPS_TYPES, uploadHint: 'KMZ · KML · GeoTIFF · CSV · Video · max 10 GB' };
+  }
+  return ATTACHMENT_CONFIG[activityTypeCode] ?? DEFAULT_ATTACHMENT_CONFIG;
+}
+
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
 interface RecordDetailPanelProps {
@@ -107,6 +161,7 @@ interface RecordDetailPanelProps {
 
 export function RecordDetailPanel({
   recordId,
+  activityTypeCode,
   canEdit,
   onClose,
 }: RecordDetailPanelProps) {
@@ -551,6 +606,7 @@ export function RecordDetailPanel({
                 entityId={recordId}
                 canUpload={currentUser?.permissions.includes('ATTACHMENT.UPLOAD.OWN_RECORDS')}
                 currentUserId={currentUser?.userId}
+                {...attachmentConfigFor(activityTypeCode)}
               />
             </div>
 

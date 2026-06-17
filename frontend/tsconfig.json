@@ -29,7 +29,8 @@
       "@api/*": ["./src/api/*"],
       "@lib/*": ["./src/lib/*"],
       "@theme/*": ["./src/theme/*"],
-      "@stores/*": ["./src/stores/*"]
+      "@stores/*": ["./src/stores/*"],
+      "@utils/*": ["./src/utils/*"]
     },
 
     "types": ["vite/client", "vitest/globals"]

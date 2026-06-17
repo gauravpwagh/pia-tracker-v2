@@ -1,6 +1,7 @@
 package `in`.gov.ir.pia.config
 
 import io.minio.MinioClient
+import io.minio.PiaMinioClient
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -19,10 +20,13 @@ data class MinioProperties(
 @EnableConfigurationProperties(MinioProperties::class)
 class MinioConfig {
     @Bean
-    fun minioClient(props: MinioProperties): MinioClient =
-        MinioClient
-            .builder()
-            .endpoint(props.endpoint)
-            .credentials(props.accessKey, props.secretKey)
-            .build()
+    fun minioClient(props: MinioProperties): PiaMinioClient {
+        val base =
+            MinioClient
+                .builder()
+                .endpoint(props.endpoint)
+                .credentials(props.accessKey, props.secretKey)
+                .build()
+        return PiaMinioClient(base)
+    }
 }

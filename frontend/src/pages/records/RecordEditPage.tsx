@@ -862,6 +862,7 @@ export default function RecordEditPage() {
                   : formData
               }
               onChange={handleFormChange}
+              formContext={{ entityType: 'ACTIVITY_RECORD', entityId: recordId ?? '' }}
               disabled={
                 autosaveStatus === 'conflict' ||
                 activeSectionState?.isTerminal === true

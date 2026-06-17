@@ -44,9 +44,15 @@ class Attachment(
     /** MinIO object key in the `pia-attachments` bucket. */
     @Column(name = "object_key", nullable = false, length = 1024)
     val objectKey: String,
-    /** CLEAN | INFECTED | PENDING */
+    /** PENDING | SCANNING | CLEAN | INFECTED | SCAN_FAILED | EXEMPT */
     @Column(name = "scan_status", nullable = false, length = 16)
-    var scanStatus: String = "CLEAN",
+    var scanStatus: String = "PENDING",
+    /** SHA-256 hex digest stored for EXEMPT files (large video). */
+    @Column(name = "sha256", length = 64)
+    var sha256: String? = null,
+    /** MinIO multipart upload ID; cleared on completeMultipart. */
+    @Column(name = "multipart_upload_id", length = 128)
+    var multipartUploadId: String? = null,
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: Instant = Instant.now(),
     @Column(name = "is_deleted", nullable = false)

@@ -46,8 +46,7 @@ spring:
     out-of-order: false
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 100MB
+      enabled: false
   mvc:
     problemdetails:
       enabled: true
@@ -113,9 +112,11 @@ pia:
     port: ${CLAMAV_PORT:3310}
     timeout-ms: 30000
   attachments:
-    max-bytes: 50331648 # 48 MB
-    allowed-content-types:
-      - application/pdf
+    max-bytes: 10737418240        # 10 GB hard ceiling
+    multipart-threshold-bytes: 104857600   # files > 100 MB use multipart
+    multipart-part-size-bytes: 104857600   # 100 MB per part
+    presign-expiry-minutes: 60
+    scan-exempt-above-bytes: 2147483648    # 2 GB → skip ClamAV (drone video)
   rate-limits:
     default-per-minute: 600
     auth-per-minute: 5
