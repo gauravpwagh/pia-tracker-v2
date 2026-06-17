@@ -80,22 +80,27 @@ class PanIndiaDashboardGateIntegrationTest {
 
         // Users seeded by V001_004
         val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_C_USER_ID: UUID   = UUID.fromString("11111111-1111-1111-1111-111111111102")
-        val CE_C_USER_ID: UUID    = UUID.fromString("11111111-1111-1111-1111-111111111103")
-        val DYCE_1_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111104")
-        val DYCE_2_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111105")
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
+        val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
+        val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
+        val DYCE_2_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111105")
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
+
     @Autowired lateinit var jdbc: JdbcTemplate
+
     @MockkBean lateinit var minioClient: MinioClient
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun loginAs(userId: UUID): List<String> {
-        val resp = restTemplate.postForEntity(
-            "/api/v1/auth/select-user", SelectUserRequest(userId), Void::class.java,
-        )
+        val resp =
+            restTemplate.postForEntity(
+                "/api/v1/auth/select-user",
+                SelectUserRequest(userId),
+                Void::class.java,
+            )
         assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
         return resp.headers["Set-Cookie"] ?: emptyList()
     }
@@ -106,10 +111,19 @@ class PanIndiaDashboardGateIntegrationTest {
         return h
     }
 
-    private fun <T> post(url: String, body: Any, cookies: List<String>, type: Class<T>) =
+    private fun <T> post(
+        url: String,
+        body: Any,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
 
-    private fun <T> get(url: String, cookies: List<String>, type: Class<T>) =
+    private fun <T> get(
+        url: String,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), type)
 
     // ── Gate test ─────────────────────────────────────────────────────────────
@@ -120,32 +134,52 @@ class PanIndiaDashboardGateIntegrationTest {
 
         // ── Step 1: Create two projects in NR zone ────────────────────────────
         val edgs = loginAs(EDGS_CI_USER_ID)
-        val cao  = loginAs(CAO_C_USER_ID)
-        val ce   = loginAs(CE_C_USER_ID)
+        val cao = loginAs(CAO_C_USER_ID)
+        val ce = loginAs(CE_C_USER_ID)
 
-        val project1 = post(
-            "/api/v1/projects",
-            CreateProjectRequest(name = "PAN India Gate Project Alpha ${UUID.randomUUID()}", zoneId = nrZoneId),
-            edgs, ProjectDetailResponse::class.java,
-        ).body!!
+        val project1 =
+            post(
+                "/api/v1/projects",
+                CreateProjectRequest(name = "PAN India Gate Project Alpha ${UUID.randomUUID()}", zoneId = nrZoneId),
+                edgs,
+                ProjectDetailResponse::class.java,
+            ).body!!
 
-        val project2 = post(
-            "/api/v1/projects",
-            CreateProjectRequest(name = "PAN India Gate Project Beta ${UUID.randomUUID()}", zoneId = nrZoneId),
-            edgs, ProjectDetailResponse::class.java,
-        ).body!!
+        val project2 =
+            post(
+                "/api/v1/projects",
+                CreateProjectRequest(name = "PAN India Gate Project Beta ${UUID.randomUUID()}", zoneId = nrZoneId),
+                edgs,
+                ProjectDetailResponse::class.java,
+            ).body!!
 
         // CAO/C allocates both
-        post("/api/v1/projects/${project1.id}/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID), cao, ProjectDetailResponse::class.java)
-        post("/api/v1/projects/${project2.id}/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID), cao, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/${project1.id}/allocate",
+            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            cao,
+            ProjectDetailResponse::class.java,
+        )
+        post(
+            "/api/v1/projects/${project2.id}/allocate",
+            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            cao,
+            ProjectDetailResponse::class.java,
+        )
 
         // CE/C sets up team on project 1
-        post("/api/v1/projects/${project1.id}/assign-dyce",
-            AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)), ce, ProjectDetailResponse::class.java)
-        post("/api/v1/projects/${project1.id}/designate-nodal",
-            DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID), ce, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/${project1.id}/assign-dyce",
+            AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
+        post(
+            "/api/v1/projects/${project1.id}/designate-nodal",
+            DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
 
         // ── Step 2: EDGS/C-I accesses PAN India dashboard ────────────────────
         val edgsResp = get("/api/v1/dashboard/pan-india", edgs, PanIndiaDashboardResponse::class.java)
@@ -190,8 +224,8 @@ class PanIndiaDashboardGateIntegrationTest {
         // ── Step 3: Numbers reconcile — sum of zones == PAN India totals ──────
         // Both are derived from zone_summary by the same cascade, so they must agree.
         val sumProjectsActive = body.zones.sumOf { it.projectsActive }
-        val sumSlaBreaches    = body.zones.sumOf { it.projectsWithSlaBreaches }
-        val sumDrawings       = body.zones.sumOf { it.totalDrawingsInApproval }
+        val sumSlaBreaches = body.zones.sumOf { it.projectsWithSlaBreaches }
+        val sumDrawings = body.zones.sumOf { it.totalDrawingsInApproval }
 
         assertThat(body.totalProjectsActive)
             .`as`("PAN India totalProjectsActive must equal sum of zone projectsActive")

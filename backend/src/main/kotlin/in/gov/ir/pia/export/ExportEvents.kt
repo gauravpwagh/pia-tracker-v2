@@ -7,4 +7,6 @@ import java.util.UUID
  * [ExportJobProcessor] listens with @TransactionalEventListener(AFTER_COMMIT) so
  * it only fires after the job row is visible to other transactions.
  */
-data class ExportJobCreatedEvent(val jobId: UUID)
+data class ExportJobCreatedEvent(
+    val jobId: UUID,
+)

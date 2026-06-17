@@ -92,29 +92,32 @@ class DrawingService(
         principal: PiaPrincipal,
     ): DrawingApproverListResponse {
         requireRecordAccess(recordId, principal)
-        val rows = jdbc.query(
-            """
-            SELECT da.id, da.approval_designation_code, COALESCE(d.name, da.approval_designation_code) AS designation_name,
-                   da.position, da.approved_on, da.remarks
-              FROM drawing_approvers da
-              LEFT JOIN designations d ON d.code = da.approval_designation_code
-             WHERE da.activity_record_id = ? AND NOT da.is_deleted
-             ORDER BY da.position
-            """.trimIndent(),
-            { rs, _ -> DrawingApproverResponse(
-                id                      = UUID.fromString(rs.getString("id")),
-                approvalDesignationCode = rs.getString("approval_designation_code"),
-                designationName         = rs.getString("designation_name"),
-                position                = rs.getInt("position"),
-                approvedOn              = rs.getDate("approved_on")?.toLocalDate(),
-                remarks                 = rs.getString("remarks"),
-            )},
-            recordId,
-        )
+        val rows =
+            jdbc.query(
+                """
+                SELECT da.id, da.approval_designation_code, COALESCE(d.name, da.approval_designation_code) AS designation_name,
+                       da.position, da.approved_on, da.remarks
+                  FROM drawing_approvers da
+                  LEFT JOIN designations d ON d.code = da.approval_designation_code
+                 WHERE da.activity_record_id = ? AND NOT da.is_deleted
+                 ORDER BY da.position
+                """.trimIndent(),
+                { rs, _ ->
+                    DrawingApproverResponse(
+                        id = UUID.fromString(rs.getString("id")),
+                        approvalDesignationCode = rs.getString("approval_designation_code"),
+                        designationName = rs.getString("designation_name"),
+                        position = rs.getInt("position"),
+                        approvedOn = rs.getDate("approved_on")?.toLocalDate(),
+                        remarks = rs.getString("remarks"),
+                    )
+                },
+                recordId,
+            )
         return DrawingApproverListResponse(
-            recordId    = recordId,
+            recordId = recordId,
             allApproved = rows.isNotEmpty() && rows.all { it.approvedOn != null },
-            approvers   = rows,
+            approvers = rows,
         )
     }
 
@@ -155,25 +158,26 @@ class DrawingService(
 
         auditLogWriter.write(
             actorUserId = actor.userId,
-            action      = if (request.approvedOn != null) "DRAWING.APPROVAL_RECORDED" else "DRAWING.APPROVAL_CLEARED",
-            entityType  = "DRAWING_APPROVER",
-            entityId    = approverId,
+            action = if (request.approvedOn != null) "DRAWING.APPROVAL_RECORDED" else "DRAWING.APPROVAL_CLEARED",
+            entityType = "DRAWING_APPROVER",
+            entityId = approverId,
         )
 
-        val designationName = jdbc.queryForObject(
-            "SELECT COALESCE(name, ?) FROM designations WHERE code = ?",
-            String::class.java,
-            approver.approvalDesignationCode,
-            approver.approvalDesignationCode,
-        ) ?: approver.approvalDesignationCode
+        val designationName =
+            jdbc.queryForObject(
+                "SELECT COALESCE(name, ?) FROM designations WHERE code = ?",
+                String::class.java,
+                approver.approvalDesignationCode,
+                approver.approvalDesignationCode,
+            ) ?: approver.approvalDesignationCode
 
         return DrawingApproverResponse(
-            id                       = approver.id,
-            approvalDesignationCode  = approver.approvalDesignationCode,
-            designationName          = designationName,
-            position                 = approver.position,
-            approvedOn               = request.approvedOn,
-            remarks                  = request.remarks,
+            id = approver.id,
+            approvalDesignationCode = approver.approvalDesignationCode,
+            designationName = designationName,
+            position = approver.position,
+            approvedOn = request.approvedOn,
+            remarks = request.remarks,
         )
     }
 
@@ -197,10 +201,10 @@ class DrawingService(
         formDef.defaultApproverDesignations.forEachIndexed { index, designationCode ->
             drawingApproverRepository.save(
                 DrawingApprover(
-                    activityRecordId        = recordId,
+                    activityRecordId = recordId,
                     approvalDesignationCode = designationCode,
-                    position                = index,
-                )
+                    position = index,
+                ),
             )
         }
     }
@@ -219,40 +223,46 @@ class DrawingService(
         requireRecordAccess(recordId, actor)
         requireApprovalRoleDesignation(request.designationCode)
 
-        val position = request.position
-            ?: (jdbc.queryForObject(
-                "SELECT COALESCE(MAX(position), -1) + 1 FROM drawing_approvers WHERE activity_record_id = ? AND NOT is_deleted",
-                Int::class.java, recordId,
-            ) ?: 0)
+        val position =
+            request.position
+                ?: (
+                    jdbc.queryForObject(
+                        "SELECT COALESCE(MAX(position), -1) + 1 FROM drawing_approvers WHERE activity_record_id = ? AND NOT is_deleted",
+                        Int::class.java,
+                        recordId,
+                    ) ?: 0
+                )
 
-        val approver = DrawingApprover(
-            activityRecordId        = recordId,
-            approvalDesignationCode = request.designationCode,
-            position                = position,
-        )
+        val approver =
+            DrawingApprover(
+                activityRecordId = recordId,
+                approvalDesignationCode = request.designationCode,
+                position = position,
+            )
         drawingApproverRepository.save(approver)
 
         auditLogWriter.write(
             actorUserId = actor.userId,
-            action      = "DRAWING.ADD_APPROVER",
-            entityType  = "DRAWING_APPROVER",
-            entityId    = approver.id,
+            action = "DRAWING.ADD_APPROVER",
+            entityType = "DRAWING_APPROVER",
+            entityId = approver.id,
         )
 
-        val designationName = jdbc.queryForObject(
-            "SELECT COALESCE(name, ?) FROM designations WHERE code = ?",
-            String::class.java,
-            request.designationCode,
-            request.designationCode,
-        ) ?: request.designationCode
+        val designationName =
+            jdbc.queryForObject(
+                "SELECT COALESCE(name, ?) FROM designations WHERE code = ?",
+                String::class.java,
+                request.designationCode,
+                request.designationCode,
+            ) ?: request.designationCode
 
         return DrawingApproverResponse(
-            id                      = approver.id,
+            id = approver.id,
             approvalDesignationCode = approver.approvalDesignationCode,
-            designationName         = designationName,
-            position                = approver.position,
-            approvedOn              = null,
-            remarks                 = null,
+            designationName = designationName,
+            position = approver.position,
+            approvedOn = null,
+            remarks = null,
         )
     }
 
@@ -284,19 +294,24 @@ class DrawingService(
 
         auditLogWriter.write(
             actorUserId = actor.userId,
-            action      = "DRAWING.REMOVE_APPROVER",
-            entityType  = "DRAWING_APPROVER",
-            entityId    = approverId,
+            action = "DRAWING.REMOVE_APPROVER",
+            entityType = "DRAWING_APPROVER",
+            entityId = approverId,
         )
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
-    private fun requireRecordAccess(recordId: UUID, principal: PiaPrincipal): ActivityRecord {
-        val record = recordRepository.findByIdAndIsDeletedFalse(recordId)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
-        val activity = activityRepository.findByIdAndIsDeletedFalse(record.projectActivityId)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+    private fun requireRecordAccess(
+        recordId: UUID,
+        principal: PiaPrincipal,
+    ): ActivityRecord {
+        val record =
+            recordRepository.findByIdAndIsDeletedFalse(recordId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val activity =
+            activityRepository.findByIdAndIsDeletedFalse(record.projectActivityId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         if (principal.isSuperAdmin || principal.permissions.contains("PROJECT.READ.ALL")) {
             projectRepository.findByIdAndIsDeletedFalse(activity.projectId)
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
@@ -310,21 +325,30 @@ class DrawingService(
     }
 
     private fun requireApprovalRoleDesignation(designationCode: String) {
-        val isValid = jdbc.queryForObject(
-            "SELECT EXISTS(SELECT 1 FROM designations WHERE code = ? AND is_approval_role = true)",
-            Boolean::class.java, designationCode,
-        ) ?: false
-        if (!isValid) throw ResponseStatusException(
-            HttpStatus.UNPROCESSABLE_ENTITY,
-            "'$designationCode' is not a valid approval-role designation",
-        )
+        val isValid =
+            jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM designations WHERE code = ? AND is_approval_role = true)",
+                Boolean::class.java,
+                designationCode,
+            ) ?: false
+        if (!isValid) {
+            throw ResponseStatusException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "'$designationCode' is not a valid approval-role designation",
+            )
+        }
     }
 
-    private fun requireApproverSlot(approverId: UUID, recordId: UUID): DrawingApprover {
-        val approver = drawingApproverRepository.findByIdAndIsDeletedFalse(approverId)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Approver slot not found")
-        if (approver.activityRecordId != recordId)
+    private fun requireApproverSlot(
+        approverId: UUID,
+        recordId: UUID,
+    ): DrawingApprover {
+        val approver =
+            drawingApproverRepository.findByIdAndIsDeletedFalse(approverId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Approver slot not found")
+        if (approver.activityRecordId != recordId) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "Approver slot does not belong to this record")
+        }
         return approver
     }
 
@@ -333,15 +357,17 @@ class DrawingService(
      * AUTHENTICATED = all slots approved; DRAFT = any pending.
      */
     private fun deriveAndCacheState(recordId: UUID) {
-        val pendingCount = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM drawing_approvers WHERE activity_record_id = ? AND approved_on IS NULL AND NOT is_deleted",
-            Long::class.java, recordId,
-        ) ?: 0L
+        val pendingCount =
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM drawing_approvers WHERE activity_record_id = ? AND approved_on IS NULL AND NOT is_deleted",
+                Long::class.java,
+                recordId,
+            ) ?: 0L
         val state = if (pendingCount == 0L) "AUTHENTICATED" else "DRAFT"
         jdbc.update(
             "UPDATE activity_records SET record_state = ?, updated_at = now() WHERE id = ? AND NOT is_deleted",
-            state, recordId,
+            state,
+            recordId,
         )
     }
-
 }

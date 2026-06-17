@@ -236,60 +236,67 @@ class DashboardService(
      */
     fun getProjectOverview(projectId: UUID): ProjectOverviewDto {
         // Project metadata
-        val project = jdbc.queryForMap(
-            """
-            SELECT p.project_code, p.name, p.lifecycle_state, p.recommended_by_board_on,
-                   z.code AS zone_code
-            FROM projects p
-            LEFT JOIN zones z ON z.id = p.zone_id
-            WHERE p.id = ?
-            """.trimIndent(),
-            projectId,
-        )
+        val project =
+            jdbc.queryForMap(
+                """
+                SELECT p.project_code, p.name, p.lifecycle_state, p.recommended_by_board_on,
+                       z.code AS zone_code
+                FROM projects p
+                LEFT JOIN zones z ON z.id = p.zone_id
+                WHERE p.id = ?
+                """.trimIndent(),
+                projectId,
+            )
 
         val rbDate = (project["recommended_by_board_on"] as? java.sql.Date)?.toLocalDate()
-        val daysSinceRb = rbDate?.let {
-            java.time.temporal.ChronoUnit.DAYS.between(it, java.time.LocalDate.now())
-        }
+        val daysSinceRb =
+            rbDate?.let {
+                java.time.temporal.ChronoUnit.DAYS
+                    .between(it, java.time.LocalDate.now())
+            }
 
         // Project-level totals from project_summary
-        val projectSummary = jdbc.queryForList(
-            "SELECT sla_breach_count, drawings_in_approval FROM project_summary WHERE project_id = ?",
-            projectId,
-        ).firstOrNull()
+        val projectSummary =
+            jdbc
+                .queryForList(
+                    "SELECT sla_breach_count, drawings_in_approval FROM project_summary WHERE project_id = ?",
+                    projectId,
+                ).firstOrNull()
 
         val totalSlaBreaches = (projectSummary?.get("sla_breach_count") as? Number)?.toInt() ?: 0
         val totalDrawingsInApproval = (projectSummary?.get("drawings_in_approval") as? Number)?.toInt() ?: 0
 
         // Per-activity cards from project_activity_summary
-        val activityCards = jdbc.query(
-            """
-            SELECT activity_type_code, total_records, authenticated_count,
-                   draft_count + submitted_count + verified_count + sent_back_count AS pending_count,
-                   sla_breach_count
-            FROM project_activity_summary
-            WHERE project_id = ?
-            ORDER BY activity_type_code
-            """.trimIndent(),
-            { rs, _ ->
-                val slaBreachCount = rs.getInt("sla_breach_count")
-                val pendingCount = rs.getInt("pending_count")
-                val ragStatus = when {
-                    slaBreachCount > 0 -> "RED"
-                    pendingCount > 0 -> "AMBER"
-                    else -> "GREEN"
-                }
-                ActivityCardDto(
-                    activityTypeCode = rs.getString("activity_type_code"),
-                    totalRecords = rs.getInt("total_records"),
-                    authenticatedCount = rs.getInt("authenticated_count"),
-                    pendingCount = pendingCount,
-                    slaBreachCount = slaBreachCount,
-                    ragStatus = ragStatus,
-                )
-            },
-            projectId,
-        )
+        val activityCards =
+            jdbc.query(
+                """
+                SELECT activity_type_code, total_records, authenticated_count,
+                       draft_count + submitted_count + verified_count + sent_back_count AS pending_count,
+                       sla_breach_count
+                FROM project_activity_summary
+                WHERE project_id = ?
+                ORDER BY activity_type_code
+                """.trimIndent(),
+                { rs, _ ->
+                    val slaBreachCount = rs.getInt("sla_breach_count")
+                    val pendingCount = rs.getInt("pending_count")
+                    val ragStatus =
+                        when {
+                            slaBreachCount > 0 -> "RED"
+                            pendingCount > 0 -> "AMBER"
+                            else -> "GREEN"
+                        }
+                    ActivityCardDto(
+                        activityTypeCode = rs.getString("activity_type_code"),
+                        totalRecords = rs.getInt("total_records"),
+                        authenticatedCount = rs.getInt("authenticated_count"),
+                        pendingCount = pendingCount,
+                        slaBreachCount = slaBreachCount,
+                        ragStatus = ragStatus,
+                    )
+                },
+                projectId,
+            )
 
         return ProjectOverviewDto(
             projectId = projectId,
@@ -383,7 +390,10 @@ class DashboardService(
      * this endpoint serves tabular record views, not KPI aggregations.
      * KPI counters still come from summary tables via [getProjectDashboard].
      */
-    fun getActivityRecordsForDashboard(projectId: UUID, activityTypeCode: String): List<DashboardRecordDto> {
+    fun getActivityRecordsForDashboard(
+        projectId: UUID,
+        activityTypeCode: String,
+    ): List<DashboardRecordDto> {
         // Tender Packaging has no child activity_records — data lives on the activity
         // itself (package_name, epc_document_prepared, tender_finalized).  Return the
         // activities as synthetic DashboardRecordDto rows so the frontend can render
@@ -404,15 +414,15 @@ class DashboardService(
                     val node = objectMapper.createObjectNode()
                     rs.getString("package_name")?.let { node.put("package_name", it) }
                     node.put("epc_document_prepared", rs.getBoolean("epc_document_prepared"))
-                    node.put("tender_finalized",      rs.getBoolean("tender_finalized"))
+                    node.put("tender_finalized", rs.getBoolean("tender_finalized"))
                     DashboardRecordDto(
-                        id                = rs.getObject("id", UUID::class.java),
+                        id = rs.getObject("id", UUID::class.java),
                         projectActivityId = null,
-                        recordState       = rs.getString("status") ?: "DRAFT",
-                        recordSubtype     = null,
-                        dataJson          = node,
-                        createdAt         = rs.getTimestamp("created_at").toInstant(),
-                        updatedAt         = rs.getTimestamp("updated_at").toInstant(),
+                        recordState = rs.getString("status") ?: "DRAFT",
+                        recordSubtype = null,
+                        dataJson = node,
+                        createdAt = rs.getTimestamp("created_at").toInstant(),
+                        updatedAt = rs.getTimestamp("updated_at").toInstant(),
                     )
                 },
                 projectId,
@@ -445,16 +455,19 @@ class DashboardService(
                     rs.getString("new_tdc")?.let { node.put("new_tdc", it) }
                     rs.getObject("old_possession_given")?.let { node.put("old_possession_given", rs.getBoolean("old_possession_given")) }
                     rs.getString("old_tdc")?.let { node.put("old_tdc", it) }
-                    rs.getObject("hiring_rental_agreement")?.let { node.put("hiring_rental_agreement", rs.getBoolean("hiring_rental_agreement")) }
+                    rs
+                        .getObject(
+                            "hiring_rental_agreement",
+                        )?.let { node.put("hiring_rental_agreement", rs.getBoolean("hiring_rental_agreement")) }
                     rs.getString("hiring_tdc")?.let { node.put("hiring_tdc", it) }
                     DashboardRecordDto(
-                        id                = rs.getObject("id", UUID::class.java),
+                        id = rs.getObject("id", UUID::class.java),
                         projectActivityId = null,
-                        recordState       = rs.getString("status") ?: "DRAFT",
-                        recordSubtype     = null,
-                        dataJson          = node,
-                        createdAt         = rs.getTimestamp("created_at").toInstant(),
-                        updatedAt         = rs.getTimestamp("updated_at").toInstant(),
+                        recordState = rs.getString("status") ?: "DRAFT",
+                        recordSubtype = null,
+                        dataJson = node,
+                        createdAt = rs.getTimestamp("created_at").toInstant(),
+                        updatedAt = rs.getTimestamp("updated_at").toInstant(),
                     )
                 },
                 projectId,
@@ -489,18 +502,18 @@ class DashboardService(
                     val base = objectMapper.readTree(rs.getString("data_json") ?: "{}") as com.fasterxml.jackson.databind.node.ObjectNode
                     // Merge activity-level area fields into the record's dataJson so the
                     // frontend can read them from one place.
-                    rs.getBigDecimal("area_hectares_total")?.let   { base.put("area_hectares_total",   it) }
+                    rs.getBigDecimal("area_hectares_total")?.let { base.put("area_hectares_total", it) }
                     rs.getBigDecimal("area_hectares_private")?.let { base.put("area_hectares_private", it) }
-                    rs.getBigDecimal("area_hectares_govt")?.let    { base.put("area_hectares_govt",    it) }
-                    rs.getBigDecimal("area_hectares_forest")?.let  { base.put("area_hectares_forest",  it) }
+                    rs.getBigDecimal("area_hectares_govt")?.let { base.put("area_hectares_govt", it) }
+                    rs.getBigDecimal("area_hectares_forest")?.let { base.put("area_hectares_forest", it) }
                     DashboardRecordDto(
-                        id                = rs.getObject("id", UUID::class.java),
+                        id = rs.getObject("id", UUID::class.java),
                         projectActivityId = rs.getObject("project_activity_id", UUID::class.java),
-                        recordState       = rs.getString("record_state"),
-                        recordSubtype     = rs.getString("record_subtype"),
-                        dataJson          = base,
-                        createdAt         = rs.getTimestamp("created_at").toInstant(),
-                        updatedAt         = rs.getTimestamp("updated_at").toInstant(),
+                        recordState = rs.getString("record_state"),
+                        recordSubtype = rs.getString("record_subtype"),
+                        dataJson = base,
+                        createdAt = rs.getTimestamp("created_at").toInstant(),
+                        updatedAt = rs.getTimestamp("updated_at").toInstant(),
                     )
                 },
                 projectId,
@@ -522,13 +535,13 @@ class DashboardService(
             """.trimIndent(),
             { rs, _ ->
                 DashboardRecordDto(
-                    id                = rs.getObject("id", UUID::class.java),
+                    id = rs.getObject("id", UUID::class.java),
                     projectActivityId = rs.getObject("project_activity_id", UUID::class.java),
-                    recordState       = rs.getString("record_state"),
-                    recordSubtype     = rs.getString("record_subtype"),
-                    dataJson          = objectMapper.readTree(rs.getString("data_json") ?: "{}"),
-                    createdAt         = rs.getTimestamp("created_at").toInstant(),
-                    updatedAt         = rs.getTimestamp("updated_at").toInstant(),
+                    recordState = rs.getString("record_state"),
+                    recordSubtype = rs.getString("record_subtype"),
+                    dataJson = objectMapper.readTree(rs.getString("data_json") ?: "{}"),
+                    createdAt = rs.getTimestamp("created_at").toInstant(),
+                    updatedAt = rs.getTimestamp("updated_at").toInstant(),
                 )
             },
             projectId,
@@ -550,25 +563,27 @@ class DashboardService(
     fun getAccessibleScope(principal: PiaPrincipal): AccessibleScopeDto =
         when {
             principal.isSuperAdmin || principal.hasPermission("DASHBOARD.VIEW.PAN_INDIA") -> {
-                val zones = jdbc.query(
-                    "SELECT id, code, name FROM zones WHERE is_active ORDER BY display_order, code",
-                ) { rs, _ ->
-                    ZoneOptionDto(
-                        id = rs.getObject("id", UUID::class.java),
-                        code = rs.getString("code"),
-                        name = rs.getString("name"),
-                    )
-                }
-                val projects = jdbc.query(
-                    "SELECT id, name, project_code, zone_id FROM projects WHERE NOT is_deleted ORDER BY name",
-                ) { rs, _ ->
-                    ProjectOptionDto(
-                        id = rs.getObject("id", UUID::class.java),
-                        name = rs.getString("name"),
-                        projectCode = rs.getString("project_code"),
-                        zoneId = rs.getObject("zone_id", UUID::class.java),
-                    )
-                }
+                val zones =
+                    jdbc.query(
+                        "SELECT id, code, name FROM zones WHERE is_active ORDER BY display_order, code",
+                    ) { rs, _ ->
+                        ZoneOptionDto(
+                            id = rs.getObject("id", UUID::class.java),
+                            code = rs.getString("code"),
+                            name = rs.getString("name"),
+                        )
+                    }
+                val projects =
+                    jdbc.query(
+                        "SELECT id, name, project_code, zone_id FROM projects WHERE NOT is_deleted ORDER BY name",
+                    ) { rs, _ ->
+                        ProjectOptionDto(
+                            id = rs.getObject("id", UUID::class.java),
+                            name = rs.getString("name"),
+                            projectCode = rs.getString("project_code"),
+                            zoneId = rs.getObject("zone_id", UUID::class.java),
+                        )
+                    }
                 AccessibleScopeDto(zones = zones, projects = projects, zoneFilterEnabled = true)
             }
 
@@ -582,9 +597,12 @@ class DashboardService(
             }
 
             principal.designationCode == "DY_CE_C" -> {
-                val zones = if (principal.primaryZoneId != null)
-                    loadZoneOptions(listOf(principal.primaryZoneId!!))
-                else emptyList()
+                val zones =
+                    if (principal.primaryZoneId != null) {
+                        loadZoneOptions(listOf(principal.primaryZoneId!!))
+                    } else {
+                        emptyList()
+                    }
                 AccessibleScopeDto(
                     zones = zones,
                     projects = loadAssignedProjects(principal.userId),
@@ -620,50 +638,52 @@ class DashboardService(
         val allowed = getAllowedProjectIds(principal)
         if (allowed.isEmpty()) return CumulativeDashboardDto(summaries = emptyList(), projectCount = 0)
 
-        val filtered: List<UUID> = when {
-            filterProjectIds.isNotEmpty() -> {
-                val filterSet = filterProjectIds.toSet()
-                allowed.filter { it in filterSet }
+        val filtered: List<UUID> =
+            when {
+                filterProjectIds.isNotEmpty() -> {
+                    val filterSet = filterProjectIds.toSet()
+                    allowed.filter { it in filterSet }
+                }
+                filterZoneIds.isNotEmpty() -> {
+                    val zoneSet = getProjectIdsInZones(filterZoneIds).toSet()
+                    allowed.filter { it in zoneSet }
+                }
+                else -> allowed
             }
-            filterZoneIds.isNotEmpty() -> {
-                val zoneSet = getProjectIdsInZones(filterZoneIds).toSet()
-                allowed.filter { it in zoneSet }
-            }
-            else -> allowed
-        }
 
         if (filtered.isEmpty()) return CumulativeDashboardDto(summaries = emptyList(), projectCount = 0)
 
         val placeholders = filtered.joinToString(",") { "?" }
-        val summaries = jdbc.query(
-            """
-            SELECT activity_type_code,
-                   COALESCE(SUM(total_records), 0)::int       AS total_records,
-                   COALESCE(SUM(draft_count), 0)::int         AS draft_count,
-                   COALESCE(SUM(submitted_count), 0)::int     AS submitted_count,
-                   COALESCE(SUM(verified_count), 0)::int      AS verified_count,
-                   COALESCE(SUM(authenticated_count), 0)::int AS authenticated_count,
-                   COALESCE(SUM(sent_back_count), 0)::int     AS sent_back_count,
-                   COALESCE(SUM(sla_breach_count), 0)::int    AS sla_breach_count
-            FROM project_activity_summary
-            WHERE project_id IN ($placeholders)
-            GROUP BY activity_type_code
-            ORDER BY activity_type_code
-            """.trimIndent(),
-            { rs, _ ->
-                CumulativeActivitySummaryDto(
-                    activityTypeCode = rs.getString("activity_type_code"),
-                    totalRecords = rs.getInt("total_records"),
-                    draftCount = rs.getInt("draft_count"),
-                    submittedCount = rs.getInt("submitted_count"),
-                    verifiedCount = rs.getInt("verified_count"),
-                    authenticatedCount = rs.getInt("authenticated_count"),
-                    sentBackCount = rs.getInt("sent_back_count"),
-                    slaBreachCount = rs.getInt("sla_breach_count"),
-                )
-            },
-            *filtered.toTypedArray(),
-        )
+        val summaries =
+            jdbc.query(
+                """
+                SELECT activity_type_code,
+                       COALESCE(SUM(total_records), 0)::int       AS total_records,
+                       COALESCE(SUM(draft_count), 0)::int         AS draft_count,
+                       COALESCE(SUM(submitted_count), 0)::int     AS submitted_count,
+                       COALESCE(SUM(verified_count), 0)::int      AS verified_count,
+                       COALESCE(SUM(authenticated_count), 0)::int AS authenticated_count,
+                       COALESCE(SUM(sent_back_count), 0)::int     AS sent_back_count,
+                       COALESCE(SUM(sla_breach_count), 0)::int    AS sla_breach_count
+                FROM project_activity_summary
+                WHERE project_id IN ($placeholders)
+                GROUP BY activity_type_code
+                ORDER BY activity_type_code
+                """.trimIndent(),
+                { rs, _ ->
+                    CumulativeActivitySummaryDto(
+                        activityTypeCode = rs.getString("activity_type_code"),
+                        totalRecords = rs.getInt("total_records"),
+                        draftCount = rs.getInt("draft_count"),
+                        submittedCount = rs.getInt("submitted_count"),
+                        verifiedCount = rs.getInt("verified_count"),
+                        authenticatedCount = rs.getInt("authenticated_count"),
+                        sentBackCount = rs.getInt("sent_back_count"),
+                        slaBreachCount = rs.getInt("sla_breach_count"),
+                    )
+                },
+                *filtered.toTypedArray(),
+            )
         return CumulativeDashboardDto(summaries = summaries, projectCount = filtered.size)
     }
 
@@ -759,36 +779,37 @@ class DashboardService(
      * Reads from [drawing_approvers] joined to [activity_records].
      */
     fun getDrawingApproverMatrix(projectId: UUID): DrawingApproverMatrixDto {
-        val cells = jdbc.query(
-            """
-            SELECT da.approval_designation_code                                        AS desig,
-                   COALESCE(ar.data_json->>'drawing_type', 'UNKNOWN')                 AS dtype,
-                   COUNT(*) FILTER (WHERE da.approved_on IS NULL)                     AS pending,
-                   COUNT(*) FILTER (WHERE da.approved_on IS NOT NULL)                 AS approved,
-                   0                                                                   AS sent_back
-            FROM drawing_approvers da
-            JOIN activity_records   ar ON ar.id = da.activity_record_id
-            JOIN project_activities pa ON pa.id = ar.project_activity_id
-            WHERE pa.project_id = ?
-              AND NOT da.is_deleted
-              AND NOT ar.is_deleted
-              AND NOT pa.is_deleted
-            GROUP BY da.approval_designation_code, ar.data_json->>'drawing_type'
-            ORDER BY da.approval_designation_code, ar.data_json->>'drawing_type'
-            """.trimIndent(),
-            { rs, _ ->
-                DrawingApproverCellDto(
-                    designationCode = rs.getString("desig"),
-                    drawingType     = rs.getString("dtype"),
-                    pendingCount    = rs.getInt("pending"),
-                    approvedCount   = rs.getInt("approved"),
-                    sentBackCount   = rs.getInt("sent_back"),
-                )
-            },
-            projectId,
-        )
+        val cells =
+            jdbc.query(
+                """
+                SELECT da.approval_designation_code                                        AS desig,
+                       COALESCE(ar.data_json->>'drawing_type', 'UNKNOWN')                 AS dtype,
+                       COUNT(*) FILTER (WHERE da.approved_on IS NULL)                     AS pending,
+                       COUNT(*) FILTER (WHERE da.approved_on IS NOT NULL)                 AS approved,
+                       0                                                                   AS sent_back
+                FROM drawing_approvers da
+                JOIN activity_records   ar ON ar.id = da.activity_record_id
+                JOIN project_activities pa ON pa.id = ar.project_activity_id
+                WHERE pa.project_id = ?
+                  AND NOT da.is_deleted
+                  AND NOT ar.is_deleted
+                  AND NOT pa.is_deleted
+                GROUP BY da.approval_designation_code, ar.data_json->>'drawing_type'
+                ORDER BY da.approval_designation_code, ar.data_json->>'drawing_type'
+                """.trimIndent(),
+                { rs, _ ->
+                    DrawingApproverCellDto(
+                        designationCode = rs.getString("desig"),
+                        drawingType = rs.getString("dtype"),
+                        pendingCount = rs.getInt("pending"),
+                        approvedCount = rs.getInt("approved"),
+                        sentBackCount = rs.getInt("sent_back"),
+                    )
+                },
+                projectId,
+            )
         return DrawingApproverMatrixDto(
-            cells        = cells,
+            cells = cells,
             designations = cells.map { it.designationCode }.distinct().sorted(),
             drawingTypes = cells.map { it.drawingType }.distinct().sorted(),
         )

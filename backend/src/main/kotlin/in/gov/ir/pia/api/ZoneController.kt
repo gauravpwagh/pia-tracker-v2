@@ -33,8 +33,9 @@ class ZoneController(
     @PreAuthorize("isAuthenticated()")
     @Operation(
         summary = "List active zones",
-        description = "Returns all active Indian Railways zones ordered by display_order. " +
-            "Used as the zone picker source for the Create Project form.",
+        description =
+            "Returns all active Indian Railways zones ordered by display_order. " +
+                "Used as the zone picker source for the Create Project form.",
         responses = [
             ApiResponse(responseCode = "200", description = "Zone list returned"),
             ApiResponse(responseCode = "401", description = "Not authenticated"),

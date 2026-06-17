@@ -117,8 +117,11 @@ class ProjectService(
 
             principal.permissions.contains("PROJECT.READ.ZONE") -> {
                 val zones = principal.accessibleZoneIds
-                if (zones.isEmpty()) emptyList()
-                else projectRepository.findAllByZoneIdInAndIsDeletedFalse(zones)
+                if (zones.isEmpty()) {
+                    emptyList()
+                } else {
+                    projectRepository.findAllByZoneIdInAndIsDeletedFalse(zones)
+                }
             }
 
             else ->

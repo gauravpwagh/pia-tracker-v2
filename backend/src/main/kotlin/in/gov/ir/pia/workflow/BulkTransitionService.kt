@@ -76,40 +76,46 @@ class BulkTransitionService(
 
         val actionCode = request.action.lowercase()
 
-        val results = request.recordIds.map { recordId ->
-            try {
-                val instance = instanceRepository.findByEntityTypeAndEntityIdNoSection(
-                    "ACTIVITY_RECORD",
-                    recordId,
-                ) ?: return@map BulkTransitionItemResult(
-                    recordId = recordId,
-                    success = false,
-                    error = "No record-level workflow instance found for record $recordId",
-                )
+        val results =
+            request.recordIds.map { recordId ->
+                try {
+                    val instance =
+                        instanceRepository.findByEntityTypeAndEntityIdNoSection(
+                            "ACTIVITY_RECORD",
+                            recordId,
+                        ) ?: return@map BulkTransitionItemResult(
+                            recordId = recordId,
+                            success = false,
+                            error = "No record-level workflow instance found for record $recordId",
+                        )
 
-                workflowService.transition(
-                    instanceId = instance.id,
-                    actionCode = actionCode,
-                    actor = actor,
-                    comment = request.comment,
-                )
+                    workflowService.transition(
+                        instanceId = instance.id,
+                        actionCode = actionCode,
+                        actor = actor,
+                        comment = request.comment,
+                    )
 
-                BulkTransitionItemResult(recordId = recordId, success = true, error = null)
-            } catch (ex: Exception) {
-                log.debug("Bulk transition failed for record {}: {}", recordId, ex.message)
-                BulkTransitionItemResult(
-                    recordId = recordId,
-                    success = false,
-                    error = ex.message?.take(256) ?: "Unknown error",
-                )
+                    BulkTransitionItemResult(recordId = recordId, success = true, error = null)
+                } catch (ex: Exception) {
+                    log.debug("Bulk transition failed for record {}: {}", recordId, ex.message)
+                    BulkTransitionItemResult(
+                        recordId = recordId,
+                        success = false,
+                        error = ex.message?.take(256) ?: "Unknown error",
+                    )
+                }
             }
-        }
 
         val succeeded = results.count { it.success }
         val failed = results.size - succeeded
         log.info(
             "Bulk transition action='{}' total={} succeeded={} failed={} actor={}",
-            actionCode, results.size, succeeded, failed, actor.userId,
+            actionCode,
+            results.size,
+            succeeded,
+            failed,
+            actor.userId,
         )
 
         return BulkTransitionResponse(

@@ -88,25 +88,30 @@ class DrawingApproverEditGateIntegrationTest {
         }
 
         val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_C_USER_ID: UUID   = UUID.fromString("11111111-1111-1111-1111-111111111102")
-        val CE_C_USER_ID: UUID    = UUID.fromString("11111111-1111-1111-1111-111111111103")
-        val DYCE_1_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111104")
-        val DYCE_2_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111105") // Nodal
-        val SR_DEN_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111109")
-        val DY_CEE_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111110")
-        val DY_CE_USER_ID: UUID   = UUID.fromString("11111111-1111-1111-1111-111111111111") // unlisted approver
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
+        val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
+        val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
+        val DYCE_2_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111105") // Nodal
+        val SR_DEN_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111109")
+        val DY_CEE_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111110")
+        val DY_CE_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111111") // unlisted approver
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
+
     @Autowired lateinit var jdbc: JdbcTemplate
+
     @MockkBean lateinit var minioClient: MinioClient
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun loginAs(userId: UUID): List<String> {
-        val resp = restTemplate.postForEntity(
-            "/api/v1/auth/select-user", SelectUserRequest(userId), Void::class.java,
-        )
+        val resp =
+            restTemplate.postForEntity(
+                "/api/v1/auth/select-user",
+                SelectUserRequest(userId),
+                Void::class.java,
+            )
         assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
         return resp.headers["Set-Cookie"] ?: emptyList()
     }
@@ -117,19 +122,40 @@ class DrawingApproverEditGateIntegrationTest {
         return h
     }
 
-    private fun <T> post(url: String, body: Any, cookies: List<String>, type: Class<T>) =
+    private fun <T> post(
+        url: String,
+        body: Any,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
 
-    private fun <T> postEmpty(url: String, cookies: List<String>, type: Class<T>) =
+    private fun <T> postEmpty(
+        url: String,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.postForEntity(url, HttpEntity<Void>(headersFor(cookies)), type)
 
-    private fun <T> get(url: String, cookies: List<String>, type: Class<T>) =
+    private fun <T> get(
+        url: String,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), type)
 
-    private fun delete(url: String, cookies: List<String>) =
+    private fun delete(
+        url: String,
+        cookies: List<String>,
+    ) =
         restTemplate.exchange(url, HttpMethod.DELETE, HttpEntity<Void>(headersFor(cookies)), Void::class.java)
 
-    private fun <T> patch(url: String, body: Any, cookies: List<String>, type: Class<T>) =
+    private fun <T> patch(
+        url: String,
+        body: Any,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.exchange(url, HttpMethod.PATCH, HttpEntity(body, headersFor(cookies)), type)
 
     // ── Gate test ─────────────────────────────────────────────────────────────
@@ -140,46 +166,66 @@ class DrawingApproverEditGateIntegrationTest {
 
         // ── Project scaffold ──────────────────────────────────────────────────
         val edgs = loginAs(EDGS_CI_USER_ID)
-        val project = post(
-            "/api/v1/projects",
-            CreateProjectRequest(name = "Approver Edit Gate ${UUID.randomUUID()}", zoneId = nrZoneId),
-            edgs, ProjectDetailResponse::class.java,
-        ).body!!
+        val project =
+            post(
+                "/api/v1/projects",
+                CreateProjectRequest(name = "Approver Edit Gate ${UUID.randomUUID()}", zoneId = nrZoneId),
+                edgs,
+                ProjectDetailResponse::class.java,
+            ).body!!
 
         val cao = loginAs(CAO_C_USER_ID)
-        post("/api/v1/projects/${project.id}/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID), cao, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/${project.id}/allocate",
+            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            cao,
+            ProjectDetailResponse::class.java,
+        )
 
         val ce = loginAs(CE_C_USER_ID)
-        post("/api/v1/projects/${project.id}/assign-dyce",
-            AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)), ce, ProjectDetailResponse::class.java)
-        post("/api/v1/projects/${project.id}/designate-nodal",
-            DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID), ce, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/${project.id}/assign-dyce",
+            AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
+        post(
+            "/api/v1/projects/${project.id}/designate-nodal",
+            DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
 
-        val dyce1  = loginAs(DYCE_1_USER_ID)
-        val nodal  = loginAs(DYCE_2_USER_ID)
-        val srDen  = loginAs(SR_DEN_USER_ID)
-        val dyCe   = loginAs(DY_CE_USER_ID)
+        val dyce1 = loginAs(DYCE_1_USER_ID)
+        val nodal = loginAs(DYCE_2_USER_ID)
+        val srDen = loginAs(SR_DEN_USER_ID)
+        val dyCe = loginAs(DY_CE_USER_ID)
 
         // ── Step 1: Create ESP drawing record ─────────────────────────────────
-        val activity = post(
-            "/api/v1/projects/${project.id}/activities",
-            CreateActivityRequest(activityTypeCode = "DRAWING_APPROVAL", name = "Approver Edit Gate Activity"),
-            dyce1, ActivityDetailResponse::class.java,
-        ).body!!
+        val activity =
+            post(
+                "/api/v1/projects/${project.id}/activities",
+                CreateActivityRequest(activityTypeCode = "DRAWING_APPROVAL", name = "Approver Edit Gate Activity"),
+                dyce1,
+                ActivityDetailResponse::class.java,
+            ).body!!
 
-        val record = post(
-            "/api/v1/activities/${activity.id}/records",
-            CreateActivityRecordRequest(recordSubtype = "ESP"),
-            dyce1, ActivityRecordDetailResponse::class.java,
-        ).body!!
+        val record =
+            post(
+                "/api/v1/activities/${activity.id}/records",
+                CreateActivityRecordRequest(recordSubtype = "ESP"),
+                dyce1,
+                ActivityRecordDetailResponse::class.java,
+            ).body!!
 
         // ── Step 2: CE/C adds user 111 (DY_CE) as an unlisted 3rd approver ───
-        val addResp = post(
-            "/api/v1/activity-records/${record.id}/drawing-approvers",
-            AddApproverRequest(designationCode = "DY_CE", userId = DY_CE_USER_ID),
-            ce, DrawingApproverResponse::class.java,
-        )
+        val addResp =
+            post(
+                "/api/v1/activity-records/${record.id}/drawing-approvers",
+                AddApproverRequest(designationCode = "DY_CE", userId = DY_CE_USER_ID),
+                ce,
+                DrawingApproverResponse::class.java,
+            )
         assertThat(addResp.statusCode).isEqualTo(HttpStatus.CREATED)
         val newSlot = addResp.body!!
         assertThat(newSlot.approvalDesignationCode).isEqualTo("DY_CE")
@@ -187,21 +233,26 @@ class DrawingApproverEditGateIntegrationTest {
         assertThat(newSlot.status).isEqualTo("PENDING")
 
         // Verify the row exists in the DB
-        val newSlotExists = jdbc.queryForObject(
-            """SELECT count(*) FROM drawing_approvers
+        val newSlotExists =
+            jdbc.queryForObject(
+                """SELECT count(*) FROM drawing_approvers
                WHERE id = ? AND approval_designation_code = 'DY_CE'
                  AND user_id = ? AND NOT is_deleted""",
-            Long::class.java, newSlot.id, DY_CE_USER_ID,
-        )!!
+                Long::class.java,
+                newSlot.id,
+                DY_CE_USER_ID,
+            )!!
         assertThat(newSlotExists).`as`("DY_CE slot must be created in DB").isEqualTo(1L)
 
         // Verify user 111 has a DRAWING_APPROVER_ADDED notification
-        val dyCeNotifCount = jdbc.queryForObject(
-            """SELECT count(*) FROM notifications
+        val dyCeNotifCount =
+            jdbc.queryForObject(
+                """SELECT count(*) FROM notifications
                WHERE recipient_user_id = ? AND notification_type = 'DRAWING_APPROVER_ADDED'
                  AND NOT is_read""",
-            Long::class.java, DY_CE_USER_ID,
-        )!!
+                Long::class.java,
+                DY_CE_USER_ID,
+            )!!
         assertThat(dyCeNotifCount)
             .`as`("User 111 (DY_CE) must have a DRAWING_APPROVER_ADDED notification after being added")
             .isGreaterThanOrEqualTo(1L)
@@ -211,94 +262,113 @@ class DrawingApproverEditGateIntegrationTest {
             .also { assertThat(it.statusCode).isIn(HttpStatus.OK, HttpStatus.NO_CONTENT, HttpStatus.CREATED) }
 
         // ── Step 4: SR_DEN approves their slot ────────────────────────────────
-        val approvers = get(
-            "/api/v1/activity-records/${record.id}/drawing-approvers",
-            srDen, DrawingApproverListResponse::class.java,
-        ).body!!
+        val approvers =
+            get(
+                "/api/v1/activity-records/${record.id}/drawing-approvers",
+                srDen,
+                DrawingApproverListResponse::class.java,
+            ).body!!
 
         val srDenSlot = approvers.approvers.find { it.approvalDesignationCode == "SR_DEN" }!!
         val dyCeeSlot = approvers.approvers.find { it.approvalDesignationCode == "DY_CEE" }!!
 
         postEmpty(
             "/api/v1/activity-records/${record.id}/drawing-approvers/${srDenSlot.id}/approve",
-            srDen, Void::class.java,
+            srDen,
+            Void::class.java,
         ).also { assertThat(it.statusCode).isIn(HttpStatus.OK, HttpStatus.NO_CONTENT, HttpStatus.CREATED) }
 
         // Verify SR_DEN slot is now APPROVED
-        val srDenStatus = jdbc.queryForObject(
-            "SELECT status FROM drawing_approvers WHERE id = ?",
-            String::class.java, srDenSlot.id,
-        )
+        val srDenStatus =
+            jdbc.queryForObject(
+                "SELECT status FROM drawing_approvers WHERE id = ?",
+                String::class.java,
+                srDenSlot.id,
+            )
         assertThat(srDenStatus).`as`("SR_DEN slot must be APPROVED").isEqualTo("APPROVED")
 
         // ── Step 5: Nodal removes user 111's DY_CE slot (PENDING) ────────────
-        val deleteResp = delete(
-            "/api/v1/activity-records/${record.id}/drawing-approvers/${newSlot.id}",
-            nodal,
-        )
+        val deleteResp =
+            delete(
+                "/api/v1/activity-records/${record.id}/drawing-approvers/${newSlot.id}",
+                nodal,
+            )
         assertThat(deleteResp.statusCode)
             .`as`("Nodal removing a PENDING slot must succeed")
             .isEqualTo(HttpStatus.NO_CONTENT)
 
-        val removedIsDeleted = jdbc.queryForObject(
-            "SELECT is_deleted FROM drawing_approvers WHERE id = ?",
-            Boolean::class.java, newSlot.id,
-        )!!
+        val removedIsDeleted =
+            jdbc.queryForObject(
+                "SELECT is_deleted FROM drawing_approvers WHERE id = ?",
+                Boolean::class.java,
+                newSlot.id,
+            )!!
         assertThat(removedIsDeleted)
             .`as`("Removed slot must be soft-deleted (is_deleted = true)")
             .isTrue()
 
         // ── Step 6: Nodal tries to remove SR_DEN's APPROVED slot → 409 ───────
-        val removeApprovedResp = delete(
-            "/api/v1/activity-records/${record.id}/drawing-approvers/${srDenSlot.id}",
-            nodal,
-        )
+        val removeApprovedResp =
+            delete(
+                "/api/v1/activity-records/${record.id}/drawing-approvers/${srDenSlot.id}",
+                nodal,
+            )
         assertThat(removeApprovedResp.statusCode)
             .`as`("Removing an APPROVED slot must return 409 (decision BBBB)")
             .isEqualTo(HttpStatus.CONFLICT)
 
         // SR_DEN slot must still exist and be APPROVED
-        val srDenStillApproved = jdbc.queryForObject(
-            "SELECT status FROM drawing_approvers WHERE id = ? AND NOT is_deleted",
-            String::class.java, srDenSlot.id,
-        )
+        val srDenStillApproved =
+            jdbc.queryForObject(
+                "SELECT status FROM drawing_approvers WHERE id = ? AND NOT is_deleted",
+                String::class.java,
+                srDenSlot.id,
+            )
         assertThat(srDenStillApproved)
             .`as`("SR_DEN APPROVED slot must be preserved after failed removal attempt")
             .isEqualTo("APPROVED")
 
         // ── Step 7: CE/C reassigns DY_CEE slot to user 111 ───────────────────
-        val reassignResp = patch(
-            "/api/v1/activity-records/${record.id}/drawing-approvers/${dyCeeSlot.id}",
-            ReassignApproverRequest(userId = DY_CE_USER_ID),
-            ce, Void::class.java,
-        )
+        val reassignResp =
+            patch(
+                "/api/v1/activity-records/${record.id}/drawing-approvers/${dyCeeSlot.id}",
+                ReassignApproverRequest(userId = DY_CE_USER_ID),
+                ce,
+                Void::class.java,
+            )
         assertThat(reassignResp.statusCode)
             .`as`("Reassignment must succeed")
             .isIn(HttpStatus.OK, HttpStatus.NO_CONTENT)
 
-        val reassignedUserId = jdbc.queryForObject(
-            "SELECT user_id FROM drawing_approvers WHERE id = ?",
-            UUID::class.java, dyCeeSlot.id,
-        )
+        val reassignedUserId =
+            jdbc.queryForObject(
+                "SELECT user_id FROM drawing_approvers WHERE id = ?",
+                UUID::class.java,
+                dyCeeSlot.id,
+            )
         assertThat(reassignedUserId)
             .`as`("DY_CEE slot must now point to DY_CE_USER_ID after reassignment")
             .isEqualTo(DY_CE_USER_ID)
 
         // User 111 must have a second notification for the reassignment
-        val dyCeNotifCountAfter = jdbc.queryForObject(
-            """SELECT count(*) FROM notifications
+        val dyCeNotifCountAfter =
+            jdbc.queryForObject(
+                """SELECT count(*) FROM notifications
                WHERE recipient_user_id = ? AND notification_type = 'DRAWING_APPROVER_ADDED'""",
-            Long::class.java, DY_CE_USER_ID,
-        )!!
+                Long::class.java,
+                DY_CE_USER_ID,
+            )!!
         assertThat(dyCeNotifCountAfter)
             .`as`("User 111 must have ≥ 2 DRAWING_APPROVER_ADDED notifications (add + reassign)")
             .isGreaterThanOrEqualTo(2L)
 
         // ── Step 8: Derived state is still IN_APPROVAL ────────────────────────
-        val finalState = get(
-            "/api/v1/activity-records/${record.id}/drawing-approvers",
-            dyCe, DrawingApproverListResponse::class.java,
-        ).body!!
+        val finalState =
+            get(
+                "/api/v1/activity-records/${record.id}/drawing-approvers",
+                dyCe,
+                DrawingApproverListResponse::class.java,
+            ).body!!
 
         assertThat(finalState.derivedState)
             .`as`("Drawing must remain IN_APPROVAL (SR_DEN APPROVED, DY_CEE/reassigned PENDING)")

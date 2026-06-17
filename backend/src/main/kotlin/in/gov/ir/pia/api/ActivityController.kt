@@ -7,11 +7,11 @@ import `in`.gov.ir.pia.service.activity.ActivityService
 import `in`.gov.ir.pia.service.activity.ActivityWorkflowActionResult
 import `in`.gov.ir.pia.service.activity.CreateActivityRecordRequest
 import `in`.gov.ir.pia.service.activity.CreateActivityRequest
-import `in`.gov.ir.pia.service.activity.UpdateActivityRequest
 import `in`.gov.ir.pia.service.activity.PatchActivityRecordRequest
 import `in`.gov.ir.pia.service.activity.RecordHistoryEntry
 import `in`.gov.ir.pia.service.activity.RecordWorkflowStateResponse
 import `in`.gov.ir.pia.service.activity.SectionWorkflowStateResponse
+import `in`.gov.ir.pia.service.activity.UpdateActivityRequest
 import `in`.gov.ir.pia.service.activity.WorkflowActionRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
@@ -20,9 +20,9 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
-import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestParam
@@ -76,7 +76,8 @@ class ActivityController(
         @PathVariable projectId: UUID,
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): List<ActivityDetailResponse> =
-        activityService.listForProject(projectId, principal)
+        activityService
+            .listForProject(projectId, principal)
             .map { a -> activityService.toDetailResponsePublic(a) }
 
     /**
@@ -236,8 +237,7 @@ class ActivityController(
     fun getActivityWorkflowState(
         @PathVariable activityId: UUID,
         @AuthenticationPrincipal principal: PiaPrincipal,
-    ): SectionWorkflowStateResponse =
-        activityService.getActivityWorkflowState(activityId, principal)
+    ): SectionWorkflowStateResponse = activityService.getActivityWorkflowState(activityId, principal)
 
     @PostMapping("/api/v1/activities/{activityId}/submit")
     @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.SUBMIT')")
@@ -245,8 +245,7 @@ class ActivityController(
         @PathVariable activityId: UUID,
         @RequestBody(required = false) req: WorkflowActionRequest?,
         @AuthenticationPrincipal principal: PiaPrincipal,
-    ): SectionWorkflowStateResponse =
-        activityService.performActivityDirectWorkflowAction(activityId, "submit", req?.comment, principal)
+    ): SectionWorkflowStateResponse = activityService.performActivityDirectWorkflowAction(activityId, "submit", req?.comment, principal)
 
     @PostMapping("/api/v1/activities/{activityId}/verify")
     @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.VERIFY')")
@@ -254,8 +253,7 @@ class ActivityController(
         @PathVariable activityId: UUID,
         @RequestBody(required = false) req: WorkflowActionRequest?,
         @AuthenticationPrincipal principal: PiaPrincipal,
-    ): SectionWorkflowStateResponse =
-        activityService.performActivityDirectWorkflowAction(activityId, "verify", req?.comment, principal)
+    ): SectionWorkflowStateResponse = activityService.performActivityDirectWorkflowAction(activityId, "verify", req?.comment, principal)
 
     @PostMapping("/api/v1/activities/{activityId}/authenticate")
     @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.AUTHENTICATE')")
@@ -275,8 +273,7 @@ class ActivityController(
         @PathVariable activityId: UUID,
         @RequestBody req: WorkflowActionRequest,
         @AuthenticationPrincipal principal: PiaPrincipal,
-    ): SectionWorkflowStateResponse =
-        activityService.performActivityDirectWorkflowAction(activityId, "send_back", req.comment, principal)
+    ): SectionWorkflowStateResponse = activityService.performActivityDirectWorkflowAction(activityId, "send_back", req.comment, principal)
 
     @PostMapping("/api/v1/activities/{activityId}/resubmit")
     @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.SUBMIT')")
@@ -284,8 +281,7 @@ class ActivityController(
         @PathVariable activityId: UUID,
         @RequestBody(required = false) req: WorkflowActionRequest?,
         @AuthenticationPrincipal principal: PiaPrincipal,
-    ): SectionWorkflowStateResponse =
-        activityService.performActivityDirectWorkflowAction(activityId, "resubmit", req?.comment, principal)
+    ): SectionWorkflowStateResponse = activityService.performActivityDirectWorkflowAction(activityId, "resubmit", req?.comment, principal)
 
     @PostMapping("/api/v1/activities/{activityId}/re-verify")
     @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.VERIFY')")
@@ -293,8 +289,7 @@ class ActivityController(
         @PathVariable activityId: UUID,
         @RequestBody(required = false) req: WorkflowActionRequest?,
         @AuthenticationPrincipal principal: PiaPrincipal,
-    ): SectionWorkflowStateResponse =
-        activityService.performActivityDirectWorkflowAction(activityId, "re_verify", req?.comment, principal)
+    ): SectionWorkflowStateResponse = activityService.performActivityDirectWorkflowAction(activityId, "re_verify", req?.comment, principal)
 
     /**
      * Applies a workflow action to every eligible record (and section) in an
@@ -327,9 +322,9 @@ class ActivityController(
     ): ActivityWorkflowActionResult =
         activityService.performActivityWorkflowAction(
             activityId = activityId,
-            action     = request.action,
-            comment    = request.comment,
-            principal  = principal,
+            action = request.action,
+            comment = request.comment,
+            principal = principal,
         )
 
     /**

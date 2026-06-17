@@ -6,11 +6,11 @@ import `in`.gov.ir.pia.dashboard.DashboardRecordDto
 import `in`.gov.ir.pia.dashboard.DashboardService
 import `in`.gov.ir.pia.dashboard.DrawingApproverMatrixDto
 import `in`.gov.ir.pia.dashboard.ForestStageBreakdownDto
+import `in`.gov.ir.pia.dashboard.PanIndiaDashboardResponse
+import `in`.gov.ir.pia.dashboard.PanIndiaDashboardService
 import `in`.gov.ir.pia.dashboard.ProjectDashboardDto
 import `in`.gov.ir.pia.dashboard.ProjectOverviewDto
 import `in`.gov.ir.pia.dashboard.UtilitySubtypeBreakdownDto
-import `in`.gov.ir.pia.dashboard.PanIndiaDashboardResponse
-import `in`.gov.ir.pia.dashboard.PanIndiaDashboardService
 import `in`.gov.ir.pia.dashboard.ZoneDashboardResponse
 import `in`.gov.ir.pia.dashboard.ZoneDashboardService
 import `in`.gov.ir.pia.security.PiaPrincipal
@@ -52,8 +52,9 @@ class DashboardController(
     )
     @Operation(
         summary = "Project activity summary",
-        description = "Returns aggregated record-state counts per activity type for a project. " +
-            "Reads from project_activity_summary — never from raw records.",
+        description =
+            "Returns aggregated record-state counts per activity type for a project. " +
+                "Reads from project_activity_summary — never from raw records.",
     )
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "Summary returned"),
@@ -190,8 +191,7 @@ class DashboardController(
         ApiResponse(responseCode = "200", description = "PAN India dashboard returned"),
         ApiResponse(responseCode = "403", description = "Insufficient permission"),
     )
-    fun getPanIndiaDashboard(): PanIndiaDashboardResponse =
-        panIndiaDashboardService.getPanIndiaDashboard()
+    fun getPanIndiaDashboard(): PanIndiaDashboardResponse = panIndiaDashboardService.getPanIndiaDashboard()
 
     // ── Cumulative activity summary (new unified dashboard) ───────────────────
 
@@ -268,8 +268,7 @@ class DashboardController(
     fun getActivityRecordsForDashboard(
         @PathVariable projectId: UUID,
         @PathVariable activityTypeCode: String,
-    ): List<DashboardRecordDto> =
-        dashboardService.getActivityRecordsForDashboard(projectId, activityTypeCode)
+    ): List<DashboardRecordDto> = dashboardService.getActivityRecordsForDashboard(projectId, activityTypeCode)
 
     // ── Drawing approver heatmap (§7) ─────────────────────────────────────────
 
@@ -292,6 +291,5 @@ class DashboardController(
     )
     fun getDrawingApproverMatrix(
         @PathVariable projectId: UUID,
-    ): DrawingApproverMatrixDto =
-        dashboardService.getDrawingApproverMatrix(projectId)
+    ): DrawingApproverMatrixDto = dashboardService.getDrawingApproverMatrix(projectId)
 }

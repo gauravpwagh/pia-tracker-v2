@@ -7,13 +7,17 @@ import java.util.UUID
  * ([project_activity_summary]) is updated.  Triggers the cascade that refreshes
  * [project_summary] for the project and then [zone_summary] for its zone.
  */
-data class ProjectSummaryChangedEvent(val projectId: UUID)
+data class ProjectSummaryChangedEvent(
+    val projectId: UUID,
+)
 
 /**
  * Published by [SummaryUpdater] after [project_summary] is refreshed for a
  * project.  Triggers the cascade that refreshes [zone_summary] for the zone.
  */
-data class ZoneSummaryChangedEvent(val zoneId: UUID)
+data class ZoneSummaryChangedEvent(
+    val zoneId: UUID,
+)
 
 /**
  * Published by [ActivityService] immediately after an [ActivityRecord] row is

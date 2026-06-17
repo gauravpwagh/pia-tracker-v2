@@ -25,11 +25,12 @@ class ActivityStatusSyncListener(
     fun onWorkflowStateChanged(event: WorkflowStateChangedEvent) {
         if (event.entityType != "PROJECT_ACTIVITY") return
 
-        val updated = jdbc.update(
-            "UPDATE project_activities SET status = ?, updated_at = NOW() WHERE id = ?",
-            event.toStateCode,
-            event.entityId,
-        )
+        val updated =
+            jdbc.update(
+                "UPDATE project_activities SET status = ?, updated_at = NOW() WHERE id = ?",
+                event.toStateCode,
+                event.entityId,
+            )
 
         if (updated == 0) {
             log.warn("ActivityStatusSyncListener: no activity row found for id={}", event.entityId)

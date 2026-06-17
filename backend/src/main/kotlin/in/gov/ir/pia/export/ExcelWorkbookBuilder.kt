@@ -27,22 +27,30 @@ object ExcelWorkbookBuilder {
     fun create(): XSSFWorkbook = XSSFWorkbook()
 
     /** Adds a new sheet and returns it. */
-    fun addSheet(wb: XSSFWorkbook, name: String): XSSFSheet = wb.createSheet(name)
+    fun addSheet(
+        wb: XSSFWorkbook,
+        name: String,
+    ): XSSFSheet = wb.createSheet(name)
 
     /**
      * Writes a bold, blue-tinted header row at row index 0 and freezes it.
      * Call before adding data rows.
      */
-    fun writeHeaderRow(wb: XSSFWorkbook, sheet: XSSFSheet, headers: List<String>) {
-        val headerStyle = wb.createCellStyle().apply {
-            val font = wb.createFont()
-            font.bold = true
-            setFont(font)
-            fillForegroundColor = IndexedColors.PALE_BLUE.index
-            fillPattern = FillPatternType.SOLID_FOREGROUND
-            alignment = HorizontalAlignment.LEFT
-            setBorderBottom(BorderStyle.THIN)
-        }
+    fun writeHeaderRow(
+        wb: XSSFWorkbook,
+        sheet: XSSFSheet,
+        headers: List<String>,
+    ) {
+        val headerStyle =
+            wb.createCellStyle().apply {
+                val font = wb.createFont()
+                font.bold = true
+                setFont(font)
+                fillForegroundColor = IndexedColors.PALE_BLUE.index
+                fillPattern = FillPatternType.SOLID_FOREGROUND
+                alignment = HorizontalAlignment.LEFT
+                setBorderBottom(BorderStyle.THIN)
+            }
         val row = sheet.createRow(0)
         headers.forEachIndexed { col, header ->
             row.createCell(col).apply {
@@ -50,7 +58,7 @@ object ExcelWorkbookBuilder {
                 cellStyle = headerStyle
             }
         }
-        sheet.createFreezePane(0, 1)  // freeze header row
+        sheet.createFreezePane(0, 1) // freeze header row
     }
 
     /**
@@ -58,7 +66,11 @@ object ExcelWorkbookBuilder {
      * Null values produce a blank cell; [LocalDate] is formatted as YYYY-MM-DD;
      * numbers and strings are written directly.
      */
-    fun writeDataRow(sheet: XSSFSheet, rowIndex: Int, values: List<Any?>) {
+    fun writeDataRow(
+        sheet: XSSFSheet,
+        rowIndex: Int,
+        values: List<Any?>,
+    ) {
         val row = sheet.createRow(rowIndex)
         values.forEachIndexed { col, value ->
             val cell = row.createCell(col)
@@ -73,7 +85,10 @@ object ExcelWorkbookBuilder {
     }
 
     /** Auto-sizes all used columns on [sheet] (call after all rows are written). */
-    fun autoSizeColumns(sheet: XSSFSheet, columnCount: Int) {
+    fun autoSizeColumns(
+        sheet: XSSFSheet,
+        columnCount: Int,
+    ) {
         for (col in 0 until columnCount) {
             sheet.autoSizeColumn(col)
         }

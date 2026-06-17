@@ -35,8 +35,9 @@ class DesignationController(
     @PreAuthorize("isAuthenticated()")
     @Operation(
         summary = "List approval-role designations",
-        description = "Returns all designations flagged is_approval_role = true, ordered by display_order. " +
-            "Used as the source list for the drawing 'Add Approver' picker (Phase 2.7).",
+        description =
+            "Returns all designations flagged is_approval_role = true, ordered by display_order. " +
+                "Used as the source list for the drawing 'Add Approver' picker (Phase 2.7).",
         responses = [
             ApiResponse(responseCode = "200", description = "List returned successfully"),
             ApiResponse(responseCode = "401", description = "Not authenticated"),

@@ -5,11 +5,6 @@ import `in`.gov.ir.pia.api.InboxResponse
 import `in`.gov.ir.pia.api.SelectUserRequest
 import `in`.gov.ir.pia.dashboard.ProjectOverviewDto
 import `in`.gov.ir.pia.dashboard.ZoneDashboardResponse
-import `in`.gov.ir.pia.service.project.AllocateProjectRequest
-import `in`.gov.ir.pia.service.project.AssignDyceRequest
-import `in`.gov.ir.pia.service.project.CreateProjectRequest
-import `in`.gov.ir.pia.service.project.DesignateNodalRequest
-import `in`.gov.ir.pia.service.project.ProjectDetailResponse
 import io.minio.MinioClient
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -79,7 +74,6 @@ import java.util.UUID
     ],
 )
 class Phase2HardeningGateIntegrationTest {
-
     companion object {
         @JvmField
         @Container
@@ -98,32 +92,37 @@ class Phase2HardeningGateIntegrationTest {
 
         // Seeded demo user IDs (V001_004)
         val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_C_USER_ID: UUID   = UUID.fromString("11111111-1111-1111-1111-111111111102")
-        val CE_C_USER_ID: UUID    = UUID.fromString("11111111-1111-1111-1111-111111111103")
-        val DYCE_1_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111104")
-        val DYCE_2_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111105")
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
+        val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
+        val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
+        val DYCE_2_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111105")
 
         // Fixed UUIDs from seed data
         const val RECORD_STANDARD_WF_DEF = "bbbbbbbb-0001-0001-0001-000000000001"
-        const val DRAFT_STATE_ID         = "bbbbbbbb-0002-0001-0001-000000000001"
-        const val TENDER_FORM_DEF        = "ffffffff-0002-0001-0001-000000000001"
+        const val DRAFT_STATE_ID = "bbbbbbbb-0002-0001-0001-000000000001"
+        const val TENDER_FORM_DEF = "ffffffff-0002-0001-0001-000000000001"
 
         // Performance thresholds
-        const val WARMUP_CALLS   = 5
-        const val MEASURE_CALLS  = 20
-        const val P95_THRESHOLD_MS = 500L  // lenient for CI; structural gate = index presence
+        const val WARMUP_CALLS = 5
+        const val MEASURE_CALLS = 20
+        const val P95_THRESHOLD_MS = 500L // lenient for CI; structural gate = index presence
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
+
     @Autowired lateinit var jdbc: JdbcTemplate
+
     @MockkBean lateinit var minioClient: MinioClient
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun loginAs(userId: UUID): List<String> {
-        val resp = restTemplate.postForEntity(
-            "/api/v1/auth/select-user", SelectUserRequest(userId), Void::class.java,
-        )
+        val resp =
+            restTemplate.postForEntity(
+                "/api/v1/auth/select-user",
+                SelectUserRequest(userId),
+                Void::class.java,
+            )
         assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
         return resp.headers["Set-Cookie"] ?: emptyList()
     }
@@ -134,19 +133,33 @@ class Phase2HardeningGateIntegrationTest {
         return h
     }
 
-    private fun <T> post(url: String, body: Any, cookies: List<String>, type: Class<T>) =
+    private fun <T> post(
+        url: String,
+        body: Any,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
 
-    private fun <T> get(url: String, cookies: List<String>, type: Class<T>) =
+    private fun <T> get(
+        url: String,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), type)
 
     /** Returns the p95 elapsed time in milliseconds across [n] invocations of [block]. */
-    private fun measureP95Ms(n: Int, block: () -> Unit): Long {
-        val times = (1..n).map {
-            val start = System.currentTimeMillis()
-            block()
-            System.currentTimeMillis() - start
-        }.sorted()
+    private fun measureP95Ms(
+        n: Int,
+        block: () -> Unit,
+    ): Long {
+        val times =
+            (1..n)
+                .map {
+                    val start = System.currentTimeMillis()
+                    block()
+                    System.currentTimeMillis() - start
+                }.sorted()
         // p95: smallest value V such that 95% of samples are ≤ V.
         // For n=20 → ceil(0.95*20)=19 → 0-based index 18 (19th element).
         val p95Index = (Math.ceil(0.95 * n).toInt() - 1).coerceIn(0, n - 1)
@@ -162,18 +175,22 @@ class Phase2HardeningGateIntegrationTest {
      * because PostgreSQL records the parent-level index with the parent table name.
      * For non-partitioned tables, any matching row in pg_indexes suffices.
      */
-    private fun assertIndexExists(indexName: String, tableName: String? = null) {
-        val (sql, args) = if (tableName != null) {
-            Pair(
-                "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = ? AND indexname = ?",
-                arrayOf<Any>(tableName, indexName),
-            )
-        } else {
-            Pair(
-                "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname = ?",
-                arrayOf<Any>(indexName),
-            )
-        }
+    private fun assertIndexExists(
+        indexName: String,
+        tableName: String? = null,
+    ) {
+        val (sql, args) =
+            if (tableName != null) {
+                Pair(
+                    "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = ? AND indexname = ?",
+                    arrayOf<Any>(tableName, indexName),
+                )
+            } else {
+                Pair(
+                    "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname = ?",
+                    arrayOf<Any>(indexName),
+                )
+            }
         val count = jdbc.queryForObject(sql, Int::class.java, *args)!!
         assertThat(count)
             .`as`("Index '$indexName'${if (tableName != null) " on '$tableName'" else ""} must exist after V021 migration")
@@ -194,9 +211,11 @@ class Phase2HardeningGateIntegrationTest {
         projectCount: Int,
         recordsPerProject: Int,
     ): List<UUID> {
-        val nrZoneId = jdbc.queryForObject(
-            "SELECT id FROM zones WHERE code = 'NR'", UUID::class.java,
-        )!!
+        val nrZoneId =
+            jdbc.queryForObject(
+                "SELECT id FROM zones WHERE code = 'NR'",
+                UUID::class.java,
+            )!!
 
         val projectIds = mutableListOf<UUID>()
 
@@ -212,7 +231,8 @@ class Phase2HardeningGateIntegrationTest {
                      created_by_user_id, created_at, updated_at)
                 VALUES (?, ?, ?, 'ACTIVE', false, 0, ?, now(), now())
                 """.trimIndent(),
-                projectId, nrZoneId,
+                projectId,
+                nrZoneId,
                 "Perf Project ${pIdx + 1}",
                 EDGS_CI_USER_ID,
             )
@@ -224,7 +244,9 @@ class Phase2HardeningGateIntegrationTest {
                     (id, project_id, user_id, assignment_role, assigned_by_user_id, assigned_at, is_active)
                 VALUES (gen_random_uuid(), ?, ?, 'CE_C', ?, now(), true)
                 """.trimIndent(),
-                projectId, CE_C_USER_ID, CAO_C_USER_ID,
+                projectId,
+                CE_C_USER_ID,
+                CAO_C_USER_ID,
             )
 
             // project_summary (write-time roll-up row)
@@ -251,7 +273,8 @@ class Phase2HardeningGateIntegrationTest {
                 VALUES (?, ?, 'TENDER_PACKAGING', ?, ?, 'IN_PROGRESS',
                         ?::uuid, ?::uuid, ?, ?, false, 0, now(), now())
                 """.trimIndent(),
-                activityId, projectId,
+                activityId,
+                projectId,
                 "Tender Package — Perf ${pIdx + 1}",
                 DYCE_1_USER_ID,
                 TENDER_FORM_DEF,
@@ -292,7 +315,8 @@ class Phase2HardeningGateIntegrationTest {
                             '{}'::jsonb, 1, 'DRAFT', ?, ?,
                             false, 0, now(), now())
                     """.trimIndent(),
-                    recordId, activityId,
+                    recordId,
+                    activityId,
                     TENDER_FORM_DEF,
                     RECORD_STANDARD_WF_DEF,
                     DYCE_1_USER_ID,
@@ -323,7 +347,6 @@ class Phase2HardeningGateIntegrationTest {
 
     @Test
     fun `Phase 2-12 hardening — indexes exist, dashboard and inbox queries within latency bounds`() {
-
         // ── Scenario A: all V021 indexes are present ─────────────────────────
         // Non-partitioned tables: just check index name
         listOf(
@@ -338,7 +361,7 @@ class Phase2HardeningGateIntegrationTest {
         // CREATE INDEX on a partitioned table creates a parent-level entry in pg_indexes
         // (tablename = the parent) plus automatically-created child indexes.
         assertIndexExists("ix_audit_action_entity", tableName = "audit_log")
-        assertIndexExists("ix_wh_actor",            tableName = "workflow_history")
+        assertIndexExists("ix_wh_actor", tableName = "workflow_history")
 
         // ── Scenario B: seed a realistic dataset ─────────────────────────────
         // 5 projects × 100 records = 500 records (matching the gate spec).
@@ -362,10 +385,11 @@ class Phase2HardeningGateIntegrationTest {
             assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
         }
 
-        val overviewP95 = measureP95Ms(MEASURE_CALLS) {
-            val resp = get(overviewUrl, ce, ProjectOverviewDto::class.java)
-            assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
-        }
+        val overviewP95 =
+            measureP95Ms(MEASURE_CALLS) {
+                val resp = get(overviewUrl, ce, ProjectOverviewDto::class.java)
+                assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
+            }
         assertThat(overviewP95)
             .`as`("Project overview p95 latency must be < ${P95_THRESHOLD_MS}ms (got ${overviewP95}ms)")
             .isLessThan(P95_THRESHOLD_MS)
@@ -387,10 +411,11 @@ class Phase2HardeningGateIntegrationTest {
             get(zoneDashUrl, edgs, ZoneDashboardResponse::class.java)
         }
 
-        val zoneDashP95 = measureP95Ms(MEASURE_CALLS) {
-            val resp = get(zoneDashUrl, edgs, ZoneDashboardResponse::class.java)
-            assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
-        }
+        val zoneDashP95 =
+            measureP95Ms(MEASURE_CALLS) {
+                val resp = get(zoneDashUrl, edgs, ZoneDashboardResponse::class.java)
+                assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
+            }
         assertThat(zoneDashP95)
             .`as`("Zone dashboard p95 latency must be < ${P95_THRESHOLD_MS}ms (got ${zoneDashP95}ms)")
             .isLessThan(P95_THRESHOLD_MS)
@@ -406,10 +431,11 @@ class Phase2HardeningGateIntegrationTest {
             get(inboxUrl, ce, InboxResponse::class.java)
         }
 
-        val inboxP95 = measureP95Ms(MEASURE_CALLS) {
-            val resp = get(inboxUrl, ce, InboxResponse::class.java)
-            assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
-        }
+        val inboxP95 =
+            measureP95Ms(MEASURE_CALLS) {
+                val resp = get(inboxUrl, ce, InboxResponse::class.java)
+                assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
+            }
         assertThat(inboxP95)
             .`as`("Inbox p95 latency must be < ${P95_THRESHOLD_MS}ms (got ${inboxP95}ms)")
             .isLessThan(P95_THRESHOLD_MS)

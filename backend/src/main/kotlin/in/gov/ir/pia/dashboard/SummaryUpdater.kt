@@ -99,32 +99,39 @@ class SummaryUpdater(
 
         val activity = projectActivityRepo.findById(event.entityId).orElse(null) ?: return
         if (activity.activityTypeCode != "TENDER_PACKAGING" &&
-            activity.activityTypeCode != "TEMPORARY_OFFICE_SPACE") return
+            activity.activityTypeCode != "TEMPORARY_OFFICE_SPACE"
+        ) {
+            return
+        }
 
         val projectId = activity.projectId
-        val typeCode  = activity.activityTypeCode
-        val fromCol   = stateToColumn(event.fromStateCode)
-        val toCol     = stateToColumn(event.toStateCode)
+        val typeCode = activity.activityTypeCode
+        val fromCol = stateToColumn(event.fromStateCode)
+        val toCol = stateToColumn(event.toStateCode)
 
         jdbc.update(
             "INSERT INTO project_activity_summary (project_id, activity_type_code) VALUES (?, ?) ON CONFLICT DO NOTHING",
-            projectId, typeCode,
+            projectId,
+            typeCode,
         )
         if (fromCol != null) {
             jdbc.update(
                 "UPDATE project_activity_summary SET $fromCol = GREATEST(0, $fromCol - 1) WHERE project_id = ? AND activity_type_code = ?",
-                projectId, typeCode,
+                projectId,
+                typeCode,
             )
         }
         if (toCol != null) {
             jdbc.update(
                 "UPDATE project_activity_summary SET $toCol = $toCol + 1 WHERE project_id = ? AND activity_type_code = ?",
-                projectId, typeCode,
+                projectId,
+                typeCode,
             )
         }
         jdbc.update(
             "UPDATE project_activity_summary SET total_records = draft_count + submitted_count + verified_count + authenticated_count + sent_back_count WHERE project_id = ? AND activity_type_code = ?",
-            projectId, typeCode,
+            projectId,
+            typeCode,
         )
         eventPublisher.publishEvent(ProjectSummaryChangedEvent(projectId))
     }
@@ -148,25 +155,28 @@ class SummaryUpdater(
             if (activity.activityTypeCode == "FOREST_CLEARANCE") {
                 val stageCode = event.sectionCode!!
                 val fromCol = stateToColumn(event.fromStateCode)
-                val toCol   = stateToColumn(event.toStateCode)
+                val toCol = stateToColumn(event.toStateCode)
 
                 jdbc.update(
                     """
                     INSERT INTO project_forest_stage_summary (project_id, stage_code)
                     VALUES (?, ?) ON CONFLICT (project_id, stage_code) DO NOTHING
                     """.trimIndent(),
-                    activity.projectId, stageCode,
+                    activity.projectId,
+                    stageCode,
                 )
                 if (fromCol != null) {
                     jdbc.update(
                         "UPDATE project_forest_stage_summary SET $fromCol = GREATEST(0, $fromCol - 1) WHERE project_id = ? AND stage_code = ?",
-                        activity.projectId, stageCode,
+                        activity.projectId,
+                        stageCode,
                     )
                 }
                 if (toCol != null) {
                     jdbc.update(
                         "UPDATE project_forest_stage_summary SET $toCol = $toCol + 1 WHERE project_id = ? AND stage_code = ?",
-                        activity.projectId, stageCode,
+                        activity.projectId,
+                        stageCode,
                     )
                 }
                 jdbc.update(
@@ -176,7 +186,8 @@ class SummaryUpdater(
                                       + authenticated_count + sent_back_count
                     WHERE project_id = ? AND stage_code = ?
                     """.trimIndent(),
-                    activity.projectId, stageCode,
+                    activity.projectId,
+                    stageCode,
                 )
             }
             return
@@ -269,7 +280,10 @@ class SummaryUpdater(
             )
             WHERE pas.project_id = ? AND pas.activity_type_code = ?
             """.trimIndent(),
-            projectId, typeCode, projectId, typeCode,
+            projectId,
+            typeCode,
+            projectId,
+            typeCode,
         )
 
         // Cascade to project summary and then zone summary
@@ -363,17 +377,21 @@ class SummaryUpdater(
                     drawings_in_approval = EXCLUDED.drawings_in_approval,
                     sla_breach_count     = EXCLUDED.sla_breach_count
             """.trimIndent(),
-            projectId, projectId, projectId,
+            projectId,
+            projectId,
+            projectId,
         )
 
         // Cascade to zone summary
-        val zoneId = jdbc.queryForObject(
-            "SELECT zone_id FROM projects WHERE id = ?",
-            UUID::class.java, projectId,
-        ) ?: run {
-            log.warn("SummaryUpdater: zone_id not found for project {}", projectId)
-            return
-        }
+        val zoneId =
+            jdbc.queryForObject(
+                "SELECT zone_id FROM projects WHERE id = ?",
+                UUID::class.java,
+                projectId,
+            ) ?: run {
+                log.warn("SummaryUpdater: zone_id not found for project {}", projectId)
+                return
+            }
 
         eventPublisher.publishEvent(ZoneSummaryChangedEvent(zoneId))
     }
@@ -415,7 +433,10 @@ class SummaryUpdater(
                     projects_with_sla_breaches = EXCLUDED.projects_with_sla_breaches,
                     total_drawings_in_approval = EXCLUDED.total_drawings_in_approval
             """.trimIndent(),
-            zoneId, zoneId, zoneId, zoneId,
+            zoneId,
+            zoneId,
+            zoneId,
+            zoneId,
         )
 
         // Cascade to PAN India summary (terminal step — no further event needed)

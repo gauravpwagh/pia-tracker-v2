@@ -84,24 +84,27 @@ class DrawingFormGateIntegrationTest {
         }
 
         val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_C_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111102")
-        val CE_C_USER_ID: UUID   = UUID.fromString("11111111-1111-1111-1111-111111111103")
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
+        val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
         val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
         val DYCE_2_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111105")
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
+
     @Autowired lateinit var jdbc: JdbcTemplate
+
     @MockkBean lateinit var minioClient: MinioClient
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun loginAs(userId: UUID): List<String> {
-        val resp = restTemplate.postForEntity(
-            "/api/v1/auth/select-user",
-            SelectUserRequest(userId),
-            Void::class.java,
-        )
+        val resp =
+            restTemplate.postForEntity(
+                "/api/v1/auth/select-user",
+                SelectUserRequest(userId),
+                Void::class.java,
+            )
         assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
         return resp.headers["Set-Cookie"] ?: emptyList()
     }
@@ -112,13 +115,26 @@ class DrawingFormGateIntegrationTest {
         return h
     }
 
-    private fun <T> post(url: String, body: Any, cookies: List<String>, type: Class<T>) =
+    private fun <T> post(
+        url: String,
+        body: Any,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
 
-    private fun <T> get(url: String, cookies: List<String>, type: Class<T>) =
+    private fun <T> get(
+        url: String,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), type)
 
-    private fun <T> getList(url: String, cookies: List<String>, ref: ParameterizedTypeReference<T>) =
+    private fun <T> getList(
+        url: String,
+        cookies: List<String>,
+        ref: ParameterizedTypeReference<T>,
+    ) =
         restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), ref)
 
     // ── Gate test ─────────────────────────────────────────────────────────────
@@ -129,82 +145,102 @@ class DrawingFormGateIntegrationTest {
 
         // ── Project scaffold ───────────────────────────────────────────────────
         val edgs = loginAs(EDGS_CI_USER_ID)
-        val project = post(
-            "/api/v1/projects",
-            CreateProjectRequest(name = "Drawing Form Gate ${UUID.randomUUID()}", zoneId = nrZoneId),
-            edgs,
-            ProjectDetailResponse::class.java,
-        ).body!!
+        val project =
+            post(
+                "/api/v1/projects",
+                CreateProjectRequest(name = "Drawing Form Gate ${UUID.randomUUID()}", zoneId = nrZoneId),
+                edgs,
+                ProjectDetailResponse::class.java,
+            ).body!!
 
         val cao = loginAs(CAO_C_USER_ID)
-        post("/api/v1/projects/${project.id}/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID), cao, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/${project.id}/allocate",
+            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            cao,
+            ProjectDetailResponse::class.java,
+        )
 
         val ce = loginAs(CE_C_USER_ID)
-        post("/api/v1/projects/${project.id}/assign-dyce",
-            AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)), ce, ProjectDetailResponse::class.java)
-        post("/api/v1/projects/${project.id}/designate-nodal",
-            DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID), ce, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/${project.id}/assign-dyce",
+            AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
+        post(
+            "/api/v1/projects/${project.id}/designate-nodal",
+            DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
 
         val dyce1 = loginAs(DYCE_1_USER_ID)
 
         // ── Create one DRAWING_APPROVAL activity (shared across drawing types) ─
-        val activity = post(
-            "/api/v1/projects/${project.id}/activities",
-            CreateActivityRequest(activityTypeCode = "DRAWING_APPROVAL", name = "Phase 2.6 Drawing Form Gate Activity"),
-            dyce1,
-            ActivityDetailResponse::class.java,
-        ).body!!
+        val activity =
+            post(
+                "/api/v1/projects/${project.id}/activities",
+                CreateActivityRequest(activityTypeCode = "DRAWING_APPROVAL", name = "Phase 2.6 Drawing Form Gate Activity"),
+                dyce1,
+                ActivityDetailResponse::class.java,
+            ).body!!
 
         // ─────────────────────────────────────────────────────────────────────
         // Step 2a: SIP drawing → expects 3 approvers: SR_DEN, DY_CE, CE_PLANNING
         // ─────────────────────────────────────────────────────────────────────
-        val sipRecord = post(
-            "/api/v1/activities/${activity.id}/records",
-            CreateActivityRecordRequest(recordSubtype = "SIP"),
-            dyce1,
-            ActivityRecordDetailResponse::class.java,
-        ).also { assertThat(it.statusCode).isEqualTo(HttpStatus.CREATED) }.body!!
+        val sipRecord =
+            post(
+                "/api/v1/activities/${activity.id}/records",
+                CreateActivityRecordRequest(recordSubtype = "SIP"),
+                dyce1,
+                ActivityRecordDetailResponse::class.java,
+            ).also { assertThat(it.statusCode).isEqualTo(HttpStatus.CREATED) }.body!!
 
-        val sipApprovers = jdbc.queryForList(
-            """SELECT approval_designation_code
+        val sipApprovers =
+            jdbc.queryForList(
+                """SELECT approval_designation_code
                FROM drawing_approvers
                WHERE activity_record_id = ?
                  AND NOT is_deleted
                ORDER BY position""",
-            String::class.java,
-            sipRecord.id,
-        )
+                String::class.java,
+                sipRecord.id,
+            )
         assertThat(sipApprovers)
             .`as`("SIP must have exactly 3 approver slots in order: SR_DEN, DY_CE, CE_PLANNING")
             .containsExactly("SR_DEN", "DY_CE", "CE_PLANNING")
 
         // record_subtype must be set correctly
-        val sipSubtype = jdbc.queryForObject(
-            "SELECT record_subtype FROM activity_records WHERE id = ?",
-            String::class.java, sipRecord.id,
-        )
+        val sipSubtype =
+            jdbc.queryForObject(
+                "SELECT record_subtype FROM activity_records WHERE id = ?",
+                String::class.java,
+                sipRecord.id,
+            )
         assertThat(sipSubtype).`as`("record_subtype for SIP record").isEqualTo("SIP")
 
         // ─────────────────────────────────────────────────────────────────────
         // Step 2b: GAD_MINOR drawing → expects 2 approvers: DY_CE_BRIDGE, SR_DEN
         // ─────────────────────────────────────────────────────────────────────
-        val gadMinorRecord = post(
-            "/api/v1/activities/${activity.id}/records",
-            CreateActivityRecordRequest(recordSubtype = "GAD_MINOR"),
-            dyce1,
-            ActivityRecordDetailResponse::class.java,
-        ).also { assertThat(it.statusCode).isEqualTo(HttpStatus.CREATED) }.body!!
+        val gadMinorRecord =
+            post(
+                "/api/v1/activities/${activity.id}/records",
+                CreateActivityRecordRequest(recordSubtype = "GAD_MINOR"),
+                dyce1,
+                ActivityRecordDetailResponse::class.java,
+            ).also { assertThat(it.statusCode).isEqualTo(HttpStatus.CREATED) }.body!!
 
-        val gadMinorApprovers = jdbc.queryForList(
-            """SELECT approval_designation_code
+        val gadMinorApprovers =
+            jdbc.queryForList(
+                """SELECT approval_designation_code
                FROM drawing_approvers
                WHERE activity_record_id = ?
                  AND NOT is_deleted
                ORDER BY position""",
-            String::class.java,
-            gadMinorRecord.id,
-        )
+                String::class.java,
+                gadMinorRecord.id,
+            )
         assertThat(gadMinorApprovers)
             .`as`("GAD_MINOR must have exactly 2 approver slots: DY_CE_BRIDGE, SR_DEN")
             .containsExactly("DY_CE_BRIDGE", "SR_DEN")
@@ -212,22 +248,24 @@ class DrawingFormGateIntegrationTest {
         // ─────────────────────────────────────────────────────────────────────
         // Step 2c: TUNNEL_DESIGN → expects 4 approvers: DY_CE_DESIGN, SR_DEN, CE_PLANNING, PCE
         // ─────────────────────────────────────────────────────────────────────
-        val tunnelRecord = post(
-            "/api/v1/activities/${activity.id}/records",
-            CreateActivityRecordRequest(recordSubtype = "TUNNEL_DESIGN"),
-            dyce1,
-            ActivityRecordDetailResponse::class.java,
-        ).also { assertThat(it.statusCode).isEqualTo(HttpStatus.CREATED) }.body!!
+        val tunnelRecord =
+            post(
+                "/api/v1/activities/${activity.id}/records",
+                CreateActivityRecordRequest(recordSubtype = "TUNNEL_DESIGN"),
+                dyce1,
+                ActivityRecordDetailResponse::class.java,
+            ).also { assertThat(it.statusCode).isEqualTo(HttpStatus.CREATED) }.body!!
 
-        val tunnelApprovers = jdbc.queryForList(
-            """SELECT approval_designation_code
+        val tunnelApprovers =
+            jdbc.queryForList(
+                """SELECT approval_designation_code
                FROM drawing_approvers
                WHERE activity_record_id = ?
                  AND NOT is_deleted
                ORDER BY position""",
-            String::class.java,
-            tunnelRecord.id,
-        )
+                String::class.java,
+                tunnelRecord.id,
+            )
         assertThat(tunnelApprovers)
             .`as`("TUNNEL_DESIGN must have exactly 4 approver slots: DY_CE_DESIGN, SR_DEN, CE_PLANNING, PCE")
             .containsExactly("DY_CE_DESIGN", "SR_DEN", "CE_PLANNING", "PCE")
@@ -235,11 +273,12 @@ class DrawingFormGateIntegrationTest {
         // ─────────────────────────────────────────────────────────────────────
         // Step 3: Approval-roles picker returns ONLY approval-role designations
         // ─────────────────────────────────────────────────────────────────────
-        val designationsResp = getList(
-            "/api/v1/designations/approval-roles",
-            dyce1,
-            object : ParameterizedTypeReference<List<DesignationResponse>>() {},
-        )
+        val designationsResp =
+            getList(
+                "/api/v1/designations/approval-roles",
+                dyce1,
+                object : ParameterizedTypeReference<List<DesignationResponse>>() {},
+            )
         assertThat(designationsResp.statusCode).isEqualTo(HttpStatus.OK)
         val designations = designationsResp.body!!
         assertThat(designations).isNotEmpty
@@ -253,12 +292,13 @@ class DrawingFormGateIntegrationTest {
         // ─────────────────────────────────────────────────────────────────────
         // Step 4: Missing recordSubtype → 422
         // ─────────────────────────────────────────────────────────────────────
-        val missingSubtypeResp = post(
-            "/api/v1/activities/${activity.id}/records",
-            CreateActivityRecordRequest(recordSubtype = null),
-            dyce1,
-            Void::class.java,
-        )
+        val missingSubtypeResp =
+            post(
+                "/api/v1/activities/${activity.id}/records",
+                CreateActivityRecordRequest(recordSubtype = null),
+                dyce1,
+                Void::class.java,
+            )
         assertThat(missingSubtypeResp.statusCode)
             .`as`("Creating a DRAWING_APPROVAL record without recordSubtype must return 422")
             .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)
@@ -266,12 +306,13 @@ class DrawingFormGateIntegrationTest {
         // ─────────────────────────────────────────────────────────────────────
         // Step 5: Unknown drawing subtype → 422
         // ─────────────────────────────────────────────────────────────────────
-        val unknownSubtypeResp = post(
-            "/api/v1/activities/${activity.id}/records",
-            CreateActivityRecordRequest(recordSubtype = "DOES_NOT_EXIST"),
-            dyce1,
-            Void::class.java,
-        )
+        val unknownSubtypeResp =
+            post(
+                "/api/v1/activities/${activity.id}/records",
+                CreateActivityRecordRequest(recordSubtype = "DOES_NOT_EXIST"),
+                dyce1,
+                Void::class.java,
+            )
         assertThat(unknownSubtypeResp.statusCode)
             .`as`("Creating a DRAWING_APPROVAL record with unknown subtype must return 422")
             .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY)

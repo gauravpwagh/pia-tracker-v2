@@ -36,8 +36,9 @@ class DivisionController(
     @PreAuthorize("isAuthenticated()")
     @Operation(
         summary = "List active divisions",
-        description = "Returns active Indian Railways divisions ordered by display_order. " +
-            "Pass zoneId to filter to a specific zone (used by the Create Project wizard).",
+        description =
+            "Returns active Indian Railways divisions ordered by display_order. " +
+                "Pass zoneId to filter to a specific zone (used by the Create Project wizard).",
         responses = [
             ApiResponse(responseCode = "200", description = "Division list returned"),
             ApiResponse(responseCode = "401", description = "Not authenticated"),

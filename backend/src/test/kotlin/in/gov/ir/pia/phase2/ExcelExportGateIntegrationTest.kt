@@ -62,7 +62,6 @@ import java.util.UUID
     ],
 )
 class ExcelExportGateIntegrationTest {
-
     companion object {
         @JvmField
         @Container
@@ -80,22 +79,27 @@ class ExcelExportGateIntegrationTest {
         }
 
         // Users seeded by V001_004
-        val EDGS_CI_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_C_USER_ID: UUID    = UUID.fromString("11111111-1111-1111-1111-111111111102")
-        val CE_C_USER_ID: UUID     = UUID.fromString("11111111-1111-1111-1111-111111111103")
-        val DYCE_1_USER_ID: UUID   = UUID.fromString("11111111-1111-1111-1111-111111111104")
+        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
+        val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
+        val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
+
     @Autowired lateinit var jdbc: JdbcTemplate
+
     @MockkBean lateinit var minioClient: MinioClient
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun loginAs(userId: UUID): List<String> {
-        val resp = restTemplate.postForEntity(
-            "/api/v1/auth/select-user", SelectUserRequest(userId), Void::class.java,
-        )
+        val resp =
+            restTemplate.postForEntity(
+                "/api/v1/auth/select-user",
+                SelectUserRequest(userId),
+                Void::class.java,
+            )
         assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
         return resp.headers["Set-Cookie"] ?: emptyList()
     }
@@ -106,10 +110,19 @@ class ExcelExportGateIntegrationTest {
         return h
     }
 
-    private fun <T> post(url: String, body: Any, cookies: List<String>, type: Class<T>) =
+    private fun <T> post(
+        url: String,
+        body: Any,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
 
-    private fun <T> get(url: String, cookies: List<String>, type: Class<T>) =
+    private fun <T> get(
+        url: String,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), type)
 
     /** Polls GET {url} until [predicate] is true or [timeoutMs] elapses. Returns the last response. */
@@ -139,20 +152,21 @@ class ExcelExportGateIntegrationTest {
         val nrZoneId = jdbc.queryForObject("SELECT id FROM zones WHERE code = 'NR'", UUID::class.java)!!
 
         val edgs = loginAs(EDGS_CI_USER_ID)
-        val cao  = loginAs(CAO_C_USER_ID)
-        val ce   = loginAs(CE_C_USER_ID)
+        val cao = loginAs(CAO_C_USER_ID)
+        val ce = loginAs(CE_C_USER_ID)
         val dyce = loginAs(DYCE_1_USER_ID)
 
         // ── Setup: Create a project so the export has data ────────────────────
-        val project = post(
-            "/api/v1/projects",
-            CreateProjectRequest(
-                name = "Export Gate Project ${UUID.randomUUID()}",
-                zoneId = nrZoneId,
-            ),
-            edgs,
-            ProjectDetailResponse::class.java,
-        ).body!!
+        val project =
+            post(
+                "/api/v1/projects",
+                CreateProjectRequest(
+                    name = "Export Gate Project ${UUID.randomUUID()}",
+                    zoneId = nrZoneId,
+                ),
+                edgs,
+                ProjectDetailResponse::class.java,
+            ).body!!
 
         // CAO/C allocates so the project is in ACTIVE / accessible state
         post(
@@ -163,11 +177,12 @@ class ExcelExportGateIntegrationTest {
         )
 
         // ── Scenario 1: CE/C downloads project export (synchronous) ───────────
-        val projectExportResp = get(
-            "/api/v1/export/projects/${project.id}",
-            ce,
-            ByteArray::class.java,
-        )
+        val projectExportResp =
+            get(
+                "/api/v1/export/projects/${project.id}",
+                ce,
+                ByteArray::class.java,
+            )
         assertThat(projectExportResp.statusCode)
             .`as`("CE/C should receive 200 on project export")
             .isEqualTo(HttpStatus.OK)
@@ -179,9 +194,10 @@ class ExcelExportGateIntegrationTest {
             .contains("spreadsheetml")
 
         // Validate it is a valid POI workbook (no warnings, no corruption)
-        val wb = org.apache.poi.xssf.usermodel.XSSFWorkbook(
-            java.io.ByteArrayInputStream(projectBytes),
-        )
+        val wb =
+            org.apache.poi.xssf.usermodel.XSSFWorkbook(
+                java.io.ByteArrayInputStream(projectBytes),
+            )
         assertThat(wb.numberOfSheets)
             .`as`("Project xlsx must have at least 2 sheets (Summary + Activity Records)")
             .isGreaterThanOrEqualTo(2)
@@ -194,22 +210,24 @@ class ExcelExportGateIntegrationTest {
         wb.close()
 
         // ── Scenario 2: DY CE/C → 403 on project export endpoint ─────────────
-        val dyceProjectExportResp = get(
-            "/api/v1/export/projects/${project.id}",
-            dyce,
-            Void::class.java,
-        )
+        val dyceProjectExportResp =
+            get(
+                "/api/v1/export/projects/${project.id}",
+                dyce,
+                Void::class.java,
+            )
         assertThat(dyceProjectExportResp.statusCode)
             .`as`("DY CE/C without EXPORT.PROJECT must receive 403")
             .isEqualTo(HttpStatus.FORBIDDEN)
 
         // ── Scenario 3: CAO/C submits zone export (asynchronous) → 202 ────────
-        val zoneSubmitResp = restTemplate.exchange(
-            "/api/v1/export/zone/$nrZoneId",
-            HttpMethod.POST,
-            HttpEntity<Void>(headersFor(cao)),
-            ExportJobSubmitResponse::class.java,
-        )
+        val zoneSubmitResp =
+            restTemplate.exchange(
+                "/api/v1/export/zone/$nrZoneId",
+                HttpMethod.POST,
+                HttpEntity<Void>(headersFor(cao)),
+                ExportJobSubmitResponse::class.java,
+            )
         assertThat(zoneSubmitResp.statusCode)
             .`as`("Zone export submission must return 202 Accepted")
             .isEqualTo(HttpStatus.ACCEPTED)
@@ -224,12 +242,13 @@ class ExcelExportGateIntegrationTest {
         assertThat(statusResp.statusCode).isEqualTo(HttpStatus.OK)
 
         // ── Scenario 5: Wait for async job to complete (max 10 s) ─────────────
-        val completedStatus = pollUntil(
-            "/api/v1/export/jobs/$jobId",
-            cao,
-            ExportJobStatusResponse::class.java,
-            timeoutMs = 10_000L,
-        ) { it.status == "COMPLETED" }
+        val completedStatus =
+            pollUntil(
+                "/api/v1/export/jobs/$jobId",
+                cao,
+                ExportJobStatusResponse::class.java,
+                timeoutMs = 10_000L,
+            ) { it.status == "COMPLETED" }
 
         assertThat(completedStatus.status).isEqualTo("COMPLETED")
         assertThat(completedStatus.fileName)
@@ -246,9 +265,10 @@ class ExcelExportGateIntegrationTest {
         assertThat(downloadBytes).isNotEmpty()
 
         // Validate xlsx workbook integrity
-        val zoneWb = org.apache.poi.xssf.usermodel.XSSFWorkbook(
-            java.io.ByteArrayInputStream(downloadBytes),
-        )
+        val zoneWb =
+            org.apache.poi.xssf.usermodel.XSSFWorkbook(
+                java.io.ByteArrayInputStream(downloadBytes),
+            )
         assertThat(zoneWb.numberOfSheets)
             .`as`("Zone xlsx must have at least 2 sheets (Summary + Projects)")
             .isGreaterThanOrEqualTo(2)
@@ -267,28 +287,30 @@ class ExcelExportGateIntegrationTest {
             .isEqualTo(HttpStatus.GONE)
 
         // ── Scenario 8: EXPORT_READY notification fired for CAO/C ─────────────
-        val notificationCount = jdbc.queryForObject(
-            """
-            SELECT COUNT(*) FROM notifications
-            WHERE recipient_user_id = ?
-              AND notification_type = 'EXPORT_READY'
-              AND entity_id = ?
-            """.trimIndent(),
-            Long::class.java,
-            CAO_C_USER_ID,
-            jobId,
-        )!!
+        val notificationCount =
+            jdbc.queryForObject(
+                """
+                SELECT COUNT(*) FROM notifications
+                WHERE recipient_user_id = ?
+                  AND notification_type = 'EXPORT_READY'
+                  AND entity_id = ?
+                """.trimIndent(),
+                Long::class.java,
+                CAO_C_USER_ID,
+                jobId,
+            )!!
         assertThat(notificationCount)
             .`as`("EXPORT_READY notification must be created for the requesting user")
             .isGreaterThanOrEqualTo(1L)
 
         // ── Scenario 9: DY CE/C → 403 on zone export endpoint ────────────────
-        val dyceZoneResp = restTemplate.exchange(
-            "/api/v1/export/zone/$nrZoneId",
-            HttpMethod.POST,
-            HttpEntity<Void>(headersFor(dyce)),
-            Void::class.java,
-        )
+        val dyceZoneResp =
+            restTemplate.exchange(
+                "/api/v1/export/zone/$nrZoneId",
+                HttpMethod.POST,
+                HttpEntity<Void>(headersFor(dyce)),
+                Void::class.java,
+            )
         assertThat(dyceZoneResp.statusCode)
             .`as`("DY CE/C without EXPORT.ZONE must receive 403")
             .isEqualTo(HttpStatus.FORBIDDEN)

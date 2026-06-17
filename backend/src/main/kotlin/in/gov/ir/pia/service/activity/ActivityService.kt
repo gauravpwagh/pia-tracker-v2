@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import `in`.gov.ir.pia.audit.AuditLogWriter
+import `in`.gov.ir.pia.dashboard.ActivityRecordCreatedEvent
 import `in`.gov.ir.pia.domain.activity.ActivityRecord
 import `in`.gov.ir.pia.domain.activity.ProjectActivity
 import `in`.gov.ir.pia.repository.ActivityRecordRepository
@@ -15,12 +16,11 @@ import `in`.gov.ir.pia.repository.WorkflowInstanceRepository
 import `in`.gov.ir.pia.security.PiaPrincipal
 import `in`.gov.ir.pia.service.comment.CommentService
 import `in`.gov.ir.pia.service.comment.CreateCommentRequest
-import `in`.gov.ir.pia.dashboard.ActivityRecordCreatedEvent
 import `in`.gov.ir.pia.workflow.DrawingService
 import `in`.gov.ir.pia.workflow.WorkflowService
-import org.springframework.context.ApplicationEventPublisher
 import jakarta.persistence.EntityManager
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -211,6 +211,7 @@ class ActivityService(
      *
      * Throws 404 if the project is not accessible (zone mismatch or deleted).
      */
+
     /**
      * Returns activities on [projectId] visible to [principal].
      *
@@ -230,11 +231,12 @@ class ActivityService(
     ): List<ProjectActivity> {
         requireProjectAccess(projectId, principal)
 
-        val allActivities = principal.isSuperAdmin ||
-            principal.permissions.contains("ACTIVITY.READ.ALL") ||
-            principal.permissions.contains("ACTIVITY.READ.ZONE") ||
-            principal.designationCode == "CE_C" ||
-            principal.designationCode == "NODAL_DY_CE_C"
+        val allActivities =
+            principal.isSuperAdmin ||
+                principal.permissions.contains("ACTIVITY.READ.ALL") ||
+                principal.permissions.contains("ACTIVITY.READ.ZONE") ||
+                principal.designationCode == "CE_C" ||
+                principal.designationCode == "NODAL_DY_CE_C"
 
         return if (allActivities) {
             activityRepository.findAllByProjectIdAndIsDeletedFalseOrderByCreatedAtAsc(projectId)
@@ -350,8 +352,8 @@ class ActivityService(
         // activity as a whole — independent of whether the activity has records.
         workflowService.start(
             definitionCode = "ACTIVITY_STANDARD_V1",
-            entityType     = "PROJECT_ACTIVITY",
-            entityId       = activity.id,
+            entityType = "PROJECT_ACTIVITY",
+            entityId = activity.id,
         )
 
         // For Drawing Approval: auto-create the single activity record so the user
@@ -377,12 +379,13 @@ class ActivityService(
         // itself), seed the project_activity_summary row so the dashboard shows
         // the activity from the moment it is created.
         if (request.activityTypeCode == "TENDER_PACKAGING" ||
-            request.activityTypeCode == "TEMPORARY_OFFICE_SPACE") {
+            request.activityTypeCode == "TEMPORARY_OFFICE_SPACE"
+        ) {
             eventPublisher.publishEvent(
                 ActivityRecordCreatedEvent(
-                    projectId        = projectId,
+                    projectId = projectId,
                     activityTypeCode = request.activityTypeCode,
-                    recordSubtype    = null,
+                    recordSubtype = null,
                 ),
             )
         }
@@ -406,18 +409,19 @@ class ActivityService(
         val formDef = formDefinitionRepository.findLatestActiveByCode(formCode) ?: return
 
         val activity = activityRepository.findByIdAndIsDeletedFalse(activityId) ?: return
-        val project  = projectRepository.findByIdAndIsDeletedFalse(activity.projectId)
+        val project = projectRepository.findByIdAndIsDeletedFalse(activity.projectId)
 
-        val record = ActivityRecord(
-            projectActivityId = activityId,
-            formDefinitionId  = formDef.id,
-            workflowDefinitionId = null, // drawings use the checklist model, not the workflow engine
-            dataJson          = JsonNodeFactory.instance.objectNode(),
-            schemaVersionAtSave = formDef.version,
-            recordSubtype     = drawingType,
-            createdByUserId   = principal.userId,
-            updatedByUserId   = principal.userId,
-        )
+        val record =
+            ActivityRecord(
+                projectActivityId = activityId,
+                formDefinitionId = formDef.id,
+                workflowDefinitionId = null, // drawings use the checklist model, not the workflow engine
+                dataJson = JsonNodeFactory.instance.objectNode(),
+                schemaVersionAtSave = formDef.version,
+                recordSubtype = drawingType,
+                createdByUserId = principal.userId,
+                updatedByUserId = principal.userId,
+            )
         recordRepository.save(record)
 
         // Seed default approvers from the form definition's default_approver_designations.
@@ -425,9 +429,9 @@ class ActivityService(
 
         auditLogWriter.write(
             actorUserId = principal.userId,
-            action      = "ACTIVITY_RECORD.CREATE",
-            entityType  = "ACTIVITY_RECORD",
-            entityId    = record.id,
+            action = "ACTIVITY_RECORD.CREATE",
+            entityType = "ACTIVITY_RECORD",
+            entityId = record.id,
         )
     }
 
@@ -620,9 +624,9 @@ class ActivityService(
         // before any workflow action is taken.
         eventPublisher.publishEvent(
             ActivityRecordCreatedEvent(
-                projectId        = activity.projectId,
+                projectId = activity.projectId,
                 activityTypeCode = activity.activityTypeCode,
-                recordSubtype    = record.recordSubtype,
+                recordSubtype = record.recordSubtype,
             ),
         )
 
@@ -689,7 +693,7 @@ class ActivityService(
                 """.trimIndent(),
                 dataJsonString,
                 existing.schemaVersionAtSave,
-                request.name,   // null → COALESCE leaves existing name intact
+                request.name, // null → COALESCE leaves existing name intact
                 principal.userId,
                 recordId,
                 expectedVersion,
@@ -735,8 +739,9 @@ class ActivityService(
         recordId: UUID,
         principal: PiaPrincipal,
     ) {
-        val record = recordRepository.findByIdAndIsDeletedFalse(recordId)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val record =
+            recordRepository.findByIdAndIsDeletedFalse(recordId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val activity = getForPrincipal(record.projectActivityId, principal)
         requireRecordWriteAccess(activity.projectId, principal)
 
@@ -761,9 +766,9 @@ class ActivityService(
 
         auditLogWriter.write(
             actorUserId = principal.userId,
-            action      = "ACTIVITY_RECORD.DELETE",
-            entityType  = "ACTIVITY_RECORD",
-            entityId    = recordId,
+            action = "ACTIVITY_RECORD.DELETE",
+            entityType = "ACTIVITY_RECORD",
+            entityId = recordId,
         )
     }
 
@@ -919,69 +924,103 @@ class ActivityService(
      * Exposed publicly so [ActivityController.getActivity] can call it without
      * duplicating the type-dispatch logic.
      */
-    fun readMetadata(activityId: UUID, typeCode: String): JsonNode =
-        readDetails(activityId, typeCode)
+    fun readMetadata(
+        activityId: UUID,
+        typeCode: String,
+    ): JsonNode = readDetails(activityId, typeCode)
 
     /** Dispatch to the correct dedicated table for reads. */
-    private fun readDetails(activityId: UUID, typeCode: String): JsonNode {
-        val (table, cols) = when (typeCode) {
-            "LAND_ACQUISITION" ->
-                "land_acquisition_details" to
-                    listOf(
-                        "district", "sub_division_taluka",
-                        "area_hectares_total", "area_hectares_private", "area_hectares_govt", "area_hectares_forest",
-                        "villages_estimated_count",
-                    )
-            "FOREST_CLEARANCE" ->
-                "forest_clearance_details" to
-                    listOf("forest_division_name", "forest_area_hectares", "project_chainage_from", "project_chainage_to")
-            "UTILITY_SHIFTING" ->
-                "utility_shifting_details" to
-                    listOf(
-                        // Scope (activity-level)
-                        "total_count", "total_track_length_km",
-                        "utility_type", "owner_agency", "executing_agency",
-                        "chainage_from", "chainage_to",
-                        "estimated_cost", "sanctioned_cost",
-                        "work_start_date", "expected_completion_date", "actual_completion_date",
-                        "current_status", "remarks",
-                        // LT/HT/EHV
-                        "voltage_level", "length_km", "no_of_poles",
-                        // Pipeline
-                        "diameter_mm", "pipeline_length_m", "fluid_type",
-                        // S&T
-                        "cable_type", "cable_length_km", "no_of_circuits",
-                        // Quarter/Station
-                        "no_of_units", "area_sqm",
-                        // TSS/SS/OHE
-                        "capacity_mva", "no_of_bays",
-                        // Other
-                        "utility_description",
-                        // Agency-conditional
-                        "contractor_name", "work_order_no", "work_order_date",
-                    )
-            "DRAWING_APPROVAL" ->
-                "drawing_approval_details" to
-                    listOf("total_count", "drawing_type", "drawing_number")
-            "TENDER_PACKAGING" ->
-                "tender_packaging_details" to
-                    listOf("total_count", "package_name", "epc_document_prepared", "tender_finalized")
-            "TEMPORARY_OFFICE_SPACE" ->
-                "temporary_office_space_details" to
-                    listOf(
-                        "total_count",
-                        "details_required", "count", "structure_type",
-                        "new_agency_available", "new_tdc",
-                        "old_possession_given", "old_tdc",
-                        "hiring_rental_agreement", "hiring_tdc",
-                    )
-            else -> return JsonNodeFactory.instance.objectNode()
-        }
+    private fun readDetails(
+        activityId: UUID,
+        typeCode: String,
+    ): JsonNode {
+        val (table, cols) =
+            when (typeCode) {
+                "LAND_ACQUISITION" ->
+                    "land_acquisition_details" to
+                        listOf(
+                            "district",
+                            "sub_division_taluka",
+                            "area_hectares_total",
+                            "area_hectares_private",
+                            "area_hectares_govt",
+                            "area_hectares_forest",
+                            "villages_estimated_count",
+                        )
+                "FOREST_CLEARANCE" ->
+                    "forest_clearance_details" to
+                        listOf("forest_division_name", "forest_area_hectares", "project_chainage_from", "project_chainage_to")
+                "UTILITY_SHIFTING" ->
+                    "utility_shifting_details" to
+                        listOf(
+                            // Scope (activity-level)
+                            "total_count",
+                            "total_track_length_km",
+                            "utility_type",
+                            "owner_agency",
+                            "executing_agency",
+                            "chainage_from",
+                            "chainage_to",
+                            "estimated_cost",
+                            "sanctioned_cost",
+                            "work_start_date",
+                            "expected_completion_date",
+                            "actual_completion_date",
+                            "current_status",
+                            "remarks",
+                            // LT/HT/EHV
+                            "voltage_level",
+                            "length_km",
+                            "no_of_poles",
+                            // Pipeline
+                            "diameter_mm",
+                            "pipeline_length_m",
+                            "fluid_type",
+                            // S&T
+                            "cable_type",
+                            "cable_length_km",
+                            "no_of_circuits",
+                            // Quarter/Station
+                            "no_of_units",
+                            "area_sqm",
+                            // TSS/SS/OHE
+                            "capacity_mva",
+                            "no_of_bays",
+                            // Other
+                            "utility_description",
+                            // Agency-conditional
+                            "contractor_name",
+                            "work_order_no",
+                            "work_order_date",
+                        )
+                "DRAWING_APPROVAL" ->
+                    "drawing_approval_details" to
+                        listOf("total_count", "drawing_type", "drawing_number")
+                "TENDER_PACKAGING" ->
+                    "tender_packaging_details" to
+                        listOf("total_count", "package_name", "epc_document_prepared", "tender_finalized")
+                "TEMPORARY_OFFICE_SPACE" ->
+                    "temporary_office_space_details" to
+                        listOf(
+                            "total_count",
+                            "details_required",
+                            "count",
+                            "structure_type",
+                            "new_agency_available",
+                            "new_tdc",
+                            "old_possession_given",
+                            "old_tdc",
+                            "hiring_rental_agreement",
+                            "hiring_tdc",
+                        )
+                else -> return JsonNodeFactory.instance.objectNode()
+            }
 
-        val rows = jdbc.queryForList(
-            "SELECT ${cols.joinToString()} FROM $table WHERE activity_id = ?",
-            activityId,
-        )
+        val rows =
+            jdbc.queryForList(
+                "SELECT ${cols.joinToString()} FROM $table WHERE activity_id = ?",
+                activityId,
+            )
         if (rows.isEmpty()) return JsonNodeFactory.instance.objectNode()
 
         val node = JsonNodeFactory.instance.objectNode()
@@ -989,7 +1028,7 @@ class ActivityService(
         cols.forEach { col ->
             when (val v = row[col]) {
                 null -> {} // omit nulls — frontend treats missing keys as empty
-                is Boolean -> node.put(col, v)           // preserve as JSON boolean
+                is Boolean -> node.put(col, v) // preserve as JSON boolean
                 is String -> if (v.isNotBlank()) node.put(col, v)
                 is java.math.BigDecimal -> node.put(col, v)
                 is Int -> node.put(col, v)
@@ -1001,20 +1040,25 @@ class ActivityService(
     }
 
     /** Upsert type-specific fields into the dedicated detail table. */
-    private fun upsertDetails(activityId: UUID, typeCode: String, metadata: JsonNode?) {
+    private fun upsertDetails(
+        activityId: UUID,
+        typeCode: String,
+        metadata: JsonNode?,
+    ) {
         if (metadata == null) return
 
         fun str(key: String): String? =
-            metadata.get(key)?.takeIf { !it.isNull && it.isTextual }?.asText()?.ifBlank { null }
+            metadata
+                .get(key)
+                ?.takeIf { !it.isNull && it.isTextual }
+                ?.asText()
+                ?.ifBlank { null }
 
-        fun dec(key: String): java.math.BigDecimal? =
-            metadata.get(key)?.takeIf { !it.isNull && it.isNumber }?.decimalValue()
+        fun dec(key: String): java.math.BigDecimal? = metadata.get(key)?.takeIf { !it.isNull && it.isNumber }?.decimalValue()
 
-        fun int(key: String): Int? =
-            metadata.get(key)?.takeIf { !it.isNull && it.isNumber }?.intValue()
+        fun int(key: String): Int? = metadata.get(key)?.takeIf { !it.isNull && it.isNumber }?.intValue()
 
-        fun dat(key: String): LocalDate? =
-            str(key)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        fun dat(key: String): LocalDate? = str(key)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
         fun bool(key: String): Boolean =
             metadata.get(key)?.let {
@@ -1037,194 +1081,218 @@ class ActivityService(
             }
 
         when (typeCode) {
-            "LAND_ACQUISITION" -> jdbc.update(
-                """
-                INSERT INTO land_acquisition_details
-                    (activity_id, district, sub_division_taluka,
-                     area_hectares_total, area_hectares_private, area_hectares_govt, area_hectares_forest,
-                     villages_estimated_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (activity_id) DO UPDATE SET
-                    district                 = EXCLUDED.district,
-                    sub_division_taluka      = EXCLUDED.sub_division_taluka,
-                    area_hectares_total      = EXCLUDED.area_hectares_total,
-                    area_hectares_private    = EXCLUDED.area_hectares_private,
-                    area_hectares_govt       = EXCLUDED.area_hectares_govt,
-                    area_hectares_forest     = EXCLUDED.area_hectares_forest,
-                    villages_estimated_count = EXCLUDED.villages_estimated_count
-                """.trimIndent(),
-                activityId,
-                str("district"),
-                str("sub_division_taluka"),
-                dec("area_hectares_total"),
-                dec("area_hectares_private"),
-                dec("area_hectares_govt"),
-                dec("area_hectares_forest"),
-                int("villages_estimated_count"),
-            )
-            "FOREST_CLEARANCE" -> jdbc.update(
-                """
-                INSERT INTO forest_clearance_details
-                    (activity_id, forest_division_name, forest_area_hectares, project_chainage_from, project_chainage_to)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (activity_id) DO UPDATE SET
-                    forest_division_name  = EXCLUDED.forest_division_name,
-                    forest_area_hectares  = EXCLUDED.forest_area_hectares,
-                    project_chainage_from = EXCLUDED.project_chainage_from,
-                    project_chainage_to   = EXCLUDED.project_chainage_to
-                """.trimIndent(),
-                activityId,
-                str("forest_division_name"),
-                dec("forest_area_hectares"),
-                str("project_chainage_from"),
-                str("project_chainage_to"),
-            )
-            "UTILITY_SHIFTING" -> jdbc.update(
-                """
-                INSERT INTO utility_shifting_details (
-                    activity_id,
-                    total_count, total_track_length_km,
-                    utility_type, owner_agency, executing_agency,
-                    chainage_from, chainage_to,
-                    estimated_cost, sanctioned_cost,
-                    work_start_date, expected_completion_date, actual_completion_date,
-                    current_status, remarks,
-                    voltage_level, length_km, no_of_poles,
-                    diameter_mm, pipeline_length_m, fluid_type,
-                    cable_type, cable_length_km, no_of_circuits,
-                    no_of_units, area_sqm,
-                    capacity_mva, no_of_bays,
-                    utility_description,
-                    contractor_name, work_order_no, work_order_date
-                ) VALUES (
-                    ?,
-                    ?, ?,
-                    ?, ?, ?,
-                    ?, ?,
-                    ?, ?,
-                    ?, ?, ?,
-                    ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?,
-                    ?, ?,
-                    ?,
-                    ?, ?, ?
+            "LAND_ACQUISITION" ->
+                jdbc.update(
+                    """
+                    INSERT INTO land_acquisition_details
+                        (activity_id, district, sub_division_taluka,
+                         area_hectares_total, area_hectares_private, area_hectares_govt, area_hectares_forest,
+                         villages_estimated_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (activity_id) DO UPDATE SET
+                        district                 = EXCLUDED.district,
+                        sub_division_taluka      = EXCLUDED.sub_division_taluka,
+                        area_hectares_total      = EXCLUDED.area_hectares_total,
+                        area_hectares_private    = EXCLUDED.area_hectares_private,
+                        area_hectares_govt       = EXCLUDED.area_hectares_govt,
+                        area_hectares_forest     = EXCLUDED.area_hectares_forest,
+                        villages_estimated_count = EXCLUDED.villages_estimated_count
+                    """.trimIndent(),
+                    activityId,
+                    str("district"),
+                    str("sub_division_taluka"),
+                    dec("area_hectares_total"),
+                    dec("area_hectares_private"),
+                    dec("area_hectares_govt"),
+                    dec("area_hectares_forest"),
+                    int("villages_estimated_count"),
                 )
-                ON CONFLICT (activity_id) DO UPDATE SET
-                    total_count               = EXCLUDED.total_count,
-                    total_track_length_km     = EXCLUDED.total_track_length_km,
-                    utility_type              = EXCLUDED.utility_type,
-                    owner_agency              = EXCLUDED.owner_agency,
-                    executing_agency          = EXCLUDED.executing_agency,
-                    chainage_from             = EXCLUDED.chainage_from,
-                    chainage_to               = EXCLUDED.chainage_to,
-                    estimated_cost            = EXCLUDED.estimated_cost,
-                    sanctioned_cost           = EXCLUDED.sanctioned_cost,
-                    work_start_date           = EXCLUDED.work_start_date,
-                    expected_completion_date  = EXCLUDED.expected_completion_date,
-                    actual_completion_date    = EXCLUDED.actual_completion_date,
-                    current_status            = EXCLUDED.current_status,
-                    remarks                   = EXCLUDED.remarks,
-                    voltage_level             = EXCLUDED.voltage_level,
-                    length_km                 = EXCLUDED.length_km,
-                    no_of_poles               = EXCLUDED.no_of_poles,
-                    diameter_mm               = EXCLUDED.diameter_mm,
-                    pipeline_length_m         = EXCLUDED.pipeline_length_m,
-                    fluid_type                = EXCLUDED.fluid_type,
-                    cable_type                = EXCLUDED.cable_type,
-                    cable_length_km           = EXCLUDED.cable_length_km,
-                    no_of_circuits            = EXCLUDED.no_of_circuits,
-                    no_of_units               = EXCLUDED.no_of_units,
-                    area_sqm                  = EXCLUDED.area_sqm,
-                    capacity_mva              = EXCLUDED.capacity_mva,
-                    no_of_bays                = EXCLUDED.no_of_bays,
-                    utility_description       = EXCLUDED.utility_description,
-                    contractor_name           = EXCLUDED.contractor_name,
-                    work_order_no             = EXCLUDED.work_order_no,
-                    work_order_date           = EXCLUDED.work_order_date
-                """.trimIndent(),
-                activityId,
-                int("total_count"), dec("total_track_length_km"),
-                str("utility_type"), str("owner_agency"), str("executing_agency"),
-                str("chainage_from"), str("chainage_to"),
-                dec("estimated_cost"), dec("sanctioned_cost"),
-                dat("work_start_date"), dat("expected_completion_date"), dat("actual_completion_date"),
-                str("current_status"), str("remarks"),
-                str("voltage_level"), dec("length_km"), int("no_of_poles"),
-                int("diameter_mm"), dec("pipeline_length_m"), str("fluid_type"),
-                str("cable_type"), dec("cable_length_km"), int("no_of_circuits"),
-                int("no_of_units"), dec("area_sqm"),
-                dec("capacity_mva"), int("no_of_bays"),
-                str("utility_description"),
-                str("contractor_name"), str("work_order_no"), dat("work_order_date"),
-            )
-            "DRAWING_APPROVAL" -> jdbc.update(
-                """
-                INSERT INTO drawing_approval_details
-                    (activity_id, total_count, drawing_type, drawing_number)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (activity_id) DO UPDATE SET
-                    total_count    = EXCLUDED.total_count,
-                    drawing_type   = EXCLUDED.drawing_type,
-                    drawing_number = EXCLUDED.drawing_number
-                """.trimIndent(),
-                activityId,
-                int("total_count"),
-                str("drawing_type"),
-                str("drawing_number"),
-            )
-            "TENDER_PACKAGING" -> jdbc.update(
-                """
-                INSERT INTO tender_packaging_details
-                    (activity_id, total_count, package_name, epc_document_prepared, tender_finalized)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT (activity_id) DO UPDATE SET
-                    total_count           = EXCLUDED.total_count,
-                    package_name          = EXCLUDED.package_name,
-                    epc_document_prepared = EXCLUDED.epc_document_prepared,
-                    tender_finalized      = EXCLUDED.tender_finalized
-                """.trimIndent(),
-                activityId,
-                int("total_count"),
-                str("package_name"),
-                bool("epc_document_prepared"),
-                bool("tender_finalized"),
-            )
-            "TEMPORARY_OFFICE_SPACE" -> jdbc.update(
-                """
-                INSERT INTO temporary_office_space_details
-                    (activity_id, total_count,
-                     details_required, count, structure_type,
-                     new_agency_available, new_tdc,
-                     old_possession_given, old_tdc,
-                     hiring_rental_agreement, hiring_tdc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (activity_id) DO UPDATE SET
-                    total_count             = EXCLUDED.total_count,
-                    details_required        = EXCLUDED.details_required,
-                    count                   = EXCLUDED.count,
-                    structure_type          = EXCLUDED.structure_type,
-                    new_agency_available    = EXCLUDED.new_agency_available,
-                    new_tdc                 = EXCLUDED.new_tdc,
-                    old_possession_given    = EXCLUDED.old_possession_given,
-                    old_tdc                 = EXCLUDED.old_tdc,
-                    hiring_rental_agreement = EXCLUDED.hiring_rental_agreement,
-                    hiring_tdc              = EXCLUDED.hiring_tdc
-                """.trimIndent(),
-                activityId,
-                int("total_count"),
-                bool("details_required"),
-                int("count"),
-                str("structure_type"),
-                boolOrNull("new_agency_available"),
-                dat("new_tdc"),
-                boolOrNull("old_possession_given"),
-                dat("old_tdc"),
-                boolOrNull("hiring_rental_agreement"),
-                dat("hiring_tdc"),
-            )
+            "FOREST_CLEARANCE" ->
+                jdbc.update(
+                    """
+                    INSERT INTO forest_clearance_details
+                        (activity_id, forest_division_name, forest_area_hectares, project_chainage_from, project_chainage_to)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (activity_id) DO UPDATE SET
+                        forest_division_name  = EXCLUDED.forest_division_name,
+                        forest_area_hectares  = EXCLUDED.forest_area_hectares,
+                        project_chainage_from = EXCLUDED.project_chainage_from,
+                        project_chainage_to   = EXCLUDED.project_chainage_to
+                    """.trimIndent(),
+                    activityId,
+                    str("forest_division_name"),
+                    dec("forest_area_hectares"),
+                    str("project_chainage_from"),
+                    str("project_chainage_to"),
+                )
+            "UTILITY_SHIFTING" ->
+                jdbc.update(
+                    """
+                    INSERT INTO utility_shifting_details (
+                        activity_id,
+                        total_count, total_track_length_km,
+                        utility_type, owner_agency, executing_agency,
+                        chainage_from, chainage_to,
+                        estimated_cost, sanctioned_cost,
+                        work_start_date, expected_completion_date, actual_completion_date,
+                        current_status, remarks,
+                        voltage_level, length_km, no_of_poles,
+                        diameter_mm, pipeline_length_m, fluid_type,
+                        cable_type, cable_length_km, no_of_circuits,
+                        no_of_units, area_sqm,
+                        capacity_mva, no_of_bays,
+                        utility_description,
+                        contractor_name, work_order_no, work_order_date
+                    ) VALUES (
+                        ?,
+                        ?, ?,
+                        ?, ?, ?,
+                        ?, ?,
+                        ?, ?,
+                        ?, ?, ?,
+                        ?, ?,
+                        ?, ?, ?,
+                        ?, ?, ?,
+                        ?, ?, ?,
+                        ?, ?,
+                        ?, ?,
+                        ?,
+                        ?, ?, ?
+                    )
+                    ON CONFLICT (activity_id) DO UPDATE SET
+                        total_count               = EXCLUDED.total_count,
+                        total_track_length_km     = EXCLUDED.total_track_length_km,
+                        utility_type              = EXCLUDED.utility_type,
+                        owner_agency              = EXCLUDED.owner_agency,
+                        executing_agency          = EXCLUDED.executing_agency,
+                        chainage_from             = EXCLUDED.chainage_from,
+                        chainage_to               = EXCLUDED.chainage_to,
+                        estimated_cost            = EXCLUDED.estimated_cost,
+                        sanctioned_cost           = EXCLUDED.sanctioned_cost,
+                        work_start_date           = EXCLUDED.work_start_date,
+                        expected_completion_date  = EXCLUDED.expected_completion_date,
+                        actual_completion_date    = EXCLUDED.actual_completion_date,
+                        current_status            = EXCLUDED.current_status,
+                        remarks                   = EXCLUDED.remarks,
+                        voltage_level             = EXCLUDED.voltage_level,
+                        length_km                 = EXCLUDED.length_km,
+                        no_of_poles               = EXCLUDED.no_of_poles,
+                        diameter_mm               = EXCLUDED.diameter_mm,
+                        pipeline_length_m         = EXCLUDED.pipeline_length_m,
+                        fluid_type                = EXCLUDED.fluid_type,
+                        cable_type                = EXCLUDED.cable_type,
+                        cable_length_km           = EXCLUDED.cable_length_km,
+                        no_of_circuits            = EXCLUDED.no_of_circuits,
+                        no_of_units               = EXCLUDED.no_of_units,
+                        area_sqm                  = EXCLUDED.area_sqm,
+                        capacity_mva              = EXCLUDED.capacity_mva,
+                        no_of_bays                = EXCLUDED.no_of_bays,
+                        utility_description       = EXCLUDED.utility_description,
+                        contractor_name           = EXCLUDED.contractor_name,
+                        work_order_no             = EXCLUDED.work_order_no,
+                        work_order_date           = EXCLUDED.work_order_date
+                    """.trimIndent(),
+                    activityId,
+                    int("total_count"),
+                    dec("total_track_length_km"),
+                    str("utility_type"),
+                    str("owner_agency"),
+                    str("executing_agency"),
+                    str("chainage_from"),
+                    str("chainage_to"),
+                    dec("estimated_cost"),
+                    dec("sanctioned_cost"),
+                    dat("work_start_date"),
+                    dat("expected_completion_date"),
+                    dat("actual_completion_date"),
+                    str("current_status"),
+                    str("remarks"),
+                    str("voltage_level"),
+                    dec("length_km"),
+                    int("no_of_poles"),
+                    int("diameter_mm"),
+                    dec("pipeline_length_m"),
+                    str("fluid_type"),
+                    str("cable_type"),
+                    dec("cable_length_km"),
+                    int("no_of_circuits"),
+                    int("no_of_units"),
+                    dec("area_sqm"),
+                    dec("capacity_mva"),
+                    int("no_of_bays"),
+                    str("utility_description"),
+                    str("contractor_name"),
+                    str("work_order_no"),
+                    dat("work_order_date"),
+                )
+            "DRAWING_APPROVAL" ->
+                jdbc.update(
+                    """
+                    INSERT INTO drawing_approval_details
+                        (activity_id, total_count, drawing_type, drawing_number)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT (activity_id) DO UPDATE SET
+                        total_count    = EXCLUDED.total_count,
+                        drawing_type   = EXCLUDED.drawing_type,
+                        drawing_number = EXCLUDED.drawing_number
+                    """.trimIndent(),
+                    activityId,
+                    int("total_count"),
+                    str("drawing_type"),
+                    str("drawing_number"),
+                )
+            "TENDER_PACKAGING" ->
+                jdbc.update(
+                    """
+                    INSERT INTO tender_packaging_details
+                        (activity_id, total_count, package_name, epc_document_prepared, tender_finalized)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (activity_id) DO UPDATE SET
+                        total_count           = EXCLUDED.total_count,
+                        package_name          = EXCLUDED.package_name,
+                        epc_document_prepared = EXCLUDED.epc_document_prepared,
+                        tender_finalized      = EXCLUDED.tender_finalized
+                    """.trimIndent(),
+                    activityId,
+                    int("total_count"),
+                    str("package_name"),
+                    bool("epc_document_prepared"),
+                    bool("tender_finalized"),
+                )
+            "TEMPORARY_OFFICE_SPACE" ->
+                jdbc.update(
+                    """
+                    INSERT INTO temporary_office_space_details
+                        (activity_id, total_count,
+                         details_required, count, structure_type,
+                         new_agency_available, new_tdc,
+                         old_possession_given, old_tdc,
+                         hiring_rental_agreement, hiring_tdc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (activity_id) DO UPDATE SET
+                        total_count             = EXCLUDED.total_count,
+                        details_required        = EXCLUDED.details_required,
+                        count                   = EXCLUDED.count,
+                        structure_type          = EXCLUDED.structure_type,
+                        new_agency_available    = EXCLUDED.new_agency_available,
+                        new_tdc                 = EXCLUDED.new_tdc,
+                        old_possession_given    = EXCLUDED.old_possession_given,
+                        old_tdc                 = EXCLUDED.old_tdc,
+                        hiring_rental_agreement = EXCLUDED.hiring_rental_agreement,
+                        hiring_tdc              = EXCLUDED.hiring_tdc
+                    """.trimIndent(),
+                    activityId,
+                    int("total_count"),
+                    bool("details_required"),
+                    int("count"),
+                    str("structure_type"),
+                    boolOrNull("new_agency_available"),
+                    dat("new_tdc"),
+                    boolOrNull("old_possession_given"),
+                    dat("old_tdc"),
+                    boolOrNull("hiring_rental_agreement"),
+                    dat("hiring_tdc"),
+                )
         }
     }
 
@@ -1274,31 +1342,38 @@ class ActivityService(
         principal: PiaPrincipal,
     ): SectionWorkflowStateResponse {
         val activity = getForPrincipal(activityId, principal)
-        val instance = instanceRepository.findByEntityTypeAndEntityIdNoSection(
-            "PROJECT_ACTIVITY", activity.id,
-        )
-        val syntheticDraft = SectionWorkflowStateResponse(
-            instanceId       = UUID.fromString("00000000-0000-0000-0000-000000000000"),
-            sectionCode      = null,
-            currentStateCode = "DRAFT",
-            currentStateLabel = "Draft",
-            isTerminal       = false,
-            isSlaBreached    = false,
-            enteredStateAt   = activity.createdAt,
-            availableActions = if (principal.roleCodes.contains("ROLE_DY_CE_C") || principal.isSuperAdmin)
-                listOf("submit") else emptyList(),
-        )
+        val instance =
+            instanceRepository.findByEntityTypeAndEntityIdNoSection(
+                "PROJECT_ACTIVITY",
+                activity.id,
+            )
+        val syntheticDraft =
+            SectionWorkflowStateResponse(
+                instanceId = UUID.fromString("00000000-0000-0000-0000-000000000000"),
+                sectionCode = null,
+                currentStateCode = "DRAFT",
+                currentStateLabel = "Draft",
+                isTerminal = false,
+                isSlaBreached = false,
+                enteredStateAt = activity.createdAt,
+                availableActions =
+                    if (principal.roleCodes.contains("ROLE_DY_CE_C") || principal.isSuperAdmin) {
+                        listOf("submit")
+                    } else {
+                        emptyList()
+                    },
+            )
         if (instance == null) return syntheticDraft
 
         val available = workflowService.availableActions(instance, principal)
         return SectionWorkflowStateResponse(
-            instanceId       = instance.id,
-            sectionCode      = null,
+            instanceId = instance.id,
+            sectionCode = null,
             currentStateCode = instance.currentState.code,
             currentStateLabel = instance.currentState.label,
-            isTerminal       = instance.currentState.isTerminal,
-            isSlaBreached    = workflowService.isSlaBreached(instance.id),
-            enteredStateAt   = instance.enteredStateAt,
+            isTerminal = instance.currentState.isTerminal,
+            isSlaBreached = workflowService.isSlaBreached(instance.id),
+            enteredStateAt = instance.enteredStateAt,
             availableActions = available,
         )
     }
@@ -1319,34 +1394,38 @@ class ActivityService(
     ): SectionWorkflowStateResponse {
         val activity = getForPrincipal(activityId, principal)
 
-        var instance = instanceRepository.findByEntityTypeAndEntityIdNoSection(
-            "PROJECT_ACTIVITY", activity.id,
-        )
+        var instance =
+            instanceRepository.findByEntityTypeAndEntityIdNoSection(
+                "PROJECT_ACTIVITY",
+                activity.id,
+            )
         // Lazy bootstrap for activities created before V028 migration.
         if (instance == null) {
-            instance = workflowService.start(
-                definitionCode = "ACTIVITY_STANDARD_V1",
-                entityType     = "PROJECT_ACTIVITY",
-                entityId       = activity.id,
-            )
+            instance =
+                workflowService.start(
+                    definitionCode = "ACTIVITY_STANDARD_V1",
+                    entityType = "PROJECT_ACTIVITY",
+                    entityId = activity.id,
+                )
         }
 
-        val updated = workflowService.transition(
-            instanceId = instance.id,
-            actionCode = action,
-            actor      = principal,
-            comment    = comment,
-        )
+        val updated =
+            workflowService.transition(
+                instanceId = instance.id,
+                actionCode = action,
+                actor = principal,
+                comment = comment,
+            )
         val available = workflowService.availableActions(updated, principal)
         return SectionWorkflowStateResponse(
-            instanceId        = updated.id,
-            sectionCode       = null,
-            currentStateCode  = updated.currentState.code,
+            instanceId = updated.id,
+            sectionCode = null,
+            currentStateCode = updated.currentState.code,
             currentStateLabel = updated.currentState.label,
-            isTerminal        = updated.currentState.isTerminal,
-            isSlaBreached     = false,
-            enteredStateAt    = updated.enteredStateAt,
-            availableActions  = available,
+            isTerminal = updated.currentState.isTerminal,
+            isSlaBreached = false,
+            enteredStateAt = updated.enteredStateAt,
+            availableActions = available,
         )
     }
 
@@ -1374,42 +1453,56 @@ class ActivityService(
         comment: String?,
         principal: PiaPrincipal,
     ): ActivityWorkflowActionResult {
-        val activity = activityRepository.findByIdAndIsDeletedFalse(activityId)
-            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val activity =
+            activityRepository.findByIdAndIsDeletedFalse(activityId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
         requireProjectAccess(activity.projectId, principal)
 
-        val records = recordRepository
-            .findAllByProjectActivityIdAndIsDeletedFalseOrderByCreatedAtAsc(activityId)
+        val records =
+            recordRepository
+                .findAllByProjectActivityIdAndIsDeletedFalseOrderByCreatedAtAsc(activityId)
 
         var succeeded = 0
         var failed = 0
         var skipped = 0
 
         for (record in records) {
-            val instances = instanceRepository.findAllByEntityTypeAndEntityId(
-                "ACTIVITY_RECORD",
-                record.id,
-            )
-            if (instances.isEmpty()) { skipped++; continue }
+            val instances =
+                instanceRepository.findAllByEntityTypeAndEntityId(
+                    "ACTIVITY_RECORD",
+                    record.id,
+                )
+            if (instances.isEmpty()) {
+                skipped++
+                continue
+            }
 
             for (instance in instances) {
-                if (instance.currentState.isTerminal) { skipped++; continue }
+                if (instance.currentState.isTerminal) {
+                    skipped++
+                    continue
+                }
 
                 val available = workflowService.availableActions(instance, principal)
-                if (action !in available) { skipped++; continue }
+                if (action !in available) {
+                    skipped++
+                    continue
+                }
 
                 try {
                     workflowService.transition(
                         instanceId = instance.id,
                         actionCode = action,
-                        actor      = principal,
-                        comment    = comment,
+                        actor = principal,
+                        comment = comment,
                     )
                     succeeded++
                 } catch (ex: Exception) {
                     log.debug(
                         "Activity workflow action '{}' failed for instance {}: {}",
-                        action, instance.id, ex.message,
+                        action,
+                        instance.id,
+                        ex.message,
                     )
                     failed++
                 }
@@ -1418,9 +1511,9 @@ class ActivityService(
 
         return ActivityWorkflowActionResult(
             totalRecords = records.size,
-            succeeded    = succeeded,
-            failed       = failed,
-            skipped      = skipped,
+            succeeded = succeeded,
+            failed = failed,
+            skipped = skipped,
         )
     }
 
@@ -1460,9 +1553,12 @@ class ActivityService(
     }
 
     /** Backward-compat alias used by activity-level create/update which still requires Dy CE assignment. */
-    private fun requireDyceAssignment(projectId: UUID, principal: PiaPrincipal) {
+    private fun requireDyceAssignment(
+        projectId: UUID,
+        principal: PiaPrincipal,
+    ) {
         if (principal.isSuperAdmin) return
-        if (principal.designationCode == "CE_C") return   // CE/C can also manage activities
+        if (principal.designationCode == "CE_C") return // CE/C can also manage activities
         val assignedRoles =
             assignmentRepository
                 .findAllByProjectIdAndIsActiveTrue(projectId)
@@ -1485,8 +1581,7 @@ class ActivityService(
      * dedicated detail table.  When null, falls back to the entity's [metadataJson]
      * JSONB column (kept for backwards compatibility with list endpoints).
      */
-    fun toDetailResponsePublic(a: ProjectActivity): ActivityDetailResponse =
-        a.toDetailResponse(readDetails(a.id, a.activityTypeCode))
+    fun toDetailResponsePublic(a: ProjectActivity): ActivityDetailResponse = a.toDetailResponse(readDetails(a.id, a.activityTypeCode))
 
     private fun ProjectActivity.toDetailResponse(metaOverride: JsonNode? = null): ActivityDetailResponse =
         ActivityDetailResponse(

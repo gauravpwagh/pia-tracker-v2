@@ -45,22 +45,24 @@ class PanIndiaDashboardService(
 ) {
     fun getPanIndiaDashboard(): PanIndiaDashboardResponse {
         // Read system-wide KPIs from the singleton row (default 0 if not yet populated).
-        val kpis = jdbc.query(
-            """
-            SELECT total_projects_active,
-                   total_projects_with_sla_breaches,
-                   total_drawings_in_approval
-            FROM pan_india_summary
-            LIMIT 1
-            """.trimIndent(),
-            { rs, _ ->
-                Triple(
-                    rs.getInt("total_projects_active"),
-                    rs.getInt("total_projects_with_sla_breaches"),
-                    rs.getInt("total_drawings_in_approval"),
-                )
-            },
-        ).firstOrNull() ?: Triple(0, 0, 0)
+        val kpis =
+            jdbc
+                .query(
+                    """
+                    SELECT total_projects_active,
+                           total_projects_with_sla_breaches,
+                           total_drawings_in_approval
+                    FROM pan_india_summary
+                    LIMIT 1
+                    """.trimIndent(),
+                    { rs, _ ->
+                        Triple(
+                            rs.getInt("total_projects_active"),
+                            rs.getInt("total_projects_with_sla_breaches"),
+                            rs.getInt("total_drawings_in_approval"),
+                        )
+                    },
+                ).firstOrNull() ?: Triple(0, 0, 0)
 
         val zones = zoneDashboardService.loadAllZones()
 

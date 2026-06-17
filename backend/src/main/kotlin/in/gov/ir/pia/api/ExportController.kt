@@ -65,7 +65,8 @@ class ExportController(
         @PathVariable projectId: UUID,
     ): ResponseEntity<ByteArray> {
         val (bytes, fileName) = exportService.exportProject(projectId)
-        return ResponseEntity.ok()
+        return ResponseEntity
+            .ok()
             .headers(xlsxHeaders(fileName))
             .body(bytes)
     }
@@ -149,7 +150,8 @@ class ExportController(
     ): ResponseEntity<ByteArray> =
         when (val result = exportService.download(jobId)) {
             is DownloadResult.Ready ->
-                ResponseEntity.ok()
+                ResponseEntity
+                    .ok()
                     .headers(xlsxHeaders(result.fileName))
                     .body(result.bytes)
 
@@ -179,9 +181,10 @@ class ExportController(
 
     private fun xlsxHeaders(fileName: String): HttpHeaders =
         HttpHeaders().apply {
-            contentType = MediaType.parseMediaType(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+            contentType =
+                MediaType.parseMediaType(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
             contentDisposition = ContentDisposition.attachment().filename(fileName).build()
         }
 }

@@ -48,10 +48,11 @@ class ExportJobProcessor(
     fun processJob(jobId: UUID) {
         log.info("Processing export job {}", jobId)
 
-        val row = jdbc.queryForMap(
-            "SELECT export_scope, scope_id, created_by_user_id FROM export_jobs WHERE id = ?",
-            jobId,
-        )
+        val row =
+            jdbc.queryForMap(
+                "SELECT export_scope, scope_id, created_by_user_id FROM export_jobs WHERE id = ?",
+                jobId,
+            )
         val scope = row["export_scope"] as String
         val scopeId = row["scope_id"] as UUID?
         val createdByUserId = row["created_by_user_id"] as UUID
@@ -99,7 +100,10 @@ class ExportJobProcessor(
         }
     }
 
-    private fun generateExcel(scope: String, scopeId: UUID?): Pair<ByteArray, String> =
+    private fun generateExcel(
+        scope: String,
+        scopeId: UUID?,
+    ): Pair<ByteArray, String> =
         when (scope) {
             "PROJECT" -> {
                 requireNotNull(scopeId) { "scope_id must not be null for PROJECT exports" }
@@ -108,7 +112,7 @@ class ExportJobProcessor(
             "ZONE" -> {
                 requireNotNull(scopeId) { "scope_id must not be null for ZONE exports" }
                 zoneExcelGenerator.generate(scopeId) to
-                    "zone-export-${scopeId}-${System.currentTimeMillis()}.xlsx"
+                    "zone-export-$scopeId-${System.currentTimeMillis()}.xlsx"
             }
             else -> error("Unsupported async export scope: $scope")
         }

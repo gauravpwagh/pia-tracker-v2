@@ -80,25 +80,30 @@ class ZoneDashboardGateIntegrationTest {
 
         // Users seeded by V001_004
         val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_C_USER_ID: UUID   = UUID.fromString("11111111-1111-1111-1111-111111111102") // NR zone
-        val CE_C_USER_ID: UUID    = UUID.fromString("11111111-1111-1111-1111-111111111103")
-        val DYCE_1_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111104")
-        val DYCE_2_USER_ID: UUID  = UUID.fromString("11111111-1111-1111-1111-111111111105")
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102") // NR zone
+        val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
+        val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
+        val DYCE_2_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111105")
 
         // Cross-zone user seeded by V017_001: CAO_C in SCR with NR cross-zone grant
         val CAO_C_SCR_NR_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111112")
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
+
     @Autowired lateinit var jdbc: JdbcTemplate
+
     @MockkBean lateinit var minioClient: MinioClient
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun loginAs(userId: UUID): List<String> {
-        val resp = restTemplate.postForEntity(
-            "/api/v1/auth/select-user", SelectUserRequest(userId), Void::class.java,
-        )
+        val resp =
+            restTemplate.postForEntity(
+                "/api/v1/auth/select-user",
+                SelectUserRequest(userId),
+                Void::class.java,
+            )
         assertThat(resp.statusCode).isEqualTo(HttpStatus.OK)
         return resp.headers["Set-Cookie"] ?: emptyList()
     }
@@ -109,10 +114,19 @@ class ZoneDashboardGateIntegrationTest {
         return h
     }
 
-    private fun <T> post(url: String, body: Any, cookies: List<String>, type: Class<T>) =
+    private fun <T> post(
+        url: String,
+        body: Any,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
 
-    private fun <T> get(url: String, cookies: List<String>, type: Class<T>) =
+    private fun <T> get(
+        url: String,
+        cookies: List<String>,
+        type: Class<T>,
+    ) =
         restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), type)
 
     // ── Gate test ─────────────────────────────────────────────────────────────
@@ -124,32 +138,52 @@ class ZoneDashboardGateIntegrationTest {
 
         // ── Step 1: Create two NR projects ────────────────────────────────────
         val edgs = loginAs(EDGS_CI_USER_ID)
-        val cao  = loginAs(CAO_C_USER_ID)
-        val ce   = loginAs(CE_C_USER_ID)
+        val cao = loginAs(CAO_C_USER_ID)
+        val ce = loginAs(CE_C_USER_ID)
 
-        val project1 = post(
-            "/api/v1/projects",
-            CreateProjectRequest(name = "Zone Gate Project Alpha ${UUID.randomUUID()}", zoneId = nrZoneId),
-            edgs, ProjectDetailResponse::class.java,
-        ).body!!
+        val project1 =
+            post(
+                "/api/v1/projects",
+                CreateProjectRequest(name = "Zone Gate Project Alpha ${UUID.randomUUID()}", zoneId = nrZoneId),
+                edgs,
+                ProjectDetailResponse::class.java,
+            ).body!!
 
-        val project2 = post(
-            "/api/v1/projects",
-            CreateProjectRequest(name = "Zone Gate Project Beta ${UUID.randomUUID()}", zoneId = nrZoneId),
-            edgs, ProjectDetailResponse::class.java,
-        ).body!!
+        val project2 =
+            post(
+                "/api/v1/projects",
+                CreateProjectRequest(name = "Zone Gate Project Beta ${UUID.randomUUID()}", zoneId = nrZoneId),
+                edgs,
+                ProjectDetailResponse::class.java,
+            ).body!!
 
         // CAO/C allocates both
-        post("/api/v1/projects/${project1.id}/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID), cao, ProjectDetailResponse::class.java)
-        post("/api/v1/projects/${project2.id}/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID), cao, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/${project1.id}/allocate",
+            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            cao,
+            ProjectDetailResponse::class.java,
+        )
+        post(
+            "/api/v1/projects/${project2.id}/allocate",
+            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            cao,
+            ProjectDetailResponse::class.java,
+        )
 
         // CE/C sets up teams (ensures projects are fully initialised)
-        post("/api/v1/projects/${project1.id}/assign-dyce",
-            AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)), ce, ProjectDetailResponse::class.java)
-        post("/api/v1/projects/${project1.id}/designate-nodal",
-            DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID), ce, ProjectDetailResponse::class.java)
+        post(
+            "/api/v1/projects/${project1.id}/assign-dyce",
+            AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
+        post(
+            "/api/v1/projects/${project1.id}/designate-nodal",
+            DesignateNodalRequest(nodalUserId = DYCE_2_USER_ID),
+            ce,
+            ProjectDetailResponse::class.java,
+        )
 
         // ── Step 2: CAO/C of NR sees exactly NR zone with both projects ───────
         val caoResp = get("/api/v1/dashboard/zone", cao, ZoneDashboardResponse::class.java)

@@ -70,7 +70,9 @@ interface ProjectRepository : JpaRepository<Project, UUID> {
         ORDER BY p.createdAt DESC
         """,
     )
-    fun findAllByAssignedUser(@Param("userId") userId: UUID): List<Project>
+    fun findAllByAssignedUser(
+        @Param("userId") userId: UUID,
+    ): List<Project>
 
     /**
      * Returns the project only if [userId] has an active assignment on it.

@@ -62,14 +62,19 @@ class ExportService(
      * Asynchronous zone export.
      * Creates a QUEUED job row, publishes the creation event, and returns immediately.
      */
-    fun submitZoneExport(zoneId: UUID, createdByUserId: UUID): ExportJobSubmitResponse {
+    fun submitZoneExport(
+        zoneId: UUID,
+        createdByUserId: UUID,
+    ): ExportJobSubmitResponse {
         val jobId = UUID.randomUUID()
         jdbc.update(
             """
             INSERT INTO export_jobs (id, export_scope, scope_id, status, created_by_user_id)
             VALUES (?, 'ZONE', ?, 'QUEUED', ?)
             """.trimIndent(),
-            jobId, zoneId, createdByUserId,
+            jobId,
+            zoneId,
+            createdByUserId,
         )
         // Published inside the transaction — listener fires AFTER_COMMIT
         eventPublisher.publishEvent(ExportJobCreatedEvent(jobId))
@@ -81,10 +86,11 @@ class ExportService(
      */
     @Transactional(readOnly = true)
     fun getJobStatus(jobId: UUID): ExportJobStatusResponse {
-        val row = jdbc.queryForMap(
-            "SELECT status, file_name, error_message FROM export_jobs WHERE id = ?",
-            jobId,
-        )
+        val row =
+            jdbc.queryForMap(
+                "SELECT status, file_name, error_message FROM export_jobs WHERE id = ?",
+                jobId,
+            )
         return ExportJobStatusResponse(
             jobId = jobId,
             status = row["status"] as String,
@@ -102,13 +108,14 @@ class ExportService(
      */
     fun download(jobId: UUID): DownloadResult {
         // Optimistic fetch — check preconditions before touching download_count
-        val row = jdbc.queryForMap(
-            """
-            SELECT status, file_data, file_name, download_count, expires_at
-            FROM export_jobs WHERE id = ?
-            """.trimIndent(),
-            jobId,
-        ) ?: return DownloadResult.NotFound
+        val row =
+            jdbc.queryForMap(
+                """
+                SELECT status, file_data, file_name, download_count, expires_at
+                FROM export_jobs WHERE id = ?
+                """.trimIndent(),
+                jobId,
+            ) ?: return DownloadResult.NotFound
 
         val status = row["status"] as String
         if (status != "COMPLETED") return DownloadResult.NotReady(status)
@@ -117,7 +124,11 @@ class ExportService(
         if (downloadCount >= 1) return DownloadResult.AlreadyDownloaded
 
         val expiresAt = (row["expires_at"] as? java.sql.Timestamp)?.toInstant()
-        if (expiresAt != null && java.time.Instant.now().isAfter(expiresAt)) {
+        if (expiresAt != null &&
+            java.time.Instant
+                .now()
+                .isAfter(expiresAt)
+        ) {
             return DownloadResult.Expired
         }
 
@@ -137,9 +148,18 @@ class ExportService(
 // ── Download result sealed hierarchy ─────────────────────────────────────────
 
 sealed interface DownloadResult {
-    data class Ready(val bytes: ByteArray, val fileName: String) : DownloadResult
-    data class NotReady(val status: String) : DownloadResult
+    data class Ready(
+        val bytes: ByteArray,
+        val fileName: String,
+    ) : DownloadResult
+
+    data class NotReady(
+        val status: String,
+    ) : DownloadResult
+
     object NotFound : DownloadResult
+
     object AlreadyDownloaded : DownloadResult
+
     object Expired : DownloadResult
 }
