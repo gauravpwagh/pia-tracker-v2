@@ -1,18 +1,34 @@
 #!/bin/sh
-# MinIO backup loop — mirrors the attachments bucket nightly.
+# MinIO backup loop — mirrors the attachments bucket nightly at 01:30.
+# Compatible with BusyBox date (alpine-based images).
 # See docs/deployment.md § 6.
 
 set -eu
 
 BACKUP_DIR=/backups/minio
+BUCKET="${MINIO_BUCKET_ATTACHMENTS:-pia-attachments}"
 mkdir -p "$BACKUP_DIR"
 
 mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
 
+# Compute seconds until next HH:MM in local TZ using only BusyBox-safe date calls.
+secs_until() {
+    TARGET_H=$1
+    TARGET_M=$2
+    NOW_H=$(date +%H)
+    NOW_M=$(date +%M)
+    NOW_S=$(date +%S)
+    ELAPSED=$(( NOW_H * 3600 + NOW_M * 60 + NOW_S ))
+    TARGET=$(( TARGET_H * 3600 + TARGET_M * 60 ))
+    if [ "$ELAPSED" -lt "$TARGET" ]; then
+        echo $(( TARGET - ELAPSED ))
+    else
+        echo $(( 86400 - ELAPSED + TARGET ))
+    fi
+}
+
 while true; do
-    NOW=$(date +%s)
-    TARGET=$(date -d 'tomorrow 01:30' +%s 2>/dev/null || date -v+1d -v1H -v30M -v0S +%s)
-    SLEEP=$((TARGET - NOW))
+    SLEEP=$(secs_until 1 30)
     [ "$SLEEP" -lt 60 ] && SLEEP=86400
     echo "[miniobackup] Next run in ${SLEEP}s"
     sleep "$SLEEP"
@@ -20,8 +36,8 @@ while true; do
     STAMP=$(date +%Y%m%d-%H%M%S)
     OUT_DIR="${BACKUP_DIR}/${STAMP}"
     mkdir -p "$OUT_DIR"
-    echo "[miniobackup] Mirroring to ${OUT_DIR}"
-    mc mirror --remove local/pia-attachments "$OUT_DIR"
+    echo "[miniobackup] Mirroring bucket ${BUCKET} to ${OUT_DIR}"
+    mc mirror --remove "local/${BUCKET}" "$OUT_DIR"
 
     tar czf "${OUT_DIR}.tar.gz" -C "$BACKUP_DIR" "$STAMP"
     rm -rf "$OUT_DIR"

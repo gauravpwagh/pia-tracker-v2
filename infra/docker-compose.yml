@@ -124,6 +124,9 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-miniopia}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopia}
+      # Allow browsers to PUT directly to MinIO via presigned URLs.
+      # CORS is enforced per-bucket by minio-init below.
+      MINIO_BROWSER_REDIRECT_URL: ${PIA_BASE_URL:-https://pia.local}
     volumes:
       - minio_data:/data
     networks: [pia]
@@ -148,7 +151,20 @@ services:
         mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-miniopia} ${MINIO_ROOT_PASSWORD:-miniopia} &&
         mc mb --ignore-existing local/${MINIO_BUCKET_ATTACHMENTS:-pia-attachments} &&
         mc mb --ignore-existing local/${MINIO_BUCKET_QUARANTINE:-pia-quarantine} &&
-        echo "Buckets ready."
+        mc anonymous set-json /dev/stdin local/${MINIO_BUCKET_ATTACHMENTS:-pia-attachments} <<'CORS'
+        {
+          "CORSConfiguration": {
+            "CORSRule": [{
+              "AllowedOrigin": ["*"],
+              "AllowedMethod": ["GET","PUT","POST","DELETE","HEAD"],
+              "AllowedHeader": ["*"],
+              "ExposeHeader": ["ETag","x-amz-request-id"],
+              "MaxAgeSeconds": 3600
+            }]
+          }
+        }
+        CORS
+        echo "Buckets and CORS ready."
 
   # ─── ClamAV (blocking scan sidecar) ──────────────────────────────────────
   clamav:
@@ -242,6 +258,10 @@ services:
     image: minio/mc:latest
     container_name: pia-miniobackup
     restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-miniopia}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopia}
+      MINIO_BUCKET_ATTACHMENTS: ${MINIO_BUCKET_ATTACHMENTS:-pia-attachments}
     volumes:
       - ../infra/scripts:/scripts:ro
       - backup_data:/backups
