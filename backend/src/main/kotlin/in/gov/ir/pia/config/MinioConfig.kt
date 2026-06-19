@@ -10,6 +10,9 @@ import org.springframework.context.annotation.Configuration
 @ConfigurationProperties(prefix = "pia.minio")
 data class MinioProperties(
     val endpoint: String = "http://minio:9000",
+    /** Public-facing base URL used to rewrite presigned URLs for the browser.
+     *  Must be routable from the client. Leave blank to use [endpoint] (local dev without proxy). */
+    val publicEndpoint: String = "",
     val accessKey: String = "miniopia",
     val secretKey: String = "change-me",
     val bucketAttachments: String = "pia-attachments",

@@ -160,7 +160,7 @@ class AttachmentService(
 
         return InitiateUploadResponse(
             attachmentId = attachment.id,
-            presignedUrl = presignedUrl,
+            presignedUrl = publicUrl(presignedUrl),
             expiresAt = Instant.now().plusSeconds(presignExpiryMinutes * SECONDS_PER_MINUTE),
         )
     }
@@ -195,15 +195,17 @@ class AttachmentService(
                 PresignedPart(
                     partNumber = n,
                     presignedUrl =
-                        minioClient.getPresignedObjectUrl(
-                            GetPresignedObjectUrlArgs
-                                .builder()
-                                .method(Method.PUT)
-                                .bucket(minioProps.bucketAttachments)
-                                .`object`(objectKey)
-                                .expiry(presignExpiryMinutes.toInt(), TimeUnit.MINUTES)
-                                .extraQueryParams(mapOf("partNumber" to n.toString(), "uploadId" to uploadId))
-                                .build(),
+                        publicUrl(
+                            minioClient.getPresignedObjectUrl(
+                                GetPresignedObjectUrlArgs
+                                    .builder()
+                                    .method(Method.PUT)
+                                    .bucket(minioProps.bucketAttachments)
+                                    .`object`(objectKey)
+                                    .expiry(presignExpiryMinutes.toInt(), TimeUnit.MINUTES)
+                                    .extraQueryParams(mapOf("partNumber" to n.toString(), "uploadId" to uploadId))
+                                    .build(),
+                            ),
                         ),
                 )
             }
@@ -274,7 +276,7 @@ class AttachmentService(
                     .expiry(DOWNLOAD_PRESIGN_MINUTES, TimeUnit.MINUTES)
                     .build(),
             )
-        return AttachmentDownloadDto(url, attachment.originalFilename, attachment.contentType)
+        return AttachmentDownloadDto(publicUrl(url), attachment.originalFilename, attachment.contentType)
     }
 
     fun delete(
@@ -443,6 +445,13 @@ class AttachmentService(
     ): String = "${entityType.lowercase()}/$entityId/${UUID.randomUUID()}_${sanitizeFilename(filename)}"
 
     private fun sanitizeFilename(filename: String): String = filename.replace(Regex("[^a-zA-Z0-9._\\-() ]"), "_").trim()
+
+    /** Rewrites a presigned URL from the internal MinIO endpoint to the public-facing one.
+     *  No-op when publicEndpoint is blank (local dev without a proxy). */
+    private fun publicUrl(url: String): String {
+        val pub = minioProps.publicEndpoint.ifBlank { return url }
+        return url.replaceFirst(minioProps.endpoint, pub)
+    }
 
     private fun Attachment.toDto() =
         AttachmentDto(

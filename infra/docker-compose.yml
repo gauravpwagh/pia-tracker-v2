@@ -74,6 +74,7 @@ services:
       POSTGRES_MIGRATOR_USER: ${POSTGRES_MIGRATOR_USER:-pia_migrator}
       POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:-pia_migrator}
       MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${PIA_BASE_URL:-https://pia.local}/minio
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-miniopia}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopia}
       CLAMAV_HOST: clamav
