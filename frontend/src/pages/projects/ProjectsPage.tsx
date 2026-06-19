@@ -49,7 +49,6 @@ import {
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import {
-  IconBuildingBridge2,
   IconFileDescription,
   IconFileInvoice,
   IconHomeCog,
@@ -125,6 +124,43 @@ function treeIcon(icon: React.ReactNode) {
   return <span className="anticon">{icon}</span>;
 }
 
+// ── Project type abbreviation icon ───────────────────────────────────────────
+
+const PROJECT_TYPE_ABBR: Record<string, string> = {
+  NEW_LINE:         'NL',
+  DOUBLING:         'D',
+  GAUGE_CONVERSION: 'GC',
+  ELECTRIFICATION:  'E',
+  ROAD_OVER_BRIDGE: 'ROB',
+  OTHER:            '?',
+};
+
+function ProjectTypeIcon({ projectType }: { projectType: string | null }) {
+  const abbr = (projectType && PROJECT_TYPE_ABBR[projectType]) ?? '?';
+  return (
+    <span
+      className="anticon"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 26,
+        height: 26,
+        borderRadius: 4,
+        background: 'var(--ant-color-primary)',
+        color: '#fff',
+        fontSize: abbr.length > 2 ? 9 : abbr.length === 2 ? 10 : 13,
+        fontWeight: 700,
+        lineHeight: 1,
+        letterSpacing: abbr.length > 2 ? -0.5 : 0,
+        flexShrink: 0,
+      }}
+    >
+      {abbr}
+    </span>
+  );
+}
+
 const ACTIVITY_TYPE_ICONS: Record<string, React.ReactNode> = {
   LAND_ACQUISITION:       treeIcon(<IconMapPinDollar size={TABLER_SIZE} />),
   FOREST_CLEARANCE:       treeIcon(<IconTrees size={TABLER_SIZE} />),
@@ -134,25 +170,14 @@ const ACTIVITY_TYPE_ICONS: Record<string, React.ReactNode> = {
   TEMPORARY_OFFICE_SPACE: treeIcon(<IconHomeCog size={TABLER_SIZE} />),
 };
 
-const ACTIVITY_TYPE_LABELS: Record<string, string> = {
-  LAND_ACQUISITION:       'Land Acquisition',
-  FOREST_CLEARANCE:       'Forest Clearance',
-  UTILITY_SHIFTING:       'Utility Shifting',
-  DRAWING_APPROVAL:       'Drawing Approval',
-  TENDER_PACKAGING:       'Tender Packaging',
-  TEMPORARY_OFFICE_SPACE: 'Temporary Office Space',
-};
-
 // ── Tree node key helpers ─────────────────────────────────────────────────────
 
 function projectNodeKey(projectId: string) { return `project:${projectId}`; }
 function activityNodeKey(activityId: string) { return `activity:${activityId}`; }
-function actGroupNodeKey(projectId: string, typeCode: string) { return `actgroup:${projectId}:${typeCode}`; }
 function recordNodeKey(recordId: string) { return `record:${recordId}`; }
 
 function isProjectKey(key: string) { return key.startsWith('project:'); }
 function isActivityKey(key: string) { return key.startsWith('activity:'); }
-function isActGroupKey(key: string) { return key.startsWith('actgroup:'); }
 function isRecordKey(key: string) { return key.startsWith('record:'); }
 
 function projectIdFromKey(key: string) { return key.replace('project:', ''); }
@@ -221,6 +246,7 @@ function ProjectNodeTitle({
     <div
       style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 8, minWidth: 0 }}
     >
+      <ProjectTypeIcon projectType={project.projectType} />
       {/* Left: name + subtitle */}
       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
         <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '20px' }}>
@@ -302,18 +328,6 @@ function ActivityNodeTitle({ activity }: { activity: ActivityDetailResponse }) {
   );
 }
 
-// ── Activity group node title ─────────────────────────────────────────────────
-
-function ActivityGroupTitle({ typeCode, count }: { typeCode: string; count: number }) {
-  const label = ACTIVITY_TYPE_LABELS[typeCode] ?? typeCode.replace(/_/g, ' ');
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 8 }}>
-      <Text style={{ fontSize: 12, fontWeight: 600 }}>{label}</Text>
-      <Tag style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 5px' }}>{count}</Tag>
-    </div>
-  );
-}
-
 // ── Record node title ─────────────────────────────────────────────────────────
 
 function RecordNodeTitle({ record, index }: { record: ActivityRecordDetail; index: number }) {
@@ -335,44 +349,205 @@ function RecordNodeTitle({ record, index }: { record: ActivityRecordDetail; inde
 
 // ── Table view ────────────────────────────────────────────────────────────────
 
+interface FlatRow {
+  key: string;
+  projectId: string;
+  projectName: string;
+  projectCode: string | null;
+  zoneId: string;
+  projectCreatedAt: string;
+  lifecycleState: string;
+  activityId?: string;
+  activityName?: string;
+  activityTypeCode?: string;
+  recordId?: string;
+  recordName?: string | null;
+  recordState?: string;
+  recordCreatedAt?: string;
+}
+
+const RECORD_STATE_COLOR: Record<string, string> = {
+  DRAFT:                       'default',
+  SUBMITTED_FOR_VERIFICATION:  'blue',
+  VERIFIED:                    'cyan',
+  AUTHENTICATED:               'green',
+  SENT_BACK_TO_DYCE:           'orange',
+  SENT_BACK_TO_NODAL:          'gold',
+};
+
+const RECORD_STATE_LABEL: Record<string, string> = {
+  DRAFT:                       'Draft',
+  SUBMITTED_FOR_VERIFICATION:  'Submitted',
+  VERIFIED:                    'Verified',
+  AUTHENTICATED:               'Authenticated',
+  SENT_BACK_TO_DYCE:           'Sent back',
+  SENT_BACK_TO_NODAL:          'Sent back',
+};
+
 function ProjectsTable({
   projects,
   zoneMap,
-  onSelect,
+  activityMap,
+  recordMap,
+  loading,
+  onSelectProject,
+  onSelectRecord,
 }: {
   projects: ProjectSummaryResponse[];
   zoneMap: Record<string, string>;
-  onSelect: (project: ProjectSummaryResponse) => void;
+  activityMap: Record<string, ActivityDetailResponse[]>;
+  recordMap: Record<string, ActivityRecordDetail[]>;
+  loading: boolean;
+  onSelectProject: (project: ProjectSummaryResponse) => void;
+  onSelectRecord: (projectCode: string, activityId: string, recordId: string) => void;
 }) {
-  const { t } = useTranslation();
-  const columns: ColumnsType<ProjectSummaryResponse> = [
+  // Flatten projects → activities → records into one row per record (min 1 row per project)
+  const rows: FlatRow[] = [];
+  for (const project of projects) {
+    const activities = activityMap[project.id];
+    if (!activities || activities.length === 0) {
+      rows.push({
+        key: `proj-${project.id}`,
+        projectId: project.id,
+        projectName: project.name,
+        projectCode: project.projectCode,
+        zoneId: project.zoneId,
+        projectCreatedAt: project.createdAt,
+        lifecycleState: project.lifecycleState,
+      });
+      continue;
+    }
+    for (const activity of activities) {
+      const records = recordMap[activity.id];
+      if (!records || records.length === 0) {
+        rows.push({
+          key: `act-${activity.id}`,
+          projectId: project.id,
+          projectName: project.name,
+          projectCode: project.projectCode,
+          zoneId: project.zoneId,
+          projectCreatedAt: project.createdAt,
+          lifecycleState: project.lifecycleState,
+          activityId: activity.id,
+          activityName: activity.name,
+          activityTypeCode: activity.activityTypeCode,
+        });
+        continue;
+      }
+      for (const record of records) {
+        rows.push({
+          key: `rec-${record.id}`,
+          projectId: project.id,
+          projectName: project.name,
+          projectCode: project.projectCode,
+          zoneId: project.zoneId,
+          projectCreatedAt: project.createdAt,
+          lifecycleState: project.lifecycleState,
+          activityId: activity.id,
+          activityName: activity.name,
+          activityTypeCode: activity.activityTypeCode,
+          recordId: record.id,
+          recordName: record.name,
+          recordState: record.recordState,
+          recordCreatedAt: record.createdAt,
+        });
+      }
+    }
+  }
+
+  const columns: ColumnsType<FlatRow> = [
     {
-      title: t('projects.table.name', 'Project name'),
-      dataIndex: 'name',
+      title: 'Project name',
       key: 'name',
-      sorter: (a, b) => a.name.localeCompare(b.name),
+      sorter: (a, b) => a.projectName.localeCompare(b.projectName),
+      render: (_: unknown, row: FlatRow) => (
+        <span
+          style={{ fontWeight: 500, cursor: 'pointer', color: 'var(--ant-color-primary)' }}
+          onClick={() => {
+            const proj = projects.find(p => p.id === row.projectId);
+            if (proj) onSelectProject(proj);
+          }}
+        >
+          {row.projectName}
+        </span>
+      ),
     },
     {
-      title: t('projects.table.zone', 'Zone'),
-      dataIndex: 'zoneId',
+      title: 'Zone',
       key: 'zone',
-      render: (zoneId: string) => zoneMap[zoneId] ?? zoneId,
-      width: 200,
+      width: 80,
+      render: (_: unknown, row: FlatRow) => (
+        <Text type="secondary" style={{ fontSize: 12 }}>{zoneMap[row.zoneId] ?? row.zoneId}</Text>
+      ),
+      filters: [...new Set(projects.map(p => p.zoneId))].map(id => ({ text: zoneMap[id] ?? id, value: id })),
+      onFilter: (value, row) => row.zoneId === value,
+    },
+    {
+      title: 'Activity',
+      key: 'activity',
+      render: (_: unknown, row: FlatRow) => row.activityName
+        ? <Text style={{ fontSize: 12 }}>{row.activityName}</Text>
+        : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
+      sorter: (a, b) => (a.activityName ?? '').localeCompare(b.activityName ?? ''),
+    },
+    {
+      title: 'Record',
+      key: 'record',
+      render: (_: unknown, row: FlatRow) => {
+        if (!row.recordId) return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
+        const label = row.recordName ?? row.recordId.slice(0, 8);
+        return (
+          <span
+            style={{ cursor: 'pointer', color: 'var(--ant-color-primary)', fontSize: 12 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (row.projectCode && row.activityId && row.recordId)
+                onSelectRecord(row.projectCode, row.activityId, row.recordId);
+            }}
+          >
+            {label}
+          </span>
+        );
+      },
+    },
+    {
+      title: 'Status',
+      key: 'status',
+      width: 120,
+      render: (_: unknown, row: FlatRow) => {
+        if (!row.recordState) return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
+        const color = RECORD_STATE_COLOR[row.recordState] ?? 'default';
+        const label = RECORD_STATE_LABEL[row.recordState] ?? row.recordState;
+        return <Tag color={color} style={{ margin: 0, fontSize: 11 }}>{label}</Tag>;
+      },
+      filters: Object.entries(RECORD_STATE_LABEL).map(([v, t]) => ({ text: t, value: v })),
+      onFilter: (value, row) => row.recordState === value,
+    },
+    {
+      title: 'Created',
+      key: 'created',
+      width: 110,
+      render: (_: unknown, row: FlatRow) => (
+        <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+          {dayjs(row.recordCreatedAt ?? row.projectCreatedAt).format('D MMM YYYY')}
+        </Text>
+      ),
+      sorter: (a, b) =>
+        dayjs(a.recordCreatedAt ?? a.projectCreatedAt).unix() -
+        dayjs(b.recordCreatedAt ?? b.projectCreatedAt).unix(),
+      defaultSortOrder: 'descend',
     },
   ];
 
   return (
-    <Table<ProjectSummaryResponse>
+    <Table<FlatRow>
       size="small"
-      rowKey="id"
+      rowKey="key"
       columns={columns}
-      dataSource={projects}
-      pagination={{ pageSize: 20, hideOnSinglePage: true }}
-      locale={{ emptyText: t('projects.empty', 'No projects yet.') }}
-      onRow={(record) => ({
-        onClick: () => onSelect(record),
-        style: { cursor: 'pointer' },
-      })}
+      dataSource={rows}
+      loading={loading}
+      pagination={{ pageSize: 25, hideOnSinglePage: true, showTotal: (n) => `${n} rows` }}
+      locale={{ emptyText: 'No projects yet.' }}
     />
   );
 }
@@ -407,6 +582,7 @@ export default function ProjectsPage() {
   const [activityMap, setActivityMap] = useState<Record<string, ActivityDetailResponse[]>>({});
   // Lazy-loaded records per activity
   const [recordMap, setRecordMap] = useState<Record<string, ActivityRecordDetail[]>>({});
+  const [tableLoading, setTableLoading] = useState(false);
 
   const canCreate = currentUser?.permissions.includes('PROJECT.CREATE') ?? false;
 
@@ -444,9 +620,7 @@ export default function ProjectsPage() {
           (p) => p.id === urlProjectCode || p.projectCode === urlProjectCode,
         );
         if (proj) {
-          const act = activityMap[proj.id]?.find((a) => a.id === urlActivityId);
           const keys = [projectNodeKey(proj.id), activityNodeKey(urlActivityId)];
-          if (act) keys.push(actGroupNodeKey(proj.id, act.activityTypeCode));
           setExpandedKeys((prev) => [...new Set([...prev, ...keys])]);
         }
       }
@@ -474,6 +648,28 @@ export default function ProjectsPage() {
     }
   }, [urlProjectCode, urlActivityId, urlRecordId, projectsQuery.data, activityMap]);
 
+  // Load all activities + records for every project when switching to table view
+  useEffect(() => {
+    if (viewMode !== 'table' || !projectsQuery.data) return;
+    const projects = projectsQuery.data;
+    setTableLoading(true);
+    Promise.all(
+      projects.map(async (p) => {
+        if (activityMap[p.id]) return; // already loaded
+        const acts = await fetchActivities(p.id);
+        setActivityMap((prev) => ({ ...prev, [p.id]: acts }));
+        await Promise.all(
+          acts.map(async (a) => {
+            if (recordMap[a.id]) return;
+            const recs = await listRecords(a.id);
+            setRecordMap((prev) => ({ ...prev, [a.id]: recs }));
+          }),
+        );
+      }),
+    ).finally(() => setTableLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, projectsQuery.data]);
+
   // ── Tree data ─────────────────────────────────────────────────────────────────
 
   const filteredProjects = (projectsQuery.data ?? []).filter((p) => {
@@ -491,40 +687,32 @@ export default function ProjectsPage() {
     const activities = activityMap[project.id];
     const loaded = activities !== undefined;
 
-    // Group loaded activities by type code
-    const byType: Record<string, ActivityDetailResponse[]> = {};
-    for (const act of activities ?? []) {
-      if (!byType[act.activityTypeCode]) byType[act.activityTypeCode] = [];
-      byType[act.activityTypeCode].push(act);
-    }
+    // Sort activities by type code alphabetically, then build flat children list
+    const sortedActivities = [...(activities ?? [])].sort((a, b) =>
+      a.activityTypeCode.localeCompare(b.activityTypeCode),
+    );
 
-    const groupChildren: DataNode[] = Object.entries(byType).map(([typeCode, typeActivities]) => ({
-      key: actGroupNodeKey(project.id, typeCode),
-      icon: ACTIVITY_TYPE_ICONS[typeCode] ?? treeIcon(<IconRoute size={TABLER_SIZE} />),
-      title: <ActivityGroupTitle typeCode={typeCode} count={typeActivities.length} />,
-      isLeaf: false,
-      children: typeActivities.map((activity) => {
-        const hasRecords   = RECORD_TREE_TYPES.has(activity.activityTypeCode);
-        const loadedRecs   = recordMap[activity.id];
-        const recChildren: DataNode[] = (loadedRecs ?? []).map((r, idx) => ({
-          key:    recordNodeKey(r.id),
-          icon:   treeIcon(<IconFileDescription size={12} />),
-          title:  <RecordNodeTitle record={r} index={idx} />,
-          isLeaf: true,
-        }));
-        return {
-          key:      activityNodeKey(activity.id),
-          icon:     null,
-          title:    <ActivityNodeTitle activity={activity} />,
-          isLeaf:   !hasRecords,
-          children: hasRecords && loadedRecs !== undefined ? recChildren : undefined,
-        };
-      }),
-    }));
+    const groupChildren: DataNode[] = sortedActivities.map((activity) => {
+      const hasRecords = RECORD_TREE_TYPES.has(activity.activityTypeCode);
+      const loadedRecs = recordMap[activity.id];
+      const recChildren: DataNode[] = (loadedRecs ?? []).map((r, idx) => ({
+        key:    recordNodeKey(r.id),
+        icon:   treeIcon(<IconFileDescription size={12} />),
+        title:  <RecordNodeTitle record={r} index={idx} />,
+        isLeaf: true,
+      }));
+      return {
+        key:      activityNodeKey(activity.id),
+        icon:     ACTIVITY_TYPE_ICONS[activity.activityTypeCode] ?? treeIcon(<IconRoute size={TABLER_SIZE} />),
+        title:    <ActivityNodeTitle activity={activity} />,
+        isLeaf:   !hasRecords,
+        children: hasRecords && loadedRecs !== undefined ? recChildren : undefined,
+      };
+    });
 
     return {
       key: projectNodeKey(project.id),
-      icon: treeIcon(<IconBuildingBridge2 size={TABLER_SIZE} />),
+      icon: null,
       title: (
         <ProjectNodeTitle
           project={project}
@@ -577,13 +765,7 @@ export default function ProjectsPage() {
     if (activityMap[projectId] !== undefined) return; // already loaded
     try {
       const activities = await fetchActivities(projectId);
-      const typeCodes = [...new Set(activities.map((a) => a.activityTypeCode))];
-      const groupKeys = typeCodes.map((tc) => actGroupNodeKey(projectId, tc));
-      // Batch both state writes so a single re-render shows groups expanded
       setActivityMap((prev) => ({ ...prev, [projectId]: activities }));
-      if (groupKeys.length > 0) {
-        setExpandedKeys((prev) => [...new Set([...prev, ...groupKeys])]);
-      }
     } catch {
       setActivityMap((prev) => ({ ...prev, [projectId]: [] }));
     }
@@ -592,9 +774,6 @@ export default function ProjectsPage() {
   const handleTreeSelect = (keys: React.Key[]) => {
     const key = String(keys[0] ?? '');
     if (!key) return;
-
-    // Group nodes are expand/collapse only — leave existing selection intact
-    if (isActGroupKey(key)) return;
 
     if (isProjectKey(key)) {
       const projectId = projectIdFromKey(key);
@@ -663,11 +842,7 @@ export default function ProjectsPage() {
           const projectId = projectIdFromKey(selectedKey);
           void fetchActivities(projectId).then((activities) => {
             setActivityMap((prev) => ({ ...prev, [projectId]: activities }));
-            const typeCodes = [...new Set(activities.map((a) => a.activityTypeCode))];
-            const groupKeys = typeCodes.map((tc) => actGroupNodeKey(projectId, tc));
-            setExpandedKeys((prev) =>
-              [...new Set([...prev, projectNodeKey(projectId), ...groupKeys])]
-            );
+            setExpandedKeys((prev) => [...new Set([...prev, projectNodeKey(projectId)])]);
           });
         }}
       />
@@ -865,7 +1040,13 @@ export default function ProjectsPage() {
               <ProjectsTable
                 projects={filteredProjects}
                 zoneMap={zoneShortMap}
-                onSelect={handleTableSelect}
+                activityMap={activityMap}
+                recordMap={recordMap}
+                loading={tableLoading}
+                onSelectProject={handleTableSelect}
+                onSelectRecord={(projectCode, activityId, recordId) => {
+                  navigate(`/projects/${projectCode}/activities/${activityId}/records/${recordId}`);
+                }}
               />
             )}
           </div>

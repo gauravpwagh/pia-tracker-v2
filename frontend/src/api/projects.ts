@@ -39,6 +39,7 @@ export interface ProjectSummaryResponse {
   name: string;
   zoneId: string;
   projectCode: string | null;
+  projectType: string | null;
   lifecycleState: string;
   chainageFromKm: number | null;
   chainageToKm: number | null;

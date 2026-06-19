@@ -28,6 +28,7 @@ data class ProjectSummaryResponse(
     val zoneId: UUID,
     /** Unique project code, e.g. "NR-2024-001". May be null for draft projects. */
     val projectCode: String?,
+    val projectType: String?,
     /** Cached lifecycle state for tree display — source of truth is workflow_instances. */
     val lifecycleState: String,
     val chainageFromKm: java.math.BigDecimal?,
@@ -82,6 +83,7 @@ class ProjectController(
                     name = p.name,
                     zoneId = p.zoneId,
                     projectCode = p.projectCode,
+                    projectType = p.projectType,
                     lifecycleState = p.lifecycleState,
                     chainageFromKm = p.chainageFromKm,
                     chainageToKm = p.chainageToKm,
