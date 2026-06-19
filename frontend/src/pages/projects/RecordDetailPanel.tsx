@@ -25,6 +25,7 @@ import {
   Button,
   Descriptions,
   Divider,
+  Dropdown,
   Form,
   Input,
   Modal,
@@ -33,14 +34,15 @@ import {
   Skeleton,
   Space,
   Tag,
-  Tooltip,
   Typography,
 } from 'antd';
 import {
   CheckCircleOutlined,
   CloseOutlined,
+  DeleteOutlined,
   EditOutlined,
   FileTextOutlined,
+  MoreOutlined,
   RollbackOutlined,
   SafetyOutlined,
   SaveOutlined,
@@ -48,7 +50,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
-import { fetchRecord, patchRecord, type ActivityRecordDetail } from '@api/activityRecords';
+import { deleteRecord, fetchRecord, patchRecord, type ActivityRecordDetail } from '@api/activityRecords';
 import { fetchActivityById, updateActivity } from '@api/projects';
 import { fetchWorkflowState, performWorkflowAction, type SectionWorkflowState, type WorkflowActionCode } from '@api/workflow';
 import { useAuthStore } from '@stores/authStore';
@@ -157,6 +159,7 @@ interface RecordDetailPanelProps {
   activityTypeCode: string;
   canEdit: boolean;
   onClose: () => void;
+  onDelete?: () => void;
 }
 
 export function RecordDetailPanel({
@@ -164,6 +167,7 @@ export function RecordDetailPanel({
   activityTypeCode,
   canEdit,
   onClose,
+  onDelete,
 }: RecordDetailPanelProps) {
   const { t } = useTranslation('forms');
   const navigate = useNavigate();
@@ -235,6 +239,29 @@ export function RecordDetailPanel({
     },
   });
 
+  // ── Delete mutation ───────────────────────────────────────────────────────
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteRecord(recordId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['records', record?.projectActivityId] });
+      onDelete?.();
+      onClose();
+    },
+    onError: (err: Error) => {
+      void Modal.error({ title: 'Delete failed', content: err.message });
+    },
+  });
+
+  const confirmDelete = () => {
+    Modal.confirm({
+      title: 'Delete record?',
+      content: 'This cannot be undone.',
+      okText: 'Delete',
+      okButtonProps: { danger: true },
+      onOk: () => deleteMutation.mutate(),
+    });
+  };
+
   // ── Workflow mutation ──────────────────────────────────────────────────────
   const workflowMutation = useMutation({
     mutationFn: ({ action, comment }: { action: WorkflowActionCode; comment?: string }) =>
@@ -297,21 +324,10 @@ export function RecordDetailPanel({
           </Tag>
         )}
 
-        {/* Edit details — inline edit for name + activity metadata */}
-        {canEdit && record && !isTerminal && !editing && (
-          <Tooltip title="Edit record name and scope details">
-            <Button size="small" icon={<EditOutlined />} onClick={startEditing}>
-              Edit details
-            </Button>
-          </Tooltip>
-        )}
+        {/* Save / Cancel while editing details */}
         {editing && (
           <Space size={4}>
-            <Button
-              size="small"
-              onClick={cancelEditing}
-              disabled={saveMutation.isPending}
-            >
+            <Button size="small" onClick={cancelEditing} disabled={saveMutation.isPending}>
               Cancel
             </Button>
             <Button
@@ -326,19 +342,41 @@ export function RecordDetailPanel({
           </Space>
         )}
 
-        {/* Open full RJSF form */}
+        {/* Primary: Edit (opens RJSF form) + ⋯ overflow with Edit details */}
         {canEdit && record && !editing && (
-          <Tooltip title={t('record.actions.editRecord')}>
+          <Space size={4}>
             <Button
               size="small"
               type="primary"
               icon={<EditOutlined />}
               onClick={() => navigate(`/records/${recordId}/edit`, { state: { returnPath: window.location.pathname } })}
-              style={{ flexShrink: 0 }}
             >
-              Edit form
+              Edit
             </Button>
-          </Tooltip>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  ...(!isTerminal ? [{
+                    key: 'edit-details',
+                    icon: <EditOutlined />,
+                    label: 'Edit details',
+                    onClick: startEditing,
+                  }] : []),
+                  { type: 'divider' as const },
+                  {
+                    key: 'delete',
+                    icon: <DeleteOutlined />,
+                    label: 'Delete',
+                    danger: true,
+                    onClick: confirmDelete,
+                  },
+                ],
+              }}
+            >
+              <Button size="small" icon={<MoreOutlined />} />
+            </Dropdown>
+          </Space>
         )}
 
         <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose}
@@ -466,7 +504,7 @@ export function RecordDetailPanel({
                       </Descriptions>
                     ) : (
                       <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
-                        No details recorded yet. Click "Edit form" to add them.
+                        No details recorded yet. Click "Edit" to add them.
                       </Text>
                     );
                   })()
@@ -488,7 +526,7 @@ export function RecordDetailPanel({
                     />
                     {Object.keys(activity.metadataJson ?? {}).length === 0 && (
                       <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
-                        No details recorded yet. Click "Edit details" to add them.
+                        No details recorded yet. Click ⋯ → "Edit details" to add them.
                       </Text>
                     )}
                   </>
