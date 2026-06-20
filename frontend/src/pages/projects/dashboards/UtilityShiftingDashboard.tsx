@@ -42,12 +42,23 @@ import { stateColor, stateLabel } from './shared';
 const { Text } = Typography;
 
 const UTILITY_LABELS: Record<string, string> = {
-  LT_HT_EHV:       'LT/HT/EHV',
-  PIPELINE:         'Pipeline',
-  SNT:              'S&T',
-  QUARTER_STATION:  'Quarter/Station',
-  TSS_SS_OHE:       'TSS/SS/OHE',
-  OTHER:            'Other',
+  LT:                   'LT',
+  HT:                   'HT',
+  EHV:                  'EHV',
+  PIPELINE_WATER:       'Pipeline (Water)',
+  PIPELINE_INFLAMMABLE: 'Pipeline (Inflammable)',
+  PIPELINE_OTHER:       'Pipeline (Other)',
+  SNT_SIGNAL_TELECOM:   'SNT Signal/Telecom',
+  SNT_LOCATION_BOX:     'SNT Location Box',
+  SNT_SIGNAL_MAST:      'SNT Signal Mast',
+  SNT_IBH:              'SNT IBH',
+  QUARTER:              'Quarter',
+  STATION_BUILDING:     'Station Building',
+  AQUEDUCT_CANAL:       'Aqueduct/Canal',
+  ROAD:                 'Road',
+  TSS:                  'TSS',
+  SS:                   'SS',
+  OHE_MAST:             'OHE Mast',
 };
 
 const AGENCY_LABELS: Record<string, string> = {

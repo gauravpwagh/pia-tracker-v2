@@ -12,12 +12,23 @@ import { Descriptions, Form, Input, InputNumber } from 'antd';
 // ── Option lists ────────────────────────────────────────────────────────────
 
 const UTILITY_TYPE_OPTIONS = [
-  { value: 'LT_HT_EHV',       label: 'LT / HT / EHV (Electrical Lines)' },
-  { value: 'PIPELINE',         label: 'Pipeline' },
-  { value: 'SNT',              label: 'S&T (Signalling & Telecom)' },
-  { value: 'QUARTER_STATION',  label: 'Quarter / Station Building' },
-  { value: 'TSS_SS_OHE',      label: 'TSS / SS / OHE' },
-  { value: 'OTHER',            label: 'Other' },
+  { value: 'LT',                  label: 'LT' },
+  { value: 'HT',                  label: 'HT' },
+  { value: 'EHV',                 label: 'EHV' },
+  { value: 'PIPELINE_WATER',      label: 'Pipeline (Water)' },
+  { value: 'PIPELINE_INFLAMMABLE',label: 'Pipeline (Inflammable Material)' },
+  { value: 'PIPELINE_OTHER',      label: 'Pipeline (Other)' },
+  { value: 'SNT_SIGNAL_TELECOM',  label: 'SNT Signal and Telecom Cable' },
+  { value: 'SNT_LOCATION_BOX',    label: 'SNT Location Box' },
+  { value: 'SNT_SIGNAL_MAST',     label: 'SNT Signal Mast' },
+  { value: 'SNT_IBH',             label: 'SNT IBH' },
+  { value: 'QUARTER',             label: 'Quarter' },
+  { value: 'STATION_BUILDING',    label: 'Station Building' },
+  { value: 'AQUEDUCT_CANAL',      label: 'Aqueduct / Canal' },
+  { value: 'ROAD',                label: 'Road' },
+  { value: 'TSS',                 label: 'TSS' },
+  { value: 'SS',                  label: 'SS' },
+  { value: 'OHE_MAST',            label: 'OHE Mast' },
 ];
 
 const EXECUTING_AGENCY_OPTIONS = [

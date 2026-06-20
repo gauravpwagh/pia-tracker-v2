@@ -454,50 +454,29 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
 // utility_type + executing_agency combination.
 
 const US_COMMON = [
-  'utility_type', 'executing_agency', 'location_description',
-  'chainage_from', 'chainage_to',
-  'work_order_no', 'work_completed_on', 'completion_cert_pdf',
-  'affected_track_length_km',
-  'remarks',
+  'record_name', 'block_section',
+  'utility_type', 'owner_agency',
+  'chainage_from', 'chainage_to', 'length_affected_km',
+  'executing_agency',
+  'status_drawing_execution', 'target_removal_date',
+  'consent_state_govt', 'remarks',
 ];
 
 // Agency-conditional field groups
 const US_AGENCY_FIELDS: Record<string, string[]> = {
-  // Non-Railway: contractor identification
-  USER_DEPT:    ['contractor_name', 'work_order_date', 'estimate_position', 'fund_submission'],
-  OPEN_LINE:    ['contractor_name', 'work_order_date', 'estimate_position', 'fund_submission_by_construction'],
-  CONSTRUCTION: ['contractor_name', 'work_order_date', 'material_available', 'agency_available'],
+  USER_DEPT:    ['estimate_position', 'fund_submission'],
+  OPEN_LINE:    ['estimate_position', 'fund_submission'],
+  CONSTRUCTION: ['material_available', 'agency_available'],
   RAILWAY:      [],
-};
-
-const US_TYPE_FIELDS: Record<string, string[]> = {
-  OVERHEAD_LINE:  ['pole_count', 'span_length_m'],
-  WATER_PIPELINE: ['pipe_diameter_mm', 'length_m'],
-  NALA:           ['nala_width_m', 'nala_length_m', 'revetment_type'],
-  TELECOM_CABLE:  ['cable_length_m', 'cable_type'],
-  GAS_PIPELINE:   ['pipe_diameter_mm', 'length_m'],
-};
-
-const US_TYPE_REQUIRED: Record<string, string[]> = {
-  OVERHEAD_LINE:  ['pole_count'],
-  WATER_PIPELINE: ['pipe_diameter_mm', 'length_m'],
-  NALA:           ['nala_width_m', 'nala_length_m'],
-  TELECOM_CABLE:  ['cable_length_m'],
-  GAS_PIPELINE:   ['pipe_diameter_mm', 'length_m'],
 };
 
 function filterUsSchema(
   schema: RJSFSchema,
-  utilityType: string,
+  _utilityType: string,
   executingAgency: string,
 ): RJSFSchema {
   const agencyFields = US_AGENCY_FIELDS[executingAgency] ?? [];
-  const typeFields   = US_TYPE_FIELDS[utilityType] ?? [];
-  const allowed = new Set([
-    ...US_COMMON,
-    ...typeFields,
-    ...agencyFields,
-  ]);
+  const allowed = new Set([...US_COMMON, ...agencyFields]);
 
   const props = schema.properties;
   const filteredProps = props
@@ -505,10 +484,7 @@ function filterUsSchema(
     : undefined;
 
   const baseRequired = (schema.required as string[] | undefined) ?? [];
-  const required = [
-    ...baseRequired.filter((k) => allowed.has(k)),
-    ...(US_TYPE_REQUIRED[utilityType] ?? []),
-  ].filter((v, i, a) => a.indexOf(v) === i); // dedupe
+  const required = baseRequired.filter((k) => allowed.has(k));
 
   const { allOf: _dropped, ...rest } = schema;
   return { ...rest, properties: filteredProps, required };
@@ -699,11 +675,10 @@ export default function RecordEditPage() {
   // available from the first open. Falls back to record.recordSubtype.
   const effectiveSchema: RJSFSchema | undefined = useMemo(() => {
     if (!sectionSchema || formDef?.activityTypeCode !== 'UTILITY_SHIFTING') return sectionSchema;
-    const utilityType     = (formData.utility_type     as string | undefined) ?? record?.recordSubtype ?? '';
+    const utilityType     = (formData.utility_type     as string | undefined) ?? '';
     const executingAgency = (formData.executing_agency as string | undefined) ?? '';
-    if (!utilityType) return sectionSchema;
     return filterUsSchema(sectionSchema, utilityType, executingAgency);
-  }, [sectionSchema, formDef?.activityTypeCode, formData.utility_type, formData.executing_agency, record?.recordSubtype]);
+  }, [sectionSchema, formDef?.activityTypeCode, formData.utility_type, formData.executing_agency]);
 
   // ── Loading / error states ─────────────────────────────────────────────────
 

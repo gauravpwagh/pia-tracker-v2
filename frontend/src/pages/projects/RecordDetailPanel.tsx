@@ -450,57 +450,76 @@ export function RecordDetailPanel({
                   (() => {
                     const data = (record.dataJson ?? {}) as Record<string, unknown>;
                     const hasData = Object.keys(data).length > 0;
+                    const UTILITY_TYPE_LABELS: Record<string, string> = {
+                      LT:                   'LT',
+                      HT:                   'HT',
+                      EHV:                  'EHV',
+                      PIPELINE_WATER:       'Pipeline (Water)',
+                      PIPELINE_INFLAMMABLE: 'Pipeline (Inflammable Material)',
+                      PIPELINE_OTHER:       'Pipeline (Other)',
+                      SNT_SIGNAL_TELECOM:   'SNT Signal and Telecom Cable',
+                      SNT_LOCATION_BOX:     'SNT Location Box',
+                      SNT_SIGNAL_MAST:      'SNT Signal Mast',
+                      SNT_IBH:              'SNT IBH',
+                      QUARTER:              'Quarter',
+                      STATION_BUILDING:     'Station Building',
+                      AQUEDUCT_CANAL:       'Aqueduct / Canal',
+                      ROAD:                 'Road',
+                      TSS:                  'TSS',
+                      SS:                   'SS',
+                      OHE_MAST:             'OHE Mast',
+                    };
+                    const EXECUTING_AGENCY_LABELS: Record<string, string> = {
+                      RAILWAY:      'Railway (Construction)',
+                      USER_DEPT:    'User Department',
+                      OPEN_LINE:    'Open Line',
+                      CONSTRUCTION: 'Construction Organisation',
+                    };
                     const US_ORDER = [
-                      'utility_type', 'executing_agency',
-                      'estimate_position', 'fund_submission', 'fund_submission_by_construction',
+                      'record_name', 'block_section',
+                      'utility_type', 'owner_agency',
+                      'chainage_from', 'chainage_to', 'length_affected_km',
+                      'executing_agency',
+                      'estimate_position', 'fund_submission',
                       'material_available', 'agency_available',
-                      'contractor_name', 'work_order_date',
-                      'location_description', 'chainage_from', 'chainage_to',
-                      'work_order_no', 'work_completed_on', 'completion_cert_pdf',
-                      'pole_count', 'span_length_m',
-                      'pipe_diameter_mm', 'length_m',
-                      'nala_width_m', 'nala_length_m', 'revetment_type',
-                      'cable_length_m', 'cable_type',
-                      'affected_track_length_km',
-                      'remarks',
+                      'status_drawing_execution', 'target_removal_date',
+                      'consent_state_govt', 'remarks',
                     ];
                     const US_LABELS: Record<string, string> = {
-                      utility_type:                    'Utility Type',
-                      executing_agency:                'Executing Agency',
-                      location_description:            'Location Description',
-                      chainage_from:                   'Chainage From',
-                      chainage_to:                     'Chainage To',
-                      estimate_position:               'Position of Estimate',
-                      fund_submission:                 'Fund Submission Date',
-                      fund_submission_by_construction: 'Fund Submission by Construction',
-                      material_available:              'Material Available?',
-                      agency_available:                'Executing Agency Available?',
-                      work_order_no:                   'Work Order No.',
-                      work_order_date:                 'Work Order Date',
-                      contractor_name:                 'Contractor Name',
-                      work_completed_on:               'Work Completed On',
-                      pole_count:                      'No. of Poles',
-                      span_length_m:                   'Span Length (m)',
-                      pipe_diameter_mm:                'Pipe Diameter (mm)',
-                      length_m:                        'Length (m)',
-                      nala_width_m:                    'Nala Width (m)',
-                      nala_length_m:                   'Nala Length (m)',
-                      revetment_type:                  'Revetment Type',
-                      cable_length_m:                  'Cable Length (m)',
-                      cable_type:                      'Cable Type',
-                      affected_track_length_km:        'Affected Track Length (km)',
-                      remarks:                         'Remarks',
+                      record_name:              'Record Name',
+                      block_section:            'Block / Section',
+                      utility_type:             'Infringement / Utility Type',
+                      owner_agency:             'Owner Agency',
+                      chainage_from:            'Chainage From',
+                      chainage_to:              'Chainage To',
+                      length_affected_km:       'Length of Alignment Affected (Km)',
+                      executing_agency:         'Executing Agency',
+                      estimate_position:        'Position of Estimate',
+                      fund_submission:          'Fund Submission Date',
+                      material_available:       'Material Available?',
+                      agency_available:         'Executing Agency Available?',
+                      status_drawing_execution: 'Status of Drawing and Execution Plan',
+                      target_removal_date:      'Target Date for Removal',
+                      consent_state_govt:       'Consent of State Govt. Obtained',
+                      remarks:                  'Remarks',
                     };
                     const orderedEntries = US_ORDER
                       .filter((k) => data[k] !== null && data[k] !== undefined && data[k] !== '')
                       .map((k) => [k, data[k]] as [string, unknown]);
                     return hasData ? (
                       <Descriptions size="small" column={1} bordered>
-                        {orderedEntries.map(([k, v]) => (
-                            <Descriptions.Item key={k} label={US_LABELS[k] ?? k}>
-                              {typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v)}
-                            </Descriptions.Item>
-                          ))}
+                        {orderedEntries.map(([k, v]) => {
+                            const display =
+                              k === 'utility_type'     ? (UTILITY_TYPE_LABELS[String(v)] ?? String(v)) :
+                              k === 'executing_agency' ? (EXECUTING_AGENCY_LABELS[String(v)] ?? String(v)) :
+                              typeof v === 'boolean'   ? (v ? 'Yes' : 'No') :
+                              String(v);
+                            return (
+                              <Descriptions.Item key={k} label={US_LABELS[k] ?? k}>
+                                {display}
+                              </Descriptions.Item>
+                            );
+                          })}
                       </Descriptions>
                     ) : (
                       <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>

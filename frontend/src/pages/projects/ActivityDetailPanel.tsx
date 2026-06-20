@@ -482,13 +482,9 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onRecordCrea
         width={520}
       >
         <Form layout="vertical" style={{ marginTop: 16 }}>
-          {/* Utility Shifting: utility type is the primary discriminator */}
+          {/* Utility Shifting: infringement/utility type */}
           {activity?.activityTypeCode === 'UTILITY_SHIFTING' && (
-            <Form.Item
-              label="Utility Type"
-              required
-              extra="Determines which fields appear in the progress form"
-            >
+            <Form.Item label="Infringement / Utility Type" required>
               <Select
                 autoFocus
                 placeholder="Select utility type…"
@@ -496,11 +492,23 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onRecordCrea
                 value={newRecordSubtype}
                 onChange={(v) => setNewRecordSubtype(v as string)}
                 options={[
-                  { value: 'OVERHEAD_LINE',  label: 'Overhead Line (OHT)' },
-                  { value: 'WATER_PIPELINE', label: 'Water Pipeline' },
-                  { value: 'NALA',           label: 'Nala / Drainage Channel' },
-                  { value: 'TELECOM_CABLE',  label: 'Telecom / Fibre Cable' },
-                  { value: 'GAS_PIPELINE',   label: 'Gas Pipeline' },
+                  { value: 'LT',                   label: 'LT' },
+                  { value: 'HT',                   label: 'HT' },
+                  { value: 'EHV',                  label: 'EHV' },
+                  { value: 'PIPELINE_WATER',        label: 'Pipeline (Water)' },
+                  { value: 'PIPELINE_INFLAMMABLE',  label: 'Pipeline (Inflammable Material)' },
+                  { value: 'PIPELINE_OTHER',        label: 'Pipeline (Other)' },
+                  { value: 'SNT_SIGNAL_TELECOM',    label: 'SNT Signal and Telecom Cable' },
+                  { value: 'SNT_LOCATION_BOX',      label: 'SNT Location Box' },
+                  { value: 'SNT_SIGNAL_MAST',       label: 'SNT Signal Mast' },
+                  { value: 'SNT_IBH',               label: 'SNT IBH' },
+                  { value: 'QUARTER',               label: 'Quarter' },
+                  { value: 'STATION_BUILDING',      label: 'Station Building' },
+                  { value: 'AQUEDUCT_CANAL',        label: 'Aqueduct / Canal' },
+                  { value: 'ROAD',                  label: 'Road' },
+                  { value: 'TSS',                   label: 'TSS' },
+                  { value: 'SS',                    label: 'SS' },
+                  { value: 'OHE_MAST',              label: 'OHE Mast' },
                 ]}
               />
             </Form.Item>
