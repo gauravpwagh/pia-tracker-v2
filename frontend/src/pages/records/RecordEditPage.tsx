@@ -85,8 +85,39 @@ import { CommentPanel } from '@components/comments/CommentPanel';
 import { HistoryPanel } from '@components/comments/HistoryPanel';
 import { AttachmentPanel } from '@components/attachments/AttachmentPanel';
 import { useAuthStore } from '@stores/authStore';
+import { DrawingApproversPanel } from '@/pages/projects/DrawingApproversPanel';
+import { DrawingObservationsPanel } from '@/pages/projects/DrawingObservationsPanel';
+import type { DrawingObservation } from '@/pages/projects/DrawingObservationsPanel';
 
 const { Title, Text } = Typography;
+
+// ── Drawing-type seed map — used to pre-populate drawing_details.drawing_type ─
+
+const FORM_CODE_TO_DRAWING_TYPE: Record<string, string> = {
+  ESP_DRAWING_V1:                   'ESP',
+  SIP_DRAWING_V1:                   'SIP',
+  ST_LT_TOC_DRAWING_V1:             'ST_LT_TOC',
+  SWRD_DRAWING_V1:                  'SWRD',
+  SWR_DRAWING_V1:                   'SWR',
+  FAT_DRAWING_V1:                   'FAT',
+  SAT_DRAWING_V1:                   'SAT',
+  RSP_DRAWING_V1:                   'RSP',
+  CABLE_ROUTE_PLAN_DRAWING_V1:      'CABLE_ROUTE_PLAN',
+  LOP_DRAWING_V1:                   'LOP',
+  PROJECT_SHEET_DRAWING_V1:         'PROJECT_SHEET',
+  GAD_MEGA_DRAWING_V1:              'GAD_MEGA',
+  GAD_MAJOR_DRAWING_V1:             'GAD_MAJOR',
+  GAD_MINOR_DRAWING_V1:             'GAD_MINOR',
+  LWR_PLAN_DRAWING_V1:              'LWR_PLAN',
+  GRADE_CONDONATION_DRAWING_V1:     'GRADE_CONDONATION',
+  BRIDGE_MINOR_SANCTION_DRAWING_V1: 'BRIDGE_MINOR_SANCTION',
+  YARD_DISPENSATION_DRAWING_V1:     'YARD_DISPENSATION',
+  YARD_MINOR_SANCTION_DRAWING_V1:   'YARD_MINOR_SANCTION',
+  STATION_BUILDING_GAD_DRAWING_V1:  'STATION_BUILDING_GAD',
+  FOB_GAD_TAD_DRAWING_V1:           'FOB_GAD_TAD',
+  CURVE_DETAILS_DRAWING_V1:         'CURVE_DETAILS',
+  TUNNEL_DESIGN_DRAWING_V1:         'TUNNEL_DESIGN',
+};
 
 // ── State badge ───────────────────────────────────────────────────────────────
 
@@ -577,6 +608,22 @@ export default function RecordEditPage() {
       let initialized = data;
       if ((typeCode === 'TEMPORARY_OFFICE_SPACE' || typeCode === 'UTILITY_SHIFTING') && data.record_name === undefined && record.name) {
         initialized = { ...data, record_name: record.name };
+      } else if (typeCode === 'DRAWING_APPROVAL') {
+        // record_name and drawing_type live inside the drawing_details section sub-object
+        const dd = (data.drawing_details as Record<string, unknown> | undefined) ?? {};
+        const drawingType = formDef?.code ? FORM_CODE_TO_DRAWING_TYPE[formDef.code] : undefined;
+        const needsName = dd.record_name === undefined && record.name;
+        const needsType = dd.drawing_type === undefined && drawingType;
+        if (needsName || needsType) {
+          initialized = {
+            ...data,
+            drawing_details: {
+              ...dd,
+              ...(needsName ? { record_name: record.name } : {}),
+              ...(needsType ? { drawing_type: drawingType } : {}),
+            },
+          };
+        }
       } else if (typeCode === 'TENDER_PACKAGING' && data.package_name === undefined && record.name) {
         initialized = { ...data, package_name: record.name };
       }
@@ -593,6 +640,8 @@ export default function RecordEditPage() {
       const recordName =
         typeCode === 'TENDER_PACKAGING'
           ? (formDataRef.current.package_name as string | undefined)
+          : typeCode === 'DRAWING_APPROVAL'
+          ? ((formDataRef.current.drawing_details as Record<string, unknown> | undefined)?.record_name as string | undefined)
           : (formDataRef.current.record_name as string | undefined);
       await patchRecord(recordId!, formDataRef.current, recordName || undefined);
     }, [recordId, formDef?.activityTypeCode]),
@@ -834,27 +883,45 @@ export default function RecordEditPage() {
             </Col>
           )}
 
-          {/* Centre: form — scrolls independently */}
+          {/* Centre: form (or custom panel for non-RJSF sections) — scrolls independently */}
           <Col
             span={centreColSpan}
             style={{ height: '100%', overflowY: 'auto', padding: '16px 20px' }}
           >
-            <RjsfForm
-              ref={formRef}
-              schema={(effectiveSchema ?? sectionSchema) as RJSFSchema}
-              uiSchema={sectionUiSchema}
-              formData={
-                hasSections && activeSectionResolved
-                  ? ((formData[activeSectionResolved] ?? {}) as Record<string, unknown>)
-                  : formData
-              }
-              onChange={handleFormChange}
-              formContext={{ entityType: 'ACTIVITY_RECORD', entityId: recordId ?? '' }}
-              disabled={
-                autosaveStatus === 'conflict' ||
-                activeSectionState?.isTerminal === true
-              }
-            />
+            {activeSectionResolved === 'approvals' ? (
+              <DrawingApproversPanel
+                recordId={recordId!}
+                canEdit={activeSectionState?.isTerminal !== true}
+                recordCreatedAt={record?.createdAt}
+              />
+            ) : activeSectionResolved === 'observations' ? (
+              <DrawingObservationsPanel
+                recordId={recordId!}
+                observations={
+                  Array.isArray((record?.dataJson as Record<string, unknown> | undefined)?.observations)
+                    ? ((record!.dataJson as Record<string, unknown>).observations as DrawingObservation[])
+                    : []
+                }
+                canEdit={activeSectionState?.isTerminal !== true}
+              />
+            ) : (
+              <RjsfForm
+                ref={formRef}
+                schema={(effectiveSchema ?? sectionSchema) as RJSFSchema}
+                uiSchema={sectionUiSchema}
+                formData={
+                  hasSections && activeSectionResolved
+                    ? ((formData[activeSectionResolved] ?? {}) as Record<string, unknown>)
+                    : formData
+                }
+                onChange={handleFormChange}
+                formContext={{ entityType: 'ACTIVITY_RECORD', entityId: recordId ?? '' }}
+                disabled={
+                  autosaveStatus === 'conflict' ||
+                  activeSectionState?.isTerminal === true
+                }
+              />
+            )}
           </Col>
 
           {/* Right: comments / history / workflow — scrolls independently */}

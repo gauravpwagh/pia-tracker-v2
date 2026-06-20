@@ -65,6 +65,8 @@ import {
   ACCEPT_ALL,
 } from '@components/attachments/AttachmentPanel';
 import { ActivityMetadataForm, ActivityMetadataView } from './ActivityMetadataForm';
+import { DrawingApproversPanel } from './DrawingApproversPanel';
+import { DrawingObservationsPanel, type DrawingObservation } from './DrawingObservationsPanel';
 
 const { Text } = Typography;
 
@@ -637,6 +639,144 @@ export function RecordDetailPanel({
                       <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
                         No details recorded yet. Click "Edit" to add them.
                       </Text>
+                    );
+                  })()
+                ) : activity.activityTypeCode === 'DRAWING_APPROVAL' ? (
+                  (() => {
+                    const data = (record.dataJson ?? {}) as Record<string, unknown>;
+                    // After V064, fields live in nested section sub-objects
+                    const dd = (data.drawing_details as Record<string, unknown> | undefined) ?? {};
+                    const sa = (data.sanction       as Record<string, unknown> | undefined) ?? {};
+
+                    const DRAWING_TYPE_LABELS: Record<string, string> = {
+                      ESP:                    'ESP',
+                      SIP:                    'SIP',
+                      ST_LT_TOC:              'ST/LT (TOC)',
+                      SWRD:                   'SWRD',
+                      SWR:                    'SWR',
+                      FAT:                    'FAT',
+                      SAT:                    'SAT',
+                      RSP:                    'Mini Diagram / RSP',
+                      CABLE_ROUTE_PLAN:       'CRP Cable Route Plan',
+                      LOP:                    'LOP',
+                      PROJECT_SHEET:          'Project Sheet',
+                      GAD_MEGA:               'GAD (Mega)',
+                      GAD_MAJOR:              'GAD (Major)',
+                      GAD_MINOR:              'GAD (Minor)',
+                      LWR_PLAN:               'LWR Plan',
+                      GRADE_CONDONATION:      'Grade Condonation',
+                      BRIDGE_MINOR_SANCTION:  'Minor Sanction of Bridge',
+                      YARD_DISPENSATION:      'Dispensation of Yard',
+                      YARD_MINOR_SANCTION:    'Minor Sanction of Yard',
+                      STATION_BUILDING_GAD:   'Station Building GAD',
+                      FOB_GAD_TAD:            'FOB',
+                      CURVE_DETAILS:          'Curve Details',
+                      TUNNEL_DESIGN:          'Tunnel Design',
+                    };
+                    const DA_DETAILS_ORDER = [
+                      'record_name', 'drawing_type', 'section', 'station',
+                      'drawing_number', 'chainage_from', 'chainage_to',
+                      'description', 'revision',
+                      'concept_esp_difference', 'curve_details',
+                      'initiation_date', 'other_details', 'remarks',
+                    ];
+                    const DA_LABELS: Record<string, string> = {
+                      record_name:              'Record Name',
+                      drawing_type:             'Drawing Type',
+                      section:                  'Section',
+                      station:                  'Station',
+                      initiation_date:          'Initiation Date',
+                      drawing_number:           'Drawing Number',
+                      chainage_from:            'Chainage From',
+                      chainage_to:              'Chainage To',
+                      description:              'Drawing Description',
+                      revision:                 'Revision Number',
+                      concept_esp_difference:   'Concept Plan vs ESP Difference',
+                      curve_details:            'Curve Details',
+                      other_details:            'Other Details',
+                      remarks:                  'Remarks',
+                    };
+                    const detailEntries = DA_DETAILS_ORDER
+                      .filter((k) => dd[k] !== null && dd[k] !== undefined && dd[k] !== '')
+                      .map((k) => {
+                        const v = dd[k];
+                        const display = k === 'drawing_type'
+                          ? (DRAWING_TYPE_LABELS[String(v)] ?? String(v))
+                          : String(v);
+                        return [k, display] as [string, string];
+                      });
+
+                    const observations: DrawingObservation[] =
+                      Array.isArray(data.observations)
+                        ? (data.observations as DrawingObservation[])
+                        : [];
+
+                    const sanctionDate    = sa.sanction_received_date as string | undefined;
+
+                    return (
+                      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                        {/* Section 1: Drawing Details */}
+                        <div>
+                          <Divider orientation="left" orientationMargin={0} style={{ ...DIVIDER_STYLE, margin: '0 0 8px' }}>
+                            Drawing Details
+                          </Divider>
+                          {detailEntries.length > 0 ? (
+                            <Descriptions size="small" column={1} bordered>
+                              {detailEntries.map(([k, display]) => (
+                                <Descriptions.Item key={k} label={DA_LABELS[k] ?? k}>
+                                  {display}
+                                </Descriptions.Item>
+                              ))}
+                            </Descriptions>
+                          ) : (
+                            <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                              No drawing details yet. Click "Edit" to add them.
+                            </Text>
+                          )}
+                        </div>
+
+                        {/* Section 2: Approvals */}
+                        <div>
+                          <Divider orientation="left" orientationMargin={0} style={{ ...DIVIDER_STYLE, margin: '0 0 8px' }}>
+                            Approvals
+                          </Divider>
+                          <DrawingApproversPanel
+                            recordId={recordId}
+                            canEdit={canEdit}
+                            recordCreatedAt={record.createdAt}
+                          />
+                        </div>
+
+                        {/* Section 3: Observations */}
+                        <div>
+                          <Divider orientation="left" orientationMargin={0} style={{ ...DIVIDER_STYLE, margin: '0 0 8px' }}>
+                            Observations
+                          </Divider>
+                          <DrawingObservationsPanel
+                            recordId={recordId}
+                            observations={observations}
+                            canEdit={canEdit}
+                          />
+                        </div>
+
+                        {/* Section 4: Sanction */}
+                        <div>
+                          <Divider orientation="left" orientationMargin={0} style={{ ...DIVIDER_STYLE, margin: '0 0 8px' }}>
+                            Sanction
+                          </Divider>
+                          {sanctionDate ? (
+                            <Descriptions size="small" column={1} bordered>
+                              <Descriptions.Item label="Sanction Received Date">
+                                {dayjs(sanctionDate).format('D MMM YYYY')}
+                              </Descriptions.Item>
+                            </Descriptions>
+                          ) : (
+                            <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                              Sanction not yet received.
+                            </Text>
+                          )}
+                        </div>
+                      </Space>
                     );
                   })()
                 ) : editing ? (

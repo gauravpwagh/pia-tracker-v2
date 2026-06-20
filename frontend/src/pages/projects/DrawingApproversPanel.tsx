@@ -34,6 +34,8 @@ const { Text } = Typography;
 interface Props {
   recordId: string;
   canEdit: boolean;
+  /** ISO string — used to compute pending days for unapproved slots. */
+  recordCreatedAt?: string;
 }
 
 interface RowState {
@@ -42,7 +44,7 @@ interface RowState {
   dirty: boolean;
 }
 
-export function DrawingApproversPanel({ recordId, canEdit }: Props) {
+export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Props) {
   const queryClient = useQueryClient();
   const queryKey = ['drawingApprovers', recordId];
 
@@ -131,6 +133,10 @@ export function DrawingApproversPanel({ recordId, canEdit }: Props) {
           const row = getRow(approver);
           const isSaving = saveMutation.isPending && saveMutation.variables?.approverId === approver.id;
 
+          const pendingDays = !approver.approvedOn && recordCreatedAt
+            ? dayjs().diff(dayjs(recordCreatedAt), 'day')
+            : null;
+
           return (
             <div
               key={approver.id}
@@ -140,15 +146,23 @@ export function DrawingApproversPanel({ recordId, canEdit }: Props) {
                 padding: '8px 10px',
                 background: approver.approvedOn
                   ? 'var(--ant-color-success-bg)'
-                  : 'var(--ant-color-bg-container)',
+                  : 'var(--ant-color-warning-bg)',
               }}
             >
-              {/* Designation name + approved tag */}
+              {/* Designation name + status tag */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                 <Text strong style={{ fontSize: 12 }}>{approver.designationName}</Text>
-                {approver.approvedOn && (
+                {approver.approvedOn ? (
                   <Tag color="green" style={{ margin: 0, fontSize: 11 }}>
                     Approved {dayjs(approver.approvedOn).format('D MMM YYYY')}
+                  </Tag>
+                ) : pendingDays !== null ? (
+                  <Tag color="orange" icon={<ClockCircleOutlined />} style={{ margin: 0, fontSize: 11 }}>
+                    Pending {pendingDays} day{pendingDays !== 1 ? 's' : ''}
+                  </Tag>
+                ) : (
+                  <Tag color="orange" icon={<ClockCircleOutlined />} style={{ margin: 0, fontSize: 11 }}>
+                    Pending
                   </Tag>
                 )}
               </div>

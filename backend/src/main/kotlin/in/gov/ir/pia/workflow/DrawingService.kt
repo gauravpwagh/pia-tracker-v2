@@ -95,7 +95,7 @@ class DrawingService(
         val rows =
             jdbc.query(
                 """
-                SELECT da.id, da.approval_designation_code, COALESCE(d.name, da.approval_designation_code) AS designation_name,
+                SELECT da.id, da.approval_designation_code, COALESCE(d.short_label, d.name, da.approval_designation_code) AS designation_name,
                        da.position, da.approved_on, da.remarks
                   FROM drawing_approvers da
                   LEFT JOIN designations d ON d.code = da.approval_designation_code
@@ -165,7 +165,7 @@ class DrawingService(
 
         val designationName =
             jdbc.queryForObject(
-                "SELECT COALESCE(name, ?) FROM designations WHERE code = ?",
+                "SELECT COALESCE(short_label, name, ?) FROM designations WHERE code = ?",
                 String::class.java,
                 approver.approvalDesignationCode,
                 approver.approvalDesignationCode,
@@ -250,7 +250,7 @@ class DrawingService(
 
         val designationName =
             jdbc.queryForObject(
-                "SELECT COALESCE(name, ?) FROM designations WHERE code = ?",
+                "SELECT COALESCE(short_label, name, ?) FROM designations WHERE code = ?",
                 String::class.java,
                 request.designationCode,
                 request.designationCode,
