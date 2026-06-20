@@ -508,6 +508,118 @@ export function RecordDetailPanel({
                       </Text>
                     );
                   })()
+                ) : activity.activityTypeCode === 'TEMPORARY_OFFICE_SPACE' ? (
+                  (() => {
+                    const data = (record.dataJson ?? {}) as Record<string, unknown>;
+                    const hasData = Object.keys(data).length > 0;
+
+                    const STRUCTURE_LABELS: Record<string, string> = {
+                      NEW_REQUIRED:  'New structure required',
+                      OLD_AVAILABLE: 'Old structure available',
+                      HIRING:        'Hiring of structure',
+                    };
+
+                    const structureType = String(data.structure_type ?? '');
+
+                    const conditionalLabel =
+                      structureType === 'NEW_REQUIRED'  ? 'Agency Available?' :
+                      structureType === 'OLD_AVAILABLE' ? 'Possession given by OL?' :
+                      structureType === 'HIRING'        ? 'Rental Agreement?' :
+                      null;
+
+                    const conditionalValue =
+                      structureType === 'NEW_REQUIRED'  ? data.agency_available :
+                      structureType === 'OLD_AVAILABLE' ? data.possession_given :
+                      structureType === 'HIRING'        ? data.rental_agreement :
+                      undefined;
+
+                    return hasData ? (
+                      <Descriptions size="small" column={1} bordered>
+                        {data.record_name !== undefined && data.record_name !== '' && (
+                          <Descriptions.Item label="Record Name">
+                            {String(data.record_name)}
+                          </Descriptions.Item>
+                        )}
+                        {data.office_spaces_required !== undefined && (
+                          <Descriptions.Item label="Office Spaces Required">
+                            {String(data.office_spaces_required)}
+                          </Descriptions.Item>
+                        )}
+                        {data.block_section !== undefined && data.block_section !== '' && (
+                          <Descriptions.Item label="Block / Section">
+                            {String(data.block_section)}
+                          </Descriptions.Item>
+                        )}
+                        {data.location !== undefined && data.location !== '' && (
+                          <Descriptions.Item label="Location">
+                            {String(data.location)}
+                          </Descriptions.Item>
+                        )}
+                        {structureType && (
+                          <Descriptions.Item label="Type of Structure">
+                            {STRUCTURE_LABELS[structureType] ?? structureType}
+                          </Descriptions.Item>
+                        )}
+                        {conditionalLabel !== null && conditionalValue !== undefined && (
+                          <Descriptions.Item label={conditionalLabel}>
+                            {typeof conditionalValue === 'boolean' ? (conditionalValue ? 'Yes' : 'No') : String(conditionalValue)}
+                          </Descriptions.Item>
+                        )}
+                        {data.tdc !== undefined && data.tdc !== '' && (
+                          <Descriptions.Item label="Target Date of Completion">
+                            {String(data.tdc)}
+                          </Descriptions.Item>
+                        )}
+                        {data.remarks !== undefined && data.remarks !== '' && (
+                          <Descriptions.Item label="Remarks">
+                            {String(data.remarks)}
+                          </Descriptions.Item>
+                        )}
+                      </Descriptions>
+                    ) : (
+                      <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                        No details recorded yet. Click "Edit" to add them.
+                      </Text>
+                    );
+                  })()
+                ) : activity.activityTypeCode === 'TENDER_PACKAGING' ? (
+                  (() => {
+                    const data = (record.dataJson ?? {}) as Record<string, unknown>;
+                    const hasData = Object.keys(data).length > 0;
+                    return hasData ? (
+                      <Descriptions size="small" column={1} bordered>
+                        {data.package_name !== undefined && data.package_name !== '' && (
+                          <Descriptions.Item label="Package Name">
+                            {String(data.package_name)}
+                          </Descriptions.Item>
+                        )}
+                        {data.packages_required !== undefined && (
+                          <Descriptions.Item label="No. of Tender Packages Required">
+                            {String(data.packages_required)}
+                          </Descriptions.Item>
+                        )}
+                        {data.block_section !== undefined && data.block_section !== '' && (
+                          <Descriptions.Item label="Block / Section">
+                            {String(data.block_section)}
+                          </Descriptions.Item>
+                        )}
+                        {data.epc_document_prepared !== undefined && (
+                          <Descriptions.Item label="Preparation of EPC Document">
+                            {data.epc_document_prepared ? 'Yes' : 'No'}
+                          </Descriptions.Item>
+                        )}
+                        {data.tender_finalized !== undefined && (
+                          <Descriptions.Item label="Finalization of EPC Tender">
+                            {data.tender_finalized ? 'Yes' : 'No'}
+                          </Descriptions.Item>
+                        )}
+                      </Descriptions>
+                    ) : (
+                      <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                        No details recorded yet. Click "Edit" to add them.
+                      </Text>
+                    );
+                  })()
                 ) : editing ? (
                   <Form layout="vertical">
                     <ActivityMetadataForm

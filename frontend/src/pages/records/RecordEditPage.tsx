@@ -597,17 +597,29 @@ export default function RecordEditPage() {
   useEffect(() => {
     if (record) {
       const data = record.dataJson as Record<string, unknown>;
-      setFormData(data);
-      formDataRef.current = data;
+      const typeCode = formDef?.activityTypeCode;
+      let initialized = data;
+      if ((typeCode === 'TEMPORARY_OFFICE_SPACE' || typeCode === 'UTILITY_SHIFTING') && data.record_name === undefined && record.name) {
+        initialized = { ...data, record_name: record.name };
+      } else if (typeCode === 'TENDER_PACKAGING' && data.package_name === undefined && record.name) {
+        initialized = { ...data, package_name: record.name };
+      }
+      setFormData(initialized);
+      formDataRef.current = initialized;
     }
-  }, [record?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [record?.id, formDef?.activityTypeCode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Autosave ───────────────────────────────────────────────────────────────
 
   const { status: autosaveStatus, savedAt, markDirty, saveNow } = useAutosave({
     saveFn: useCallback(async () => {
-      await patchRecord(recordId!, formDataRef.current);
-    }, [recordId]),
+      const typeCode = formDef?.activityTypeCode;
+      const recordName =
+        typeCode === 'TENDER_PACKAGING'
+          ? (formDataRef.current.package_name as string | undefined)
+          : (formDataRef.current.record_name as string | undefined);
+      await patchRecord(recordId!, formDataRef.current, recordName || undefined);
+    }, [recordId, formDef?.activityTypeCode]),
   });
 
   // ── RJSF onChange ─────────────────────────────────────────────────────────

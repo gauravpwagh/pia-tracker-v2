@@ -31,16 +31,21 @@ import {
 } from 'antd';
 import { ActivityMetadataForm, ActivityMetadataView, getMetadataDefaults } from './ActivityMetadataForm';
 import {
-  AuditOutlined,
-  BranchesOutlined,
   CloseOutlined,
-  ClusterOutlined,
   EditOutlined,
-  HomeOutlined,
   PlusOutlined,
   SaveOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons';
+import {
+  IconBuildingBridge2,
+  IconFileInvoice,
+  IconHomeCog,
+  IconMapPinDollar,
+  IconRoute,
+  IconRuler2,
+  IconTools,
+  IconTrees,
+} from '@tabler/icons-react';
 import {
   updateActivity,
   type ActivityDetailResponse,
@@ -57,11 +62,16 @@ const { TextArea } = Input;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+const SZ = 15;
+const ti = (icon: React.ReactNode) => <span className="anticon">{icon}</span>;
+
 const ACTIVITY_TYPE_ICONS: Record<string, React.ReactNode> = {
-  LAND_ACQUISITION:       <HomeOutlined />,
-  FOREST_CLEARANCE:       <ClusterOutlined />,
-  UTILITY_SHIFTING:       <ThunderboltOutlined />,
-  DRAWING_APPROVAL:       <AuditOutlined />,
+  LAND_ACQUISITION:       ti(<IconMapPinDollar    size={SZ} />),
+  FOREST_CLEARANCE:       ti(<IconTrees           size={SZ} />),
+  UTILITY_SHIFTING:       ti(<IconTools           size={SZ} />),
+  DRAWING_APPROVAL:       ti(<IconRuler2          size={SZ} />),
+  TENDER_PACKAGING:       ti(<IconFileInvoice     size={SZ} />),
+  TEMPORARY_OFFICE_SPACE: ti(<IconHomeCog         size={SZ} />),
 };
 
 const ACTIVITY_TYPE_LABELS: Record<string, string> = {
@@ -258,8 +268,8 @@ export function ActivityDetailPanel({ activityId, canEdit, onClose, onRecordCrea
   };
 
   const typeIcon = activity
-    ? (ACTIVITY_TYPE_ICONS[activity.activityTypeCode] ?? <BranchesOutlined />)
-    : <BranchesOutlined />;
+    ? (ACTIVITY_TYPE_ICONS[activity.activityTypeCode] ?? ti(<IconRoute size={SZ} />))
+    : ti(<IconBuildingBridge2 size={SZ} />);
 
   const typeLabel = activity
     ? (ACTIVITY_TYPE_LABELS[activity.activityTypeCode] ?? activity.activityTypeCode.replace(/_/g, ' '))
