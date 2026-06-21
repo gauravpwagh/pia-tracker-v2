@@ -164,6 +164,7 @@ export function AttachmentPanel({
     mutationFn: (id: string) => deleteAttachment(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['attachments', entityType, entityId] });
+      void queryClient.invalidateQueries({ queryKey: ['attachments', 'section-panel'] });
       void message.success('Attachment deleted');
     },
     onError: (err: Error) => {
@@ -192,6 +193,7 @@ export function AttachmentPanel({
     try {
       await uploadFile(entityType, entityId, file, (p) => setProgress(p), accept, controller.signal);
       void queryClient.invalidateQueries({ queryKey: ['attachments', entityType, entityId] });
+      void queryClient.invalidateQueries({ queryKey: ['attachments', 'section-panel'] });
       void message.success('File uploaded — malware scan in progress');
     } catch (err) {
       if ((err as Error).name === 'AbortError') {

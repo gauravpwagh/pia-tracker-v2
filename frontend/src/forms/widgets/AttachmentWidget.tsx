@@ -17,19 +17,26 @@ import { AttachmentPanel, ACCEPT_ALL } from '@components/attachments/AttachmentP
 
 const { Text } = Typography;
 
-export function AttachmentWidget({ label, schema, required, uiSchema, formContext }: WidgetProps) {
+export function AttachmentWidget({ id, label, schema, required, uiSchema, formContext }: WidgetProps) {
   const title = (schema.title as string | undefined) ?? label;
-  const opts = (uiSchema?.['ui:options'] ?? {}) as Record<string, string>;
+  const opts = (uiSchema?.['ui:options'] ?? {}) as Record<string, unknown>;
 
   // entityType / entityId come from ui:options or formContext (set by the form renderer)
   const entityType =
-    opts.entityType ?? (formContext as Record<string, string> | undefined)?.entityType ?? '';
-  const entityId =
-    opts.entityId ?? (formContext as Record<string, string> | undefined)?.entityId ?? '';
+    (opts.entityType as string | undefined) ?? (formContext as Record<string, string> | undefined)?.entityType ?? '';
+  const baseEntityId =
+    (opts.entityId as string | undefined) ?? (formContext as Record<string, string> | undefined)?.entityId ?? '';
 
-  const accept = opts.accept ?? ACCEPT_ALL;
-  const uploadLabel = opts.uploadLabel ?? 'Attach file';
-  const uploadHint = opts.uploadHint;
+  // scopeToField: true — append the field path to entityType so each field has its own
+  // attachment pool while entityId stays a valid UUID (backend requires UUID for entityId).
+  const scopeToField = opts.scopeToField === true;
+  const fieldSuffix = id.replace(/^root_/, '');
+  const entityId = baseEntityId;
+  const effectiveEntityType = scopeToField && entityType ? `${entityType}__${fieldSuffix}` : entityType;
+
+  const accept = (opts.accept as string | undefined) ?? ACCEPT_ALL;
+  const uploadLabel = (opts.uploadLabel as string | undefined) ?? 'Attach file';
+  const uploadHint = opts.uploadHint as string | undefined;
 
   return (
     <div>
@@ -43,7 +50,7 @@ export function AttachmentWidget({ label, schema, required, uiSchema, formContex
       )}
       {entityId ? (
         <AttachmentPanel
-          entityType={entityType}
+          entityType={effectiveEntityType}
           entityId={entityId}
           canUpload
           accept={accept}

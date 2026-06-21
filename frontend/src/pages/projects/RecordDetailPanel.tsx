@@ -40,6 +40,7 @@ import {
   CheckCircleOutlined,
   CloseOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   FileTextOutlined,
   MoreOutlined,
@@ -53,6 +54,7 @@ import { useTranslation } from 'react-i18next';
 import { deleteRecord, fetchRecord, patchRecord, type ActivityRecordDetail } from '@api/activityRecords';
 import { fetchActivityById, updateActivity } from '@api/projects';
 import { fetchWorkflowState, performWorkflowAction, type SectionWorkflowState, type WorkflowActionCode } from '@api/workflow';
+import { fetchAttachments, getAttachmentDownloadUrl } from '@api/attachments';
 import { useAuthStore } from '@stores/authStore';
 import { CommentPanel } from '@components/comments/CommentPanel';
 import { HistoryPanel } from '@components/comments/HistoryPanel';
@@ -162,6 +164,79 @@ interface RecordDetailPanelProps {
   canEdit: boolean;
   onClose: () => void;
   onDelete?: () => void;
+}
+
+const CA_LAND_FIELDS: { key: string; label: string }[] = [
+  { key: 'area_selection',    label: 'Area Selection' },
+  { key: 'village_map',       label: 'Village Map' },
+  { key: 'topo_sheet',        label: 'TOPO Sheet' },
+  { key: 'kml_file',          label: 'KML File' },
+  { key: 'geo_reference_map', label: 'Geo Reference Map' },
+];
+
+const CHECKLIST_FIELDS: { key: string; label: string }[] = [
+  { key: 'project_report',        label: 'Project Report' },
+  { key: 'forest_area_statement', label: 'Forest Area Statement' },
+  { key: 'dgps_survey',           label: 'DGPS Survey of Forest Land' },
+  { key: 'gis_overlay',           label: 'GIS Overlay with Forest Map' },
+  { key: 'fra_compliance',        label: 'FRA Compliance' },
+];
+
+const BASE_ENTITY_TYPE = 'ACTIVITY_RECORD';
+
+function FcCALandPanel({ recordId }: { recordId: string }) {
+  return <FcAttachmentSectionPanel recordId={recordId} fields={CA_LAND_FIELDS} title="CA Land" />;
+}
+
+function FcAttachmentSectionPanel({ recordId, fields, title }: { recordId: string; fields: { key: string; label: string }[]; title: string }) {
+  const entityTypes = fields.map(({ key }) => `${BASE_ENTITY_TYPE}__${key}`);
+  const { data, isLoading } = useQuery({
+    queryKey: ['attachments', 'section-panel', ...entityTypes, recordId],
+    queryFn: () =>
+      Promise.all(entityTypes.map((et) => fetchAttachments(et, recordId))),
+    staleTime: 0,
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: (id: string) => getAttachmentDownloadUrl(id),
+    onSuccess: (res) => window.open(res.presignedUrl, '_blank', 'noopener,noreferrer'),
+  });
+
+  return (
+    <>
+      <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
+      <Descriptions size="small" column={1} bordered>
+        {fields.map(({ key, label }, i) => {
+          const files = data?.[i] ?? [];
+          return (
+            <Descriptions.Item key={key} label={label}>
+              {isLoading ? (
+                <Text type="secondary" style={{ fontSize: 12 }}>Loading…</Text>
+              ) : files.length === 0 ? (
+                <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+              ) : (
+                <Space direction="vertical" size={2}>
+                  {files.map((f) => (
+                    <Space key={f.id} size={6}>
+                      <Text style={{ fontSize: 12 }}>{f.originalFilename}</Text>
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<DownloadOutlined />}
+                        loading={downloadMutation.isPending}
+                        onClick={() => downloadMutation.mutate(f.id)}
+                        style={{ padding: 0, height: 'auto' }}
+                      />
+                    </Space>
+                  ))}
+                </Space>
+              )}
+            </Descriptions.Item>
+          );
+        })}
+      </Descriptions>
+    </>
+  );
 }
 
 export function RecordDetailPanel({
@@ -893,6 +968,13 @@ export function RecordDetailPanel({
                                     s20dEntries,s20eEntries,s20fgEntries,s20hiEntries,mutationEntries]
                       .some((e) => e.length > 0);
 
+                    const LA_CHECKLIST_FIELDS = [
+                      { key: 'kmz_file',         label: 'KMZ File' },
+                      { key: 'drone_footage',    label: "Drone Footage of L' Section" },
+                      { key: 'srp_notification', label: 'Notification of SRP' },
+                      { key: 'cala_nomination',  label: 'CALA Nomination' },
+                    ];
+
                     return hasAny ? (
                       <>
                         <SectionBlock title="Acquisition Details" entries={adEntries} />
@@ -904,6 +986,7 @@ export function RecordDetailPanel({
                         <SectionBlock title="Section 20E" entries={s20eEntries} />
                         <SectionBlock title="Section 20F-G" entries={s20fgEntries} />
                         <SectionBlock title="Section 20H-I" entries={s20hiEntries} />
+                        <FcAttachmentSectionPanel recordId={recordId} fields={LA_CHECKLIST_FIELDS} title="Checklist" />
                         <SectionBlock title="Mutation" entries={mutationEntries} />
                       </>
                     ) : (
@@ -917,6 +1000,8 @@ export function RecordDetailPanel({
                     const data = (record.dataJson ?? {}) as Record<string, unknown>;
 
                     type FCEntry = { label: string; value: string };
+
+                    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
                     function fcFlatten(
                       sec: Record<string, unknown>,
@@ -933,6 +1018,8 @@ export function RecordDetailPanel({
                           if (v.length > 0) out.push({ label: labels[k], value: `${v.length} ${v.length === 1 ? 'entry' : 'entries'}` });
                         } else if (typeof v === 'object') {
                           out.push({ label: labels[k], value: JSON.stringify(v) });
+                        } else if (typeof v === 'string' && UUID_RE.test(v)) {
+                          out.push({ label: labels[k], value: 'Attached' });
                         } else {
                           out.push({ label: labels[k], value: String(v) });
                         }
@@ -987,19 +1074,15 @@ export function RecordDetailPanel({
                         queries:'Queries' },
                     );
 
-                    const hasAny = [adEntries, stageIEntries, stageIIEntries, postApprovalEntries].some((e) => e.length > 0);
-
-                    return hasAny ? (
+                    return (
                       <>
                         <FCSectionBlock title="Acquisition Details" entries={adEntries} />
                         <FCSectionBlock title="Stage I" entries={stageIEntries} />
                         <FCSectionBlock title="Stage II" entries={stageIIEntries} />
+                        <FcCALandPanel recordId={record.id} />
+                        <FcAttachmentSectionPanel recordId={record.id} fields={CHECKLIST_FIELDS} title="Checklist" />
                         <FCSectionBlock title="Post Approval" entries={postApprovalEntries} />
                       </>
-                    ) : (
-                      <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
-                        No details recorded yet.
-                      </Text>
                     );
                   })()
                 ) : editing ? (
