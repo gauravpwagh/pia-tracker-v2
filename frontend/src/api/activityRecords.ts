@@ -38,6 +38,7 @@ export interface ActivityDetail {
   primaryDyceUserId: string;
   status: string;
   defaultFormDefinitionId: string | null;
+  metadataJson: Record<string, unknown>;
   createdByUserId: string;
   createdAt: string;
   updatedAt: string;

@@ -779,6 +779,142 @@ export function RecordDetailPanel({
                       </Space>
                     );
                   })()
+                ) : activity.activityTypeCode === 'LAND_ACQUISITION' ? (
+                  (() => {
+                    const data = (record.dataJson ?? {}) as Record<string, unknown>;
+
+                    type FieldEntry = { label: string; value: string };
+
+                    function flattenSection(
+                      sec: Record<string, unknown>,
+                      order: string[],
+                      labels: Record<string, string>,
+                    ): FieldEntry[] {
+                      const out: FieldEntry[] = [];
+                      for (const k of order) {
+                        const v = sec[k];
+                        if (v === undefined || v === null || v === '') continue;
+                        if (typeof v === 'object' && !Array.isArray(v)) {
+                          // GazetteReference or Chainage sub-object
+                          const obj = v as Record<string, unknown>;
+                          if ('gaz_number' in obj || 'published_on' in obj) {
+                            if (obj.published_on) out.push({ label: `${labels[k]} – Published On`, value: String(obj.published_on) });
+                            if (obj.gaz_number)   out.push({ label: `${labels[k]} – Gazette No.`, value: String(obj.gaz_number) });
+                          } else if ('km' in obj || 'm' in obj) {
+                            const parts = [];
+                            if (obj.km !== undefined && obj.km !== null) parts.push(`${obj.km} km`);
+                            if (obj.m  !== undefined && obj.m  !== null) parts.push(`${obj.m} m`);
+                            if (parts.length) out.push({ label: labels[k], value: parts.join(' ') });
+                          } else {
+                            out.push({ label: labels[k], value: JSON.stringify(v) });
+                          }
+                        } else if (typeof v === 'boolean') {
+                          out.push({ label: labels[k], value: v ? 'Yes' : 'No' });
+                        } else {
+                          out.push({ label: labels[k], value: String(v) });
+                        }
+                      }
+                      return out;
+                    }
+
+                    function SectionBlock({ title, entries }: { title: string; entries: FieldEntry[] }) {
+                      if (entries.length === 0) return null;
+                      return (
+                        <>
+                          <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
+                          <Descriptions size="small" column={1} bordered>
+                            {entries.map((e, i) => (
+                              <Descriptions.Item key={i} label={e.label}>{e.value}</Descriptions.Item>
+                            ))}
+                          </Descriptions>
+                        </>
+                      );
+                    }
+
+                    const adEntries = flattenSection(
+                      (data.acquisition_details as Record<string, unknown> | undefined) ?? {},
+                      ['record_name','block_section','chainage_from','chainage_to','district','sub_division_taluka',
+                       'area_hectares_total','area_hectares_private','area_hectares_govt','area_hectares_forest','est_villages'],
+                      { record_name:'Record Name', block_section:'Block Section', chainage_from:'Chainage From',
+                        chainage_to:'Chainage To', district:'District', sub_division_taluka:'Sub-Division / Taluka',
+                        area_hectares_total:'Total Area (ha)', area_hectares_private:'Private Land (ha)',
+                        area_hectares_govt:'Govt. Land (ha)', area_hectares_forest:'Forest Land (ha)',
+                        est_villages:'Est. No. of Villages' },
+                    );
+                    const srpEntries = flattenSection(
+                      (data.srp as Record<string, unknown> | undefined) ?? {},
+                      ['srp_declared_in_gaz_on','srp_gazette'],
+                      { srp_declared_in_gaz_on:'Declared in Gazette On', srp_gazette:'Gazette' },
+                    );
+                    const calaEntries = flattenSection(
+                      (data.cala as Record<string, unknown> | undefined) ?? {},
+                      ['cala_received_from_state_on','cala_publication_in_gaz'],
+                      { cala_received_from_state_on:'Received from State On', cala_publication_in_gaz:'Publication Gazette' },
+                    );
+                    const s20aEntries = flattenSection(
+                      (data.section_20a as Record<string, unknown> | undefined) ?? {},
+                      ['notification_date','gazette_pub','local_newspaper_pub_date'],
+                      { notification_date:'Notification Date', gazette_pub:'Gazette', local_newspaper_pub_date:'Newspaper Pub. Date' },
+                    );
+                    const jmrEntries = flattenSection(
+                      (data.jmr as Record<string, unknown> | undefined) ?? {},
+                      ['jmr_fee_demanded_on','jmr_fee_amount','jmr_fee_submitted_on','jmr_done_on','revision_required','revision_reason'],
+                      { jmr_fee_demanded_on:'Fee Demanded On', jmr_fee_amount:'Fee Amount (₹)',
+                        jmr_fee_submitted_on:'Fee Submitted On', jmr_done_on:'JMR Done On',
+                        revision_required:'Revision Required', revision_reason:'Revision Reason' },
+                    );
+                    const s20dEntries = flattenSection(
+                      (data.section_20d as Record<string, unknown> | undefined) ?? {},
+                      ['objections_received','objections_summary','hearing_date'],
+                      { objections_received:'Objections Received', objections_summary:'Objections Summary', hearing_date:'Hearing Date' },
+                    );
+                    const s20eEntries = flattenSection(
+                      (data.section_20e as Record<string, unknown> | undefined) ?? {},
+                      ['declaration_gazette','local_newspaper_pub_date'],
+                      { declaration_gazette:'Declaration Gazette', local_newspaper_pub_date:'Newspaper Pub. Date' },
+                    );
+                    const s20fgEntries = flattenSection(
+                      (data.section_20f_g as Record<string, unknown> | undefined) ?? {},
+                      ['competent_authority','compensation_determined_on','compensation_amount','market_value_basis'],
+                      { competent_authority:'Competent Authority', compensation_determined_on:'Compensation Determined On',
+                        compensation_amount:'Compensation Amount (₹)', market_value_basis:'Market Value Basis' },
+                    );
+                    const s20hiEntries = flattenSection(
+                      (data.section_20h_i as Record<string, unknown> | undefined) ?? {},
+                      ['payment_made_to','payment_date','possession_given_on'],
+                      { payment_made_to:'Payment Made To', payment_date:'Payment Date', possession_given_on:'Possession Given On' },
+                    );
+                    const mutationEntries = flattenSection(
+                      (data.mutation as Record<string, unknown> | undefined) ?? {},
+                      ['mutation_done_on','revenue_records_updated','land_plan_approved','arbitration_required','arbitration_notes'],
+                      { mutation_done_on:'Mutation Done On', revenue_records_updated:'Revenue Records Updated',
+                        land_plan_approved:'Land Plan Approved', arbitration_required:'Arbitration Required',
+                        arbitration_notes:'Arbitration Notes' },
+                    );
+
+                    const hasAny = [adEntries,srpEntries,calaEntries,s20aEntries,jmrEntries,
+                                    s20dEntries,s20eEntries,s20fgEntries,s20hiEntries,mutationEntries]
+                      .some((e) => e.length > 0);
+
+                    return hasAny ? (
+                      <>
+                        <SectionBlock title="Acquisition Details" entries={adEntries} />
+                        <SectionBlock title="SRP" entries={srpEntries} />
+                        <SectionBlock title="CALA" entries={calaEntries} />
+                        <SectionBlock title="Section 20A" entries={s20aEntries} />
+                        <SectionBlock title="JMR" entries={jmrEntries} />
+                        <SectionBlock title="Section 20D" entries={s20dEntries} />
+                        <SectionBlock title="Section 20E" entries={s20eEntries} />
+                        <SectionBlock title="Section 20F-G" entries={s20fgEntries} />
+                        <SectionBlock title="Section 20H-I" entries={s20hiEntries} />
+                        <SectionBlock title="Mutation" entries={mutationEntries} />
+                      </>
+                    ) : (
+                      <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                        No details recorded yet.
+                      </Text>
+                    );
+                  })()
                 ) : editing ? (
                   <Form layout="vertical">
                     <ActivityMetadataForm

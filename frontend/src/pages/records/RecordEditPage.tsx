@@ -624,13 +624,30 @@ export default function RecordEditPage() {
             },
           };
         }
+      } else if (typeCode === 'LAND_ACQUISITION') {
+        // Seed acquisition_details from activity metadataJson (activity-level fields)
+        // and record.name / village_name for record_name.
+        const ad = (data.acquisition_details as Record<string, unknown> | undefined) ?? {};
+        const meta = activity?.metadataJson ?? {};
+        const laName = record.name || (data.village_name as string | undefined);
+        const seeded: Record<string, unknown> = { ...ad };
+        if (seeded.record_name === undefined && laName) seeded.record_name = laName;
+        const metaFields = ['block_section','chainage_from','chainage_to','district','sub_division_taluka',
+          'area_hectares_total','area_hectares_private','area_hectares_govt',
+          'area_hectares_forest','est_villages'] as const;
+        for (const f of metaFields) {
+          if (seeded[f] === undefined && meta[f] !== undefined) seeded[f] = meta[f];
+        }
+        if (JSON.stringify(seeded) !== JSON.stringify(ad)) {
+          initialized = { ...data, acquisition_details: seeded };
+        }
       } else if (typeCode === 'TENDER_PACKAGING' && data.package_name === undefined && record.name) {
         initialized = { ...data, package_name: record.name };
       }
       setFormData(initialized);
       formDataRef.current = initialized;
     }
-  }, [record?.id, formDef?.activityTypeCode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [record?.id, formDef?.activityTypeCode, activity?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Autosave ───────────────────────────────────────────────────────────────
 
@@ -642,6 +659,8 @@ export default function RecordEditPage() {
           ? (formDataRef.current.package_name as string | undefined)
           : typeCode === 'DRAWING_APPROVAL'
           ? ((formDataRef.current.drawing_details as Record<string, unknown> | undefined)?.record_name as string | undefined)
+          : typeCode === 'LAND_ACQUISITION'
+          ? ((formDataRef.current.acquisition_details as Record<string, unknown> | undefined)?.record_name as string | undefined)
           : (formDataRef.current.record_name as string | undefined);
       await patchRecord(recordId!, formDataRef.current, recordName || undefined);
     }, [recordId, formDef?.activityTypeCode]),
