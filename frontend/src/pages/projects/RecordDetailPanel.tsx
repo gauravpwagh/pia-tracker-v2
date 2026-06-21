@@ -423,9 +423,6 @@ export function RecordDetailPanel({
               ) : null}
 
               <Descriptions size="small" column={1} bordered>
-                <Descriptions.Item label="State">
-                  <Tag color={stateColor} style={{ margin: 0 }}>{stateLabel}</Tag>
-                </Descriptions.Item>
                 {record.recordSubtype && (
                   <Descriptions.Item label="Type">
                     {record.recordSubtype.replace(/_/g, ' ')}
@@ -908,6 +905,96 @@ export function RecordDetailPanel({
                         <SectionBlock title="Section 20F-G" entries={s20fgEntries} />
                         <SectionBlock title="Section 20H-I" entries={s20hiEntries} />
                         <SectionBlock title="Mutation" entries={mutationEntries} />
+                      </>
+                    ) : (
+                      <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                        No details recorded yet.
+                      </Text>
+                    );
+                  })()
+                ) : activity.activityTypeCode === 'FOREST_CLEARANCE' ? (
+                  (() => {
+                    const data = (record.dataJson ?? {}) as Record<string, unknown>;
+
+                    type FCEntry = { label: string; value: string };
+
+                    function fcFlatten(
+                      sec: Record<string, unknown>,
+                      order: string[],
+                      labels: Record<string, string>,
+                    ): FCEntry[] {
+                      const out: FCEntry[] = [];
+                      for (const k of order) {
+                        const v = sec[k];
+                        if (v === undefined || v === null || v === '') continue;
+                        if (typeof v === 'boolean') {
+                          out.push({ label: labels[k], value: v ? 'Yes' : 'No' });
+                        } else if (Array.isArray(v)) {
+                          if (v.length > 0) out.push({ label: labels[k], value: `${v.length} ${v.length === 1 ? 'entry' : 'entries'}` });
+                        } else if (typeof v === 'object') {
+                          out.push({ label: labels[k], value: JSON.stringify(v) });
+                        } else {
+                          out.push({ label: labels[k], value: String(v) });
+                        }
+                      }
+                      return out;
+                    }
+
+                    function FCSectionBlock({ title, entries }: { title: string; entries: FCEntry[] }) {
+                      if (entries.length === 0) return null;
+                      return (
+                        <>
+                          <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
+                          <Descriptions size="small" column={1} bordered>
+                            {entries.map((e, i) => (
+                              <Descriptions.Item key={i} label={e.label}>{e.value}</Descriptions.Item>
+                            ))}
+                          </Descriptions>
+                        </>
+                      );
+                    }
+
+                    const adEntries = fcFlatten(
+                      (data.acquisition_details as Record<string, unknown> | undefined) ?? {},
+                      ['record_name','block_section','chainage_from','chainage_to','forest_division','forest_area'],
+                      { record_name:'Record Name', block_section:'Block Section', chainage_from:'Chainage From',
+                        chainage_to:'Chainage To', forest_division:'Forest Division', forest_area:'Forest Area (ha)' },
+                    );
+                    const stageIEntries = fcFlatten(
+                      (data.stage_i as Record<string, unknown> | undefined) ?? {},
+                      ['proposal_submitted_on_parivesh','proposal_submitted_date','scrutiny_by_dfo','scrutiny_date',
+                       'site_inspection','site_inspection_date','in_principle_approval','in_principle_approval_date',
+                       'stipulated_conditions','queries'],
+                      { proposal_submitted_on_parivesh:'Proposal on PARIVESH?', proposal_submitted_date:'Proposal Submitted On',
+                        scrutiny_by_dfo:'DFO Scrutiny Done?', scrutiny_date:'Scrutiny Date',
+                        site_inspection:'Site Inspection Done?', site_inspection_date:'Site Inspection Date',
+                        in_principle_approval:'In-Principle Approval?', in_principle_approval_date:'In-Principle Approval Date',
+                        stipulated_conditions:'Stipulated Conditions', queries:'Queries' },
+                    );
+                    const stageIIEntries = fcFlatten(
+                      (data.stage_ii as Record<string, unknown> | undefined) ?? {},
+                      ['compliance_submitted_on','state_recommendation_forwarded_on','final_approval_on','queries'],
+                      { compliance_submitted_on:'Compliance Submitted On',
+                        state_recommendation_forwarded_on:'State Recommendation Forwarded On',
+                        final_approval_on:'Final Approval On', queries:'Queries' },
+                    );
+                    const postApprovalEntries = fcFlatten(
+                      (data.post_approval as Record<string, unknown> | undefined) ?? {},
+                      ['formal_order_issued_on','tree_felling_started_on','compensatory_afforestation_initiated_on','queries'],
+                      { formal_order_issued_on:'Formal Order Issued On',
+                        tree_felling_started_on:'Tree Felling Started On',
+                        compensatory_afforestation_initiated_on:'Compensatory Afforestation Initiated On',
+                        queries:'Queries' },
+                    );
+
+                    const hasAny = [adEntries, stageIEntries, stageIIEntries, postApprovalEntries].some((e) => e.length > 0);
+
+                    return hasAny ? (
+                      <>
+                        <FCSectionBlock title="Acquisition Details" entries={adEntries} />
+                        <FCSectionBlock title="Stage I" entries={stageIEntries} />
+                        <FCSectionBlock title="Stage II" entries={stageIIEntries} />
+                        <FCSectionBlock title="Post Approval" entries={postApprovalEntries} />
                       </>
                     ) : (
                       <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>

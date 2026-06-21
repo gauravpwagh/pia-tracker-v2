@@ -25,10 +25,11 @@ function parse(value: string | undefined): { km: number | null; m: number | null
   return { km: parseInt(match[1], 10), m: parseInt(match[2], 10) };
 }
 
-/** Format `{ km, m }` → `"42+500"`, zero-padding m to 3 digits. */
+/** Format `{ km, m }` → `"42+500"`, zero-padding m to 3 digits.
+ *  m defaults to 0 when unset so a km-only entry still produces a valid string. */
 function format(km: number | null, m: number | null): string {
-  if (km === null || m === null) return '';
-  return `${km}+${String(m).padStart(3, '0')}`;
+  if (km === null) return '';
+  return `${km}+${String(m ?? 0).padStart(3, '0')}`;
 }
 
 export function ChainageWidget({

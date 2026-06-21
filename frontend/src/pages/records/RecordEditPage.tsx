@@ -624,6 +624,11 @@ export default function RecordEditPage() {
             },
           };
         }
+      } else if (typeCode === 'FOREST_CLEARANCE') {
+        const ad = (data.acquisition_details as Record<string, unknown> | undefined) ?? {};
+        if (ad.record_name === undefined && record.name) {
+          initialized = { ...data, acquisition_details: { ...ad, record_name: record.name } };
+        }
       } else if (typeCode === 'LAND_ACQUISITION') {
         // Seed acquisition_details from activity metadataJson (activity-level fields)
         // and record.name / village_name for record_name.
@@ -659,7 +664,7 @@ export default function RecordEditPage() {
           ? (formDataRef.current.package_name as string | undefined)
           : typeCode === 'DRAWING_APPROVAL'
           ? ((formDataRef.current.drawing_details as Record<string, unknown> | undefined)?.record_name as string | undefined)
-          : typeCode === 'LAND_ACQUISITION'
+          : (typeCode === 'LAND_ACQUISITION' || typeCode === 'FOREST_CLEARANCE')
           ? ((formDataRef.current.acquisition_details as Record<string, unknown> | undefined)?.record_name as string | undefined)
           : (formDataRef.current.record_name as string | undefined);
       await patchRecord(recordId!, formDataRef.current, recordName || undefined);
