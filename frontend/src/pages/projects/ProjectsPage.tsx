@@ -26,7 +26,6 @@ import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Button,
-  Dropdown,
   Empty,
   Input,
   Segmented,
@@ -44,7 +43,6 @@ import type { DataNode } from 'antd/es/tree';
 import {
   AppstoreOutlined,
   ExportOutlined,
-  MoreOutlined,
   PlusOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
@@ -91,29 +89,6 @@ const LIFECYCLE_BADGE: Record<string, { color: string; label: string }> = {
 
 // ── Activity status colours + labels ─────────────────────────────────────────
 
-const ACTIVITY_STATUS_COLORS: Record<string, string> = {
-  DRAFT:                       'default',
-  SUBMITTED_FOR_VERIFICATION:  'blue',
-  VERIFIED:                    'cyan',
-  AUTHENTICATED:               'green',
-  SENT_BACK_TO_DYCE:           'orange',
-  SENT_BACK_TO_NODAL:          'gold',
-};
-
-const ACTIVITY_STATUS_LABELS: Record<string, string> = {
-  DRAFT:                       'Draft',
-  SUBMITTED_FOR_VERIFICATION:  'Submitted',
-  VERIFIED:                    'Verified',
-  AUTHENTICATED:               'Authenticated',
-  SENT_BACK_TO_DYCE:           'Sent back to Dy CE/C',
-  SENT_BACK_TO_NODAL:          'Sent back to Nodal',
-  // legacy values still present in existing DB rows
-  NOT_STARTED:                 'Draft',
-  IN_PROGRESS:                 'Submitted',
-  COMPLETED:                   'Authenticated',
-  ON_HOLD:                     'Sent back to Dy CE/C',
-  CANCELLED:                   'Sent back to Nodal',
-};
 
 // ── Activity type → icon / label ─────────────────────────────────────────────
 
@@ -272,17 +247,6 @@ function ProjectNodeTitle({
         <Tag color={badge.color} style={{ margin: 0, fontSize: 11, lineHeight: '18px', padding: '0 6px' }}>
           {badge.label}
         </Tag>
-        <Dropdown
-          trigger={['click']}
-          menu={{ items: [] }}  // wired in a later phase
-        >
-          <Button
-            type="text"
-            size="small"
-            icon={<MoreOutlined />}
-            style={{ width: 20, height: 20, minWidth: 20, padding: 0, fontSize: 13 }}
-          />
-        </Dropdown>
       </Space>
     </div>
   );
@@ -291,8 +255,6 @@ function ProjectNodeTitle({
 // ── Activity node title ───────────────────────────────────────────────────────
 
 function ActivityNodeTitle({ activity }: { activity: ActivityDetailResponse }) {
-  const statusColor = ACTIVITY_STATUS_COLORS[activity.status] ?? 'default';
-  const statusLabel = ACTIVITY_STATUS_LABELS[activity.status] ?? activity.status.replace(/_/g, ' ');
   const daysElapsed = dayjs().diff(dayjs(activity.createdAt), 'day');
 
   return (
@@ -307,23 +269,10 @@ function ActivityNodeTitle({ activity }: { activity: ActivityDetailResponse }) {
         {activity.name || activity.activityTypeCode.replace(/_/g, ' ')}
       </Text>
 
-      {/* Right: days elapsed + status badge + more */}
-      <Space size={6} style={{ flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-        <Text type="secondary" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-          {daysElapsed}d
-        </Text>
-        <Tag color={statusColor} style={{ margin: 0, fontSize: 11, lineHeight: '18px', padding: '0 6px' }}>
-          {statusLabel}
-        </Tag>
-        <Dropdown trigger={['click']} menu={{ items: [] }}>
-          <Button
-            type="text"
-            size="small"
-            icon={<MoreOutlined />}
-            style={{ width: 20, height: 20, minWidth: 20, padding: 0, fontSize: 13 }}
-          />
-        </Dropdown>
-      </Space>
+      {/* Right: days elapsed + more */}
+      <Text type="secondary" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>
+        {daysElapsed}d
+      </Text>
     </div>
   );
 }

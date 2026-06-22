@@ -58,6 +58,7 @@ interface AttachmentPanelProps {
   entityType: string;
   entityId: string;
   canUpload?: boolean;
+  canDelete?: boolean;
   currentUserId?: string;
   /** Comma-separated MIME types for the file picker. Defaults to all allowed types. */
   accept?: string;
@@ -111,7 +112,7 @@ const SCAN_CONFIG: Record<
   },
 };
 
-function ScanBadge({ status }: { status: string }) {
+export function ScanBadge({ status }: { status: string }) {
   const cfg = SCAN_CONFIG[status] ?? SCAN_CONFIG.PENDING;
   return (
     <Tooltip title={cfg.tooltip}>
@@ -124,7 +125,7 @@ function ScanBadge({ status }: { status: string }) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(1)} MB`;
@@ -137,6 +138,7 @@ export function AttachmentPanel({
   entityType,
   entityId,
   canUpload = false,
+  canDelete = true,
   currentUserId,
   accept = ACCEPT_ALL,
   uploadLabel = 'Upload file',
@@ -282,7 +284,7 @@ export function AttachmentPanel({
                 onClick={() => downloadMutation.mutate(item.id)}
                 title="Download"
               />,
-              (item.uploadedByUserId === currentUserId || !currentUserId) && (
+              canDelete && (item.uploadedByUserId === currentUserId || !currentUserId) && (
                 <Popconfirm
                   key="del"
                   title="Delete this attachment?"

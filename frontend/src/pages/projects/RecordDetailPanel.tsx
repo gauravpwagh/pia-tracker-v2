@@ -60,6 +60,8 @@ import { CommentPanel } from '@components/comments/CommentPanel';
 import { HistoryPanel } from '@components/comments/HistoryPanel';
 import {
   AttachmentPanel,
+  ScanBadge,
+  formatBytes,
   ACCEPT_DOCUMENTS,
   ACCEPT_GEOGRAPHIC,
   ACCEPT_IMAGES,
@@ -166,6 +168,25 @@ interface RecordDetailPanelProps {
   onDelete?: () => void;
 }
 
+function AttachFileRow({ f, onDownload }: { f: import('@api/attachments').AttachmentDto; onDownload: (id: string) => void }) {
+  return (
+    <Space direction="vertical" size={1}>
+      <Space size={6} wrap>
+        <Text style={{ fontSize: 12 }}>{f.originalFilename}</Text>
+        <Tag style={{ fontSize: 11 }}>{formatBytes(f.fileSizeBytes)}</Tag>
+        <ScanBadge status={f.scanStatus} />
+        <Button
+          type="link" size="small" icon={<DownloadOutlined />}
+          disabled={f.scanStatus === 'INFECTED'}
+          onClick={() => onDownload(f.id)}
+          style={{ padding: 0, height: 'auto' }}
+        />
+      </Space>
+      <Text type="secondary" style={{ fontSize: 11 }}>{dayjs(f.createdAt).format('DD MMM YYYY HH:mm')}</Text>
+    </Space>
+  );
+}
+
 const CA_LAND_FIELDS: { key: string; label: string }[] = [
   { key: 'area_selection',    label: 'Area Selection' },
   { key: 'village_map',       label: 'Village Map' },
@@ -215,19 +236,9 @@ function FcAttachmentSectionPanel({ recordId, fields, title }: { recordId: strin
               ) : files.length === 0 ? (
                 <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
               ) : (
-                <Space direction="vertical" size={2}>
+                <Space direction="vertical" size={4}>
                   {files.map((f) => (
-                    <Space key={f.id} size={6}>
-                      <Text style={{ fontSize: 12 }}>{f.originalFilename}</Text>
-                      <Button
-                        type="link"
-                        size="small"
-                        icon={<DownloadOutlined />}
-                        loading={downloadMutation.isPending}
-                        onClick={() => downloadMutation.mutate(f.id)}
-                        style={{ padding: 0, height: 'auto' }}
-                      />
-                    </Space>
+                    <AttachFileRow key={f.id} f={f} onDownload={(id) => downloadMutation.mutate(id)} />
                   ))}
                 </Space>
               )}
@@ -235,6 +246,335 @@ function FcAttachmentSectionPanel({ recordId, fields, title }: { recordId: strin
           );
         })}
       </Descriptions>
+    </>
+  );
+}
+
+// ── LA section attachment field map ──────────────────────────────────────────
+// Each entry: RJSF field suffix (after stripping root_) → display label, grouped by section key.
+
+const LA_SECTION_ATTACH: Record<string, { key: string; label: string }[]> = {
+  srp:           [{ key: 'srp_gazette_pdf_attachment_id',             label: 'Gazette PDF' }],
+  cala:          [{ key: 'cala_publication_in_gaz_pdf_attachment_id', label: 'Gazette PDF' }],
+  section_20a:   [{ key: 'gazette_pub_pdf_attachment_id',             label: 'Gazette PDF' },
+                  { key: 'local_newspaper_pdf',                        label: 'Local Newspaper PDF' }],
+  section_20d:   [{ key: 'objections_pdf',                            label: 'Objections PDF' }],
+  section_20e:   [{ key: 'declaration_gazette_pdf_attachment_id',     label: 'Gazette PDF' }],
+  section_20h_i: [{ key: 'possession_pdf',                            label: 'Possession PDF' }],
+  mutation:      [{ key: 'mutation_certificate',                       label: 'Mutation Certificate' }],
+};
+
+const LA_ALL_ATTACH_FIELDS = Object.values(LA_SECTION_ATTACH).flat();
+
+type FieldEntry = { label: string; value: string };
+
+function flattenSection(
+  sec: Record<string, unknown>,
+  order: string[],
+  labels: Record<string, string>,
+): FieldEntry[] {
+  const out: FieldEntry[] = [];
+  for (const k of order) {
+    const v = sec[k];
+    if (v === undefined || v === null || v === '') continue;
+    if (typeof v === 'object' && !Array.isArray(v)) {
+      const obj = v as Record<string, unknown>;
+      if ('gaz_number' in obj || 'published_on' in obj) {
+        if (obj.published_on) out.push({ label: `${labels[k]} – Published On`, value: String(obj.published_on) });
+        if (obj.gaz_number)   out.push({ label: `${labels[k]} – Gazette No.`, value: String(obj.gaz_number) });
+      } else if ('km' in obj || 'm' in obj) {
+        const parts = [];
+        if (obj.km !== undefined && obj.km !== null) parts.push(`${obj.km} km`);
+        if (obj.m  !== undefined && obj.m  !== null) parts.push(`${obj.m} m`);
+        if (parts.length) out.push({ label: labels[k], value: parts.join(' ') });
+      } else {
+        out.push({ label: labels[k], value: JSON.stringify(v) });
+      }
+    } else if (typeof v === 'boolean') {
+      out.push({ label: labels[k], value: v ? 'Yes' : 'No' });
+    } else {
+      out.push({ label: labels[k], value: String(v) });
+    }
+  }
+  return out;
+}
+
+function LaSectionBlock({
+  title,
+  entries,
+  attachFiles,
+  downloadFn,
+}: {
+  title: string;
+  entries: FieldEntry[];
+  attachFiles?: { label: string; files: import('@api/attachments').AttachmentDto[] }[];
+  downloadFn: (id: string) => void;
+}) {
+  const hasAttach = attachFiles?.some((a) => a.files.length > 0) ?? false;
+  if (entries.length === 0 && !hasAttach) return null;
+  return (
+    <>
+      <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
+      <Descriptions size="small" column={1} bordered>
+        {entries.map((e, i) => (
+          <Descriptions.Item key={i} label={e.label}>{e.value}</Descriptions.Item>
+        ))}
+        {attachFiles?.map(({ label, files }) =>
+          files.length === 0 ? null : (
+            <Descriptions.Item key={label} label={label}>
+              <Space direction="vertical" size={4}>
+                {files.map((f) => (
+                  <AttachFileRow key={f.id} f={f} onDownload={downloadFn} />
+                ))}
+              </Space>
+            </Descriptions.Item>
+          )
+        )}
+      </Descriptions>
+    </>
+  );
+}
+
+function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Record<string, unknown> }) {
+  const { data: allFiles } = useQuery({
+    queryKey: ['attachments', 'section-panel', 'la', recordId],
+    queryFn: () =>
+      Promise.all(LA_ALL_ATTACH_FIELDS.map(({ key }) => fetchAttachments(`${BASE_ENTITY_TYPE}__${key}`, recordId))),
+    staleTime: 0,
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: (id: string) => getAttachmentDownloadUrl(id),
+    onSuccess: (res) => window.open(res.presignedUrl, '_blank', 'noopener,noreferrer'),
+  });
+
+  // Map field key → fetched files
+  const fileMap = new Map<string, import('@api/attachments').AttachmentDto[]>();
+  LA_ALL_ATTACH_FIELDS.forEach(({ key }, i) => {
+    fileMap.set(key, allFiles?.[i] ?? []);
+  });
+
+  function attachFor(sectionKey: string) {
+    return (LA_SECTION_ATTACH[sectionKey] ?? []).map(({ key, label }) => ({
+      label,
+      files: fileMap.get(key) ?? [],
+    }));
+  }
+
+  const adEntries = flattenSection(
+    (dataJson.acquisition_details as Record<string, unknown> | undefined) ?? {},
+    ['record_name','block_section','chainage_from','chainage_to','district','sub_division_taluka',
+     'area_hectares_total','area_hectares_private','area_hectares_govt','area_hectares_forest','est_villages'],
+    { record_name:'Record Name', block_section:'Block Section', chainage_from:'Chainage From',
+      chainage_to:'Chainage To', district:'District', sub_division_taluka:'Sub-Division / Taluka',
+      area_hectares_total:'Total Area (ha)', area_hectares_private:'Private Land (ha)',
+      area_hectares_govt:'Govt. Land (ha)', area_hectares_forest:'Forest Land (ha)',
+      est_villages:'Est. No. of Villages' },
+  );
+  const srpEntries = flattenSection(
+    (dataJson.srp as Record<string, unknown> | undefined) ?? {},
+    ['srp_declared_in_gaz_on'],
+    { srp_declared_in_gaz_on:'Declared in Gazette On' },
+  );
+  const calaEntries = flattenSection(
+    (dataJson.cala as Record<string, unknown> | undefined) ?? {},
+    ['cala_received_from_state_on'],
+    { cala_received_from_state_on:'Received from State On' },
+  );
+  const s20aEntries = flattenSection(
+    (dataJson.section_20a as Record<string, unknown> | undefined) ?? {},
+    ['notification_date','local_newspaper_pub_date'],
+    { notification_date:'Notification Date', local_newspaper_pub_date:'Newspaper Pub. Date' },
+  );
+  const jmrEntries = flattenSection(
+    (dataJson.jmr as Record<string, unknown> | undefined) ?? {},
+    ['jmr_fee_demanded_on','jmr_fee_amount','jmr_fee_submitted_on','jmr_done_on','revision_required','revision_reason'],
+    { jmr_fee_demanded_on:'Fee Demanded On', jmr_fee_amount:'Fee Amount (₹)',
+      jmr_fee_submitted_on:'Fee Submitted On', jmr_done_on:'JMR Done On',
+      revision_required:'Revision Required', revision_reason:'Revision Reason' },
+  );
+  const s20dEntries = flattenSection(
+    (dataJson.section_20d as Record<string, unknown> | undefined) ?? {},
+    ['objections_received','objections_summary','hearing_date'],
+    { objections_received:'Objections Received', objections_summary:'Objections Summary', hearing_date:'Hearing Date' },
+  );
+  const s20eEntries = flattenSection(
+    (dataJson.section_20e as Record<string, unknown> | undefined) ?? {},
+    ['local_newspaper_pub_date'],
+    { local_newspaper_pub_date:'Newspaper Pub. Date' },
+  );
+  const s20fgEntries = flattenSection(
+    (dataJson.section_20f_g as Record<string, unknown> | undefined) ?? {},
+    ['competent_authority','compensation_determined_on','compensation_amount','market_value_basis'],
+    { competent_authority:'Competent Authority', compensation_determined_on:'Compensation Determined On',
+      compensation_amount:'Compensation Amount (₹)', market_value_basis:'Market Value Basis' },
+  );
+  const s20hiEntries = flattenSection(
+    (dataJson.section_20h_i as Record<string, unknown> | undefined) ?? {},
+    ['payment_made_to','payment_date','possession_given_on'],
+    { payment_made_to:'Payment Made To', payment_date:'Payment Date', possession_given_on:'Possession Given On' },
+  );
+  const mutationEntries = flattenSection(
+    (dataJson.mutation as Record<string, unknown> | undefined) ?? {},
+    ['mutation_done_on','revenue_records_updated','land_plan_approved','arbitration_required','arbitration_notes'],
+    { mutation_done_on:'Mutation Done On', revenue_records_updated:'Revenue Records Updated',
+      land_plan_approved:'Land Plan Approved', arbitration_required:'Arbitration Required',
+      arbitration_notes:'Arbitration Notes' },
+  );
+
+  const LA_CHECKLIST_FIELDS = [
+    { key: 'kmz_file',         label: 'KMZ File' },
+    { key: 'drone_footage',    label: "Drone Footage of L' Section" },
+    { key: 'srp_notification', label: 'Notification of SRP' },
+    { key: 'cala_nomination',  label: 'CALA Nomination' },
+  ];
+
+  const dl = (id: string) => downloadMutation.mutate(id);
+
+  return (
+    <>
+      <LaSectionBlock title="Acquisition Details" entries={adEntries} downloadFn={dl} />
+      <LaSectionBlock title="SRP" entries={srpEntries} attachFiles={attachFor('srp')} downloadFn={dl} />
+      <LaSectionBlock title="CALA" entries={calaEntries} attachFiles={attachFor('cala')} downloadFn={dl} />
+      <LaSectionBlock title="Section 20A" entries={s20aEntries} attachFiles={attachFor('section_20a')} downloadFn={dl} />
+      <LaSectionBlock title="JMR" entries={jmrEntries} downloadFn={dl} />
+      <LaSectionBlock title="Section 20D" entries={s20dEntries} attachFiles={attachFor('section_20d')} downloadFn={dl} />
+      <LaSectionBlock title="Section 20E" entries={s20eEntries} attachFiles={attachFor('section_20e')} downloadFn={dl} />
+      <LaSectionBlock title="Section 20F-G" entries={s20fgEntries} downloadFn={dl} />
+      <LaSectionBlock title="Section 20H-I" entries={s20hiEntries} attachFiles={attachFor('section_20h_i')} downloadFn={dl} />
+      <FcAttachmentSectionPanel recordId={recordId} fields={LA_CHECKLIST_FIELDS} title="Checklist" />
+      <LaSectionBlock title="Mutation" entries={mutationEntries} attachFiles={attachFor('mutation')} downloadFn={dl} />
+    </>
+  );
+}
+
+const FC_SECTION_ATTACH: Record<string, { key: string; label: string }[]> = {
+  stage_i:  [{ key: 'inspection_report_pdf', label: 'Inspection Report PDF' }],
+  stage_ii: [{ key: 'final_approval_pdf',    label: 'Final Approval PDF' }],
+};
+
+const FC_ALL_ATTACH_FIELDS = Object.values(FC_SECTION_ATTACH).flat();
+
+function FcSectionBlock({
+  title,
+  entries,
+  attachFiles,
+  downloadFn,
+}: {
+  title: string;
+  entries: { label: string; value: string }[];
+  attachFiles?: { label: string; files: import('@api/attachments').AttachmentDto[] }[];
+  downloadFn: (id: string) => void;
+}) {
+  const hasAttach = attachFiles?.some((a) => a.files.length > 0) ?? false;
+  if (entries.length === 0 && !hasAttach) return null;
+  return (
+    <>
+      <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
+      <Descriptions size="small" column={1} bordered>
+        {entries.map((e, i) => (
+          <Descriptions.Item key={i} label={e.label}>{e.value}</Descriptions.Item>
+        ))}
+        {attachFiles?.map(({ label, files }) =>
+          files.length === 0 ? null : (
+            <Descriptions.Item key={label} label={label}>
+              <Space direction="vertical" size={4}>
+                {files.map((f) => (
+                  <AttachFileRow key={f.id} f={f} onDownload={downloadFn} />
+                ))}
+              </Space>
+            </Descriptions.Item>
+          )
+        )}
+      </Descriptions>
+    </>
+  );
+}
+
+function FcDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Record<string, unknown> }) {
+  const { data: allFiles } = useQuery({
+    queryKey: ['attachments', 'section-panel', 'fc', recordId],
+    queryFn: () =>
+      Promise.all(FC_ALL_ATTACH_FIELDS.map(({ key }) => fetchAttachments(`${BASE_ENTITY_TYPE}__${key}`, recordId))),
+    staleTime: 0,
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: (id: string) => getAttachmentDownloadUrl(id),
+    onSuccess: (res) => window.open(res.presignedUrl, '_blank', 'noopener,noreferrer'),
+  });
+
+  const fileMap = new Map<string, import('@api/attachments').AttachmentDto[]>();
+  FC_ALL_ATTACH_FIELDS.forEach(({ key }, i) => fileMap.set(key, allFiles?.[i] ?? []));
+
+  function attachFor(sectionKey: string) {
+    return (FC_SECTION_ATTACH[sectionKey] ?? []).map(({ key, label }) => ({
+      label,
+      files: fileMap.get(key) ?? [],
+    }));
+  }
+
+  function fcFlatten(sec: Record<string, unknown>, order: string[], labels: Record<string, string>) {
+    const out: { label: string; value: string }[] = [];
+    for (const k of order) {
+      const v = sec[k];
+      if (v === undefined || v === null || v === '') continue;
+      if (typeof v === 'boolean') {
+        out.push({ label: labels[k], value: v ? 'Yes' : 'No' });
+      } else if (Array.isArray(v)) {
+        if (v.length > 0) out.push({ label: labels[k], value: `${v.length} ${v.length === 1 ? 'entry' : 'entries'}` });
+      } else if (typeof v === 'object') {
+        out.push({ label: labels[k], value: JSON.stringify(v) });
+      } else {
+        out.push({ label: labels[k], value: String(v) });
+      }
+    }
+    return out;
+  }
+
+  const adEntries = fcFlatten(
+    (dataJson.acquisition_details as Record<string, unknown> | undefined) ?? {},
+    ['record_name','block_section','chainage_from','chainage_to','forest_division','forest_area'],
+    { record_name:'Record Name', block_section:'Block Section', chainage_from:'Chainage From',
+      chainage_to:'Chainage To', forest_division:'Forest Division', forest_area:'Forest Area (ha)' },
+  );
+  const stageIEntries = fcFlatten(
+    (dataJson.stage_i as Record<string, unknown> | undefined) ?? {},
+    ['proposal_submitted_on_parivesh','proposal_submitted_date','scrutiny_by_dfo','scrutiny_date',
+     'site_inspection','site_inspection_date','in_principle_approval','in_principle_approval_date',
+     'stipulated_conditions','queries'],
+    { proposal_submitted_on_parivesh:'Proposal on PARIVESH?', proposal_submitted_date:'Proposal Submitted On',
+      scrutiny_by_dfo:'DFO Scrutiny Done?', scrutiny_date:'Scrutiny Date',
+      site_inspection:'Site Inspection Done?', site_inspection_date:'Site Inspection Date',
+      in_principle_approval:'In-Principle Approval?', in_principle_approval_date:'In-Principle Approval Date',
+      stipulated_conditions:'Stipulated Conditions', queries:'Queries' },
+  );
+  const stageIIEntries = fcFlatten(
+    (dataJson.stage_ii as Record<string, unknown> | undefined) ?? {},
+    ['compliance_submitted_on','state_recommendation_forwarded_on','final_approval_on','queries'],
+    { compliance_submitted_on:'Compliance Submitted On',
+      state_recommendation_forwarded_on:'State Recommendation Forwarded On',
+      final_approval_on:'Final Approval On', queries:'Queries' },
+  );
+  const postApprovalEntries = fcFlatten(
+    (dataJson.post_approval as Record<string, unknown> | undefined) ?? {},
+    ['formal_order_issued_on','tree_felling_started_on','compensatory_afforestation_initiated_on','queries'],
+    { formal_order_issued_on:'Formal Order Issued On',
+      tree_felling_started_on:'Tree Felling Started On',
+      compensatory_afforestation_initiated_on:'Compensatory Afforestation Initiated On',
+      queries:'Queries' },
+  );
+
+  const dl = (id: string) => downloadMutation.mutate(id);
+
+  return (
+    <>
+      <FcSectionBlock title="Acquisition Details" entries={adEntries} downloadFn={dl} />
+      <FcSectionBlock title="Stage I" entries={stageIEntries} attachFiles={attachFor('stage_i')} downloadFn={dl} />
+      <FcSectionBlock title="Stage II" entries={stageIIEntries} attachFiles={attachFor('stage_ii')} downloadFn={dl} />
+      <FcCALandPanel recordId={recordId} />
+      <FcAttachmentSectionPanel recordId={recordId} fields={CHECKLIST_FIELDS} title="Checklist" />
+      <FcSectionBlock title="Post Approval" entries={postApprovalEntries} downloadFn={dl} />
     </>
   );
 }
@@ -353,12 +693,6 @@ export function RecordDetailPanel({
     },
   });
 
-  const startEditing = () => {
-    setEditName(record?.name ?? '');
-    setEditMetadata({ ...(activity?.metadataJson as Record<string, unknown> ?? {}) });
-    setEditing(true);
-  };
-
   const cancelEditing = () => {
     setEditing(false);
     setEditName('');
@@ -434,13 +768,6 @@ export function RecordDetailPanel({
               trigger={['click']}
               menu={{
                 items: [
-                  ...(!isTerminal ? [{
-                    key: 'edit-details',
-                    icon: <EditOutlined />,
-                    label: 'Edit details',
-                    onClick: startEditing,
-                  }] : []),
-                  { type: 'divider' as const },
                   {
                     key: 'delete',
                     icon: <DeleteOutlined />,
@@ -852,239 +1179,15 @@ export function RecordDetailPanel({
                     );
                   })()
                 ) : activity.activityTypeCode === 'LAND_ACQUISITION' ? (
-                  (() => {
-                    const data = (record.dataJson ?? {}) as Record<string, unknown>;
-
-                    type FieldEntry = { label: string; value: string };
-
-                    function flattenSection(
-                      sec: Record<string, unknown>,
-                      order: string[],
-                      labels: Record<string, string>,
-                    ): FieldEntry[] {
-                      const out: FieldEntry[] = [];
-                      for (const k of order) {
-                        const v = sec[k];
-                        if (v === undefined || v === null || v === '') continue;
-                        if (typeof v === 'object' && !Array.isArray(v)) {
-                          // GazetteReference or Chainage sub-object
-                          const obj = v as Record<string, unknown>;
-                          if ('gaz_number' in obj || 'published_on' in obj) {
-                            if (obj.published_on) out.push({ label: `${labels[k]} – Published On`, value: String(obj.published_on) });
-                            if (obj.gaz_number)   out.push({ label: `${labels[k]} – Gazette No.`, value: String(obj.gaz_number) });
-                          } else if ('km' in obj || 'm' in obj) {
-                            const parts = [];
-                            if (obj.km !== undefined && obj.km !== null) parts.push(`${obj.km} km`);
-                            if (obj.m  !== undefined && obj.m  !== null) parts.push(`${obj.m} m`);
-                            if (parts.length) out.push({ label: labels[k], value: parts.join(' ') });
-                          } else {
-                            out.push({ label: labels[k], value: JSON.stringify(v) });
-                          }
-                        } else if (typeof v === 'boolean') {
-                          out.push({ label: labels[k], value: v ? 'Yes' : 'No' });
-                        } else {
-                          out.push({ label: labels[k], value: String(v) });
-                        }
-                      }
-                      return out;
-                    }
-
-                    function SectionBlock({ title, entries }: { title: string; entries: FieldEntry[] }) {
-                      if (entries.length === 0) return null;
-                      return (
-                        <>
-                          <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
-                          <Descriptions size="small" column={1} bordered>
-                            {entries.map((e, i) => (
-                              <Descriptions.Item key={i} label={e.label}>{e.value}</Descriptions.Item>
-                            ))}
-                          </Descriptions>
-                        </>
-                      );
-                    }
-
-                    const adEntries = flattenSection(
-                      (data.acquisition_details as Record<string, unknown> | undefined) ?? {},
-                      ['record_name','block_section','chainage_from','chainage_to','district','sub_division_taluka',
-                       'area_hectares_total','area_hectares_private','area_hectares_govt','area_hectares_forest','est_villages'],
-                      { record_name:'Record Name', block_section:'Block Section', chainage_from:'Chainage From',
-                        chainage_to:'Chainage To', district:'District', sub_division_taluka:'Sub-Division / Taluka',
-                        area_hectares_total:'Total Area (ha)', area_hectares_private:'Private Land (ha)',
-                        area_hectares_govt:'Govt. Land (ha)', area_hectares_forest:'Forest Land (ha)',
-                        est_villages:'Est. No. of Villages' },
-                    );
-                    const srpEntries = flattenSection(
-                      (data.srp as Record<string, unknown> | undefined) ?? {},
-                      ['srp_declared_in_gaz_on','srp_gazette'],
-                      { srp_declared_in_gaz_on:'Declared in Gazette On', srp_gazette:'Gazette' },
-                    );
-                    const calaEntries = flattenSection(
-                      (data.cala as Record<string, unknown> | undefined) ?? {},
-                      ['cala_received_from_state_on','cala_publication_in_gaz'],
-                      { cala_received_from_state_on:'Received from State On', cala_publication_in_gaz:'Publication Gazette' },
-                    );
-                    const s20aEntries = flattenSection(
-                      (data.section_20a as Record<string, unknown> | undefined) ?? {},
-                      ['notification_date','gazette_pub','local_newspaper_pub_date'],
-                      { notification_date:'Notification Date', gazette_pub:'Gazette', local_newspaper_pub_date:'Newspaper Pub. Date' },
-                    );
-                    const jmrEntries = flattenSection(
-                      (data.jmr as Record<string, unknown> | undefined) ?? {},
-                      ['jmr_fee_demanded_on','jmr_fee_amount','jmr_fee_submitted_on','jmr_done_on','revision_required','revision_reason'],
-                      { jmr_fee_demanded_on:'Fee Demanded On', jmr_fee_amount:'Fee Amount (₹)',
-                        jmr_fee_submitted_on:'Fee Submitted On', jmr_done_on:'JMR Done On',
-                        revision_required:'Revision Required', revision_reason:'Revision Reason' },
-                    );
-                    const s20dEntries = flattenSection(
-                      (data.section_20d as Record<string, unknown> | undefined) ?? {},
-                      ['objections_received','objections_summary','hearing_date'],
-                      { objections_received:'Objections Received', objections_summary:'Objections Summary', hearing_date:'Hearing Date' },
-                    );
-                    const s20eEntries = flattenSection(
-                      (data.section_20e as Record<string, unknown> | undefined) ?? {},
-                      ['declaration_gazette','local_newspaper_pub_date'],
-                      { declaration_gazette:'Declaration Gazette', local_newspaper_pub_date:'Newspaper Pub. Date' },
-                    );
-                    const s20fgEntries = flattenSection(
-                      (data.section_20f_g as Record<string, unknown> | undefined) ?? {},
-                      ['competent_authority','compensation_determined_on','compensation_amount','market_value_basis'],
-                      { competent_authority:'Competent Authority', compensation_determined_on:'Compensation Determined On',
-                        compensation_amount:'Compensation Amount (₹)', market_value_basis:'Market Value Basis' },
-                    );
-                    const s20hiEntries = flattenSection(
-                      (data.section_20h_i as Record<string, unknown> | undefined) ?? {},
-                      ['payment_made_to','payment_date','possession_given_on'],
-                      { payment_made_to:'Payment Made To', payment_date:'Payment Date', possession_given_on:'Possession Given On' },
-                    );
-                    const mutationEntries = flattenSection(
-                      (data.mutation as Record<string, unknown> | undefined) ?? {},
-                      ['mutation_done_on','revenue_records_updated','land_plan_approved','arbitration_required','arbitration_notes'],
-                      { mutation_done_on:'Mutation Done On', revenue_records_updated:'Revenue Records Updated',
-                        land_plan_approved:'Land Plan Approved', arbitration_required:'Arbitration Required',
-                        arbitration_notes:'Arbitration Notes' },
-                    );
-
-                    const hasAny = [adEntries,srpEntries,calaEntries,s20aEntries,jmrEntries,
-                                    s20dEntries,s20eEntries,s20fgEntries,s20hiEntries,mutationEntries]
-                      .some((e) => e.length > 0);
-
-                    const LA_CHECKLIST_FIELDS = [
-                      { key: 'kmz_file',         label: 'KMZ File' },
-                      { key: 'drone_footage',    label: "Drone Footage of L' Section" },
-                      { key: 'srp_notification', label: 'Notification of SRP' },
-                      { key: 'cala_nomination',  label: 'CALA Nomination' },
-                    ];
-
-                    return hasAny ? (
-                      <>
-                        <SectionBlock title="Acquisition Details" entries={adEntries} />
-                        <SectionBlock title="SRP" entries={srpEntries} />
-                        <SectionBlock title="CALA" entries={calaEntries} />
-                        <SectionBlock title="Section 20A" entries={s20aEntries} />
-                        <SectionBlock title="JMR" entries={jmrEntries} />
-                        <SectionBlock title="Section 20D" entries={s20dEntries} />
-                        <SectionBlock title="Section 20E" entries={s20eEntries} />
-                        <SectionBlock title="Section 20F-G" entries={s20fgEntries} />
-                        <SectionBlock title="Section 20H-I" entries={s20hiEntries} />
-                        <FcAttachmentSectionPanel recordId={recordId} fields={LA_CHECKLIST_FIELDS} title="Checklist" />
-                        <SectionBlock title="Mutation" entries={mutationEntries} />
-                      </>
-                    ) : (
-                      <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
-                        No details recorded yet.
-                      </Text>
-                    );
-                  })()
+                  <LaDetailPanel
+                    recordId={recordId}
+                    dataJson={(record.dataJson ?? {}) as Record<string, unknown>}
+                  />
                 ) : activity.activityTypeCode === 'FOREST_CLEARANCE' ? (
-                  (() => {
-                    const data = (record.dataJson ?? {}) as Record<string, unknown>;
-
-                    type FCEntry = { label: string; value: string };
-
-                    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-                    function fcFlatten(
-                      sec: Record<string, unknown>,
-                      order: string[],
-                      labels: Record<string, string>,
-                    ): FCEntry[] {
-                      const out: FCEntry[] = [];
-                      for (const k of order) {
-                        const v = sec[k];
-                        if (v === undefined || v === null || v === '') continue;
-                        if (typeof v === 'boolean') {
-                          out.push({ label: labels[k], value: v ? 'Yes' : 'No' });
-                        } else if (Array.isArray(v)) {
-                          if (v.length > 0) out.push({ label: labels[k], value: `${v.length} ${v.length === 1 ? 'entry' : 'entries'}` });
-                        } else if (typeof v === 'object') {
-                          out.push({ label: labels[k], value: JSON.stringify(v) });
-                        } else if (typeof v === 'string' && UUID_RE.test(v)) {
-                          out.push({ label: labels[k], value: 'Attached' });
-                        } else {
-                          out.push({ label: labels[k], value: String(v) });
-                        }
-                      }
-                      return out;
-                    }
-
-                    function FCSectionBlock({ title, entries }: { title: string; entries: FCEntry[] }) {
-                      if (entries.length === 0) return null;
-                      return (
-                        <>
-                          <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
-                          <Descriptions size="small" column={1} bordered>
-                            {entries.map((e, i) => (
-                              <Descriptions.Item key={i} label={e.label}>{e.value}</Descriptions.Item>
-                            ))}
-                          </Descriptions>
-                        </>
-                      );
-                    }
-
-                    const adEntries = fcFlatten(
-                      (data.acquisition_details as Record<string, unknown> | undefined) ?? {},
-                      ['record_name','block_section','chainage_from','chainage_to','forest_division','forest_area'],
-                      { record_name:'Record Name', block_section:'Block Section', chainage_from:'Chainage From',
-                        chainage_to:'Chainage To', forest_division:'Forest Division', forest_area:'Forest Area (ha)' },
-                    );
-                    const stageIEntries = fcFlatten(
-                      (data.stage_i as Record<string, unknown> | undefined) ?? {},
-                      ['proposal_submitted_on_parivesh','proposal_submitted_date','scrutiny_by_dfo','scrutiny_date',
-                       'site_inspection','site_inspection_date','in_principle_approval','in_principle_approval_date',
-                       'stipulated_conditions','queries'],
-                      { proposal_submitted_on_parivesh:'Proposal on PARIVESH?', proposal_submitted_date:'Proposal Submitted On',
-                        scrutiny_by_dfo:'DFO Scrutiny Done?', scrutiny_date:'Scrutiny Date',
-                        site_inspection:'Site Inspection Done?', site_inspection_date:'Site Inspection Date',
-                        in_principle_approval:'In-Principle Approval?', in_principle_approval_date:'In-Principle Approval Date',
-                        stipulated_conditions:'Stipulated Conditions', queries:'Queries' },
-                    );
-                    const stageIIEntries = fcFlatten(
-                      (data.stage_ii as Record<string, unknown> | undefined) ?? {},
-                      ['compliance_submitted_on','state_recommendation_forwarded_on','final_approval_on','queries'],
-                      { compliance_submitted_on:'Compliance Submitted On',
-                        state_recommendation_forwarded_on:'State Recommendation Forwarded On',
-                        final_approval_on:'Final Approval On', queries:'Queries' },
-                    );
-                    const postApprovalEntries = fcFlatten(
-                      (data.post_approval as Record<string, unknown> | undefined) ?? {},
-                      ['formal_order_issued_on','tree_felling_started_on','compensatory_afforestation_initiated_on','queries'],
-                      { formal_order_issued_on:'Formal Order Issued On',
-                        tree_felling_started_on:'Tree Felling Started On',
-                        compensatory_afforestation_initiated_on:'Compensatory Afforestation Initiated On',
-                        queries:'Queries' },
-                    );
-
-                    return (
-                      <>
-                        <FCSectionBlock title="Acquisition Details" entries={adEntries} />
-                        <FCSectionBlock title="Stage I" entries={stageIEntries} />
-                        <FCSectionBlock title="Stage II" entries={stageIIEntries} />
-                        <FcCALandPanel recordId={record.id} />
-                        <FcAttachmentSectionPanel recordId={record.id} fields={CHECKLIST_FIELDS} title="Checklist" />
-                        <FCSectionBlock title="Post Approval" entries={postApprovalEntries} />
-                      </>
-                    );
-                  })()
+                  <FcDetailPanel
+                    recordId={record.id}
+                    dataJson={(record.dataJson ?? {}) as Record<string, unknown>}
+                  />
                 ) : editing ? (
                   <Form layout="vertical">
                     <ActivityMetadataForm
@@ -1103,7 +1206,7 @@ export function RecordDetailPanel({
                     />
                     {Object.keys(activity.metadataJson ?? {}).length === 0 && (
                       <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
-                        No details recorded yet. Click ⋯ → "Edit details" to add them.
+                        No details recorded yet.
                       </Text>
                     )}
                   </>
@@ -1219,7 +1322,8 @@ export function RecordDetailPanel({
               <AttachmentPanel
                 entityType="ACTIVITY_RECORD"
                 entityId={recordId}
-                canUpload={currentUser?.permissions.includes('ATTACHMENT.UPLOAD.OWN_RECORDS')}
+                canUpload={false}
+                canDelete={false}
                 currentUserId={currentUser?.userId}
                 {...attachmentConfigFor(activityTypeCode)}
               />
