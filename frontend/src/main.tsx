@@ -52,7 +52,7 @@ function Root() {
       >
         <AntApp>
           <QueryClientProvider client={queryClient}>
-            <BrowserRouter>
+            <BrowserRouter basename={import.meta.env.BASE_URL}>
               <App />
             </BrowserRouter>
           </QueryClientProvider>

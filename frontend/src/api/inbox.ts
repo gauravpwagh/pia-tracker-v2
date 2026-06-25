@@ -7,7 +7,8 @@
  *   - slaBreached subset of awaiting where the SLA has been exceeded.
  */
 
-const BASE = '/api/v1';
+import { API_BASE } from '@lib/apiBase';
+const BASE = API_BASE;
 
 export interface InboxItem {
   instanceId: string;

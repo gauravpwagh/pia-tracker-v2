@@ -10,7 +10,8 @@
  *   GET  /api/v1/projects/{projectId}/activities — activities on a project
  */
 
-const BASE = '/api/v1';
+import { API_BASE } from '@lib/apiBase';
+const BASE = API_BASE;
 
 // ── Zone ─────────────────────────────────────────────────────────────────────
 

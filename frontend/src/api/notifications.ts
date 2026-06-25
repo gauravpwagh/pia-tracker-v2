@@ -7,7 +7,8 @@
  *   POST /api/v1/notifications/read-all    — mark all notifications read
  */
 
-const BASE = '/api/v1';
+import { API_BASE } from '@lib/apiBase';
+const BASE = API_BASE;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

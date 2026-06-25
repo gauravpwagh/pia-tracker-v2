@@ -6,8 +6,9 @@
  */
 
 import { captureETag, getETag } from '@lib/etag';
+import { API_BASE } from '@lib/apiBase';
 
-const BASE = '/api/v1';
+const BASE = API_BASE;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

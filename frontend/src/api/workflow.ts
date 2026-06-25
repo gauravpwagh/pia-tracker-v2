@@ -11,7 +11,8 @@
  *   POST /api/v1/activity-records/{id}/re-verify
  */
 
-const BASE = '/api/v1/activity-records';
+import { API_BASE } from '@lib/apiBase';
+const BASE = `${API_BASE}/activity-records`;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

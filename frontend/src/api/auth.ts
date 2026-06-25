@@ -1,4 +1,5 @@
-const BASE = '/api/v1';
+import { API_BASE } from '@lib/apiBase';
+const BASE = API_BASE;
 
 export interface UserSummary {
   id: string;

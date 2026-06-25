@@ -19,7 +19,8 @@
  *     DELETE /api/v1/attachments/{id}                     — soft-delete
  */
 
-const BASE = '/api/v1';
+import { API_BASE } from '@lib/apiBase';
+const BASE = API_BASE;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

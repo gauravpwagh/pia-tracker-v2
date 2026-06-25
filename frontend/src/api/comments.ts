@@ -8,7 +8,8 @@
  *   GET    /api/v1/activity-records/{id}/history
  */
 
-const BASE = '/api/v1';
+import { API_BASE } from '@lib/apiBase';
+const BASE = API_BASE;
 
 // ── Comment types ─────────────────────────────────────────────────────────────
 
