@@ -21,6 +21,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $LASTEXITCODE = 0   # initialise so strict mode doesn't throw before first external command
+$ThirdParty   = @()
+$AllImages    = @()
+$saveArgs     = ""
+$sizeMB       = 0
+$proc         = $null
 
 $RepoRoot   = Resolve-Path "$PSScriptRoot\..\.."
 $InfraDir   = "$RepoRoot\infra"
