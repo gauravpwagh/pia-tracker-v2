@@ -34,7 +34,7 @@ function Die($msg) { Write-Host "`nERROR: $msg" -ForegroundColor Red; exit 1 }
 
 # ── 1. Build frontend dist ────────────────────────────────────────────────────
 if (-not $SkipBuild) {
-    Log "Building frontend (base=/pia/ VITE_API_BASE=/pia/api/v1)"
+    Log "Building frontend — base=/pia/ VITE_API_BASE=/pia/api/v1"
     Push-Location $FrontendDir
     try {
         npm run build
@@ -46,7 +46,7 @@ if (-not $SkipBuild) {
 
 # ── 2. Build backend Docker image ─────────────────────────────────────────────
 if (-not $SkipBuild) {
-    Log "Building pia-backend:prod image (linux/amd64)"
+    Log "Building pia-backend:prod image for linux/amd64"
     docker build --platform linux/amd64 -t pia-backend:prod "$BackendDir"
     if ($LASTEXITCODE -ne 0) { Die "Backend image build failed" }
 } else {
@@ -74,7 +74,7 @@ if (-not $SkipImages) {
     }
 
     # ── 4. Export all images to tar.gz ────────────────────────────────────────
-    Log "Saving all images to $TarFile (this may take a few minutes)"
+    Log "Saving all images to $TarFile — this may take a few minutes"
     $AllImages = @("pia-backend:prod") + $ThirdParty
     $saveArgs  = $AllImages -join " "
 
@@ -109,47 +109,47 @@ if (-not $SkipImages) {
 # ── 5. Ensure remote directory exists ────────────────────────────────────────
 Log "Creating remote directory $RemotePath"
 & ssh @SshArgs "$RemoteUser@$RemoteHost" "mkdir -p $RemotePath/infra"
-if ($LASTEXITCODE -ne 0) { Die "SSH failed — check host/user/key" }
+if ($LASTEXITCODE -ne 0) { Die "SSH failed - check host/user/key" }
 
 # ── 6. Transfer image tarball ─────────────────────────────────────────────────
 if (-not $SkipImages) {
-    Log "Uploading image bundle to $RemoteHost:$RemotePath/ ..."
+    Log "Uploading image bundle to ${RemoteHost}:${RemotePath}/ ..."
     & scp @SshArgs $TarFile "${RemoteUser}@${RemoteHost}:${RemotePath}/pia-images.tar.gz"
     if ($LASTEXITCODE -ne 0) { Die "SCP of image bundle failed" }
 }
 
 # ── 7. Transfer infra/ directory ──────────────────────────────────────────────
 if (-not $SkipInfra) {
-    Log "Uploading infra/ to $RemoteHost:$RemotePath/infra/"
+    Log "Uploading infra/ to ${RemoteHost}:${RemotePath}/infra/"
     & scp @SshArgs -r "$InfraDir\." "${RemoteUser}@${RemoteHost}:${RemotePath}/infra/"
     if ($LASTEXITCODE -ne 0) { Die "SCP of infra/ failed" }
 
-    Log "Uploading frontend dist/ to $RemoteHost:/usr/share/nginx/html/pia/"
+    Log "Uploading frontend dist/ to ${RemoteHost}:/usr/share/nginx/html/pia/"
     & ssh @SshArgs "$RemoteUser@$RemoteHost" "mkdir -p /usr/share/nginx/html/pia"
     & scp @SshArgs -r "$FrontendDir\dist\." "${RemoteUser}@${RemoteHost}:/usr/share/nginx/html/pia/"
     if ($LASTEXITCODE -ne 0) { Die "SCP of frontend dist/ failed" }
 }
 
 # ── 8. Remote: load images ────────────────────────────────────────────────────
-Log "Loading images on remote server (this may take a few minutes)"
-& ssh @SshArgs "$RemoteUser@$RemoteHost" "podman load < $RemotePath/pia-images.tar.gz"
+Log "Loading images on remote server — this may take a few minutes"
+& ssh @SshArgs "$RemoteUser@$RemoteHost" "podman load --input $RemotePath/pia-images.tar.gz"
 if ($LASTEXITCODE -ne 0) { Die "podman load failed on remote" }
 
 # ── Done ─────────────────────────────────────────────────────────────────────
-Write-Host @"
+$done = @"
 
 ===============================================================
   Transfer complete. Next steps ON THE SERVER:
 
   1. Add PIA nginx locations to /etc/nginx/conf.d/crs.conf:
        cat $RemotePath/infra/nginx/pia-locations.conf
-     (paste the contents inside the server { listen 80 } block)
-     Then: nginx -t && nginx -s reload
+     Paste the contents inside the server listen-80 block,
+     then: nginx -t && nginx -s reload
 
   2. Configure env:
        cd $RemotePath/infra
        cp .env.prod.example .env
-       vi .env   # set all CHANGE_ME values
+       vi .env
 
   3. Start PIA stack:
        podman-compose -f podman-compose.prod.yml up -d
@@ -158,4 +158,5 @@ Write-Host @"
        curl http://10.77.48.80/pia/
        podman ps
 ===============================================================
-"@ -ForegroundColor Green
+"@
+Write-Host $done -ForegroundColor Green
