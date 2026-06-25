@@ -4,6 +4,9 @@
 # System nginx reaches containers via static bridge IPs (10.90.0.x) directly.
 # Do NOT add `ports:` mappings — they will not work reliably.
 #
+# All images are pre-loaded via `podman load` — pull_policy: never on every
+# service prevents Podman from attempting registry pulls on an air-gapped host.
+#
 # Network subnet: 10.90.0.0/24  (CRS uses 10.89.0.0/24 — no overlap)
 # Static IPs:
 #   10.90.0.2  pia-postgres
@@ -23,7 +26,8 @@ name: pia
 services:
 
   backend:
-    image: pia-backend:prod
+    image: localhost/pia-backend:prod
+    pull_policy: never
     container_name: pia-backend
     restart: unless-stopped
     networks:
@@ -54,7 +58,8 @@ services:
       start_period: 60s
 
   postgres:
-    image: postgres:16-alpine
+    image: docker.io/library/postgres:16-alpine
+    pull_policy: never
     container_name: pia-postgres
     restart: unless-stopped
     networks:
@@ -76,6 +81,7 @@ services:
 
   minio:
     image: quay.io/minio/minio:latest
+    pull_policy: never
     container_name: pia-minio
     restart: unless-stopped
     networks:
@@ -95,6 +101,7 @@ services:
 
   minio-init:
     image: quay.io/minio/mc:latest
+    pull_policy: never
     container_name: pia-minio-init
     networks:
       pia:
@@ -112,7 +119,8 @@ services:
         echo "Buckets ready."
 
   clamav:
-    image: clamav/clamav:1.4
+    image: docker.io/clamav/clamav:1.4
+    pull_policy: never
     container_name: pia-clamav
     restart: unless-stopped
     networks:
@@ -128,7 +136,8 @@ services:
       start_period: 120s
 
   prometheus:
-    image: prom/prometheus:latest
+    image: docker.io/prom/prometheus:latest
+    pull_policy: never
     container_name: pia-prometheus
     restart: unless-stopped
     networks:
@@ -143,7 +152,8 @@ services:
       - --storage.tsdb.retention.time=30d
 
   grafana:
-    image: grafana/grafana-oss:latest
+    image: docker.io/grafana/grafana-oss:latest
+    pull_policy: never
     container_name: pia-grafana
     restart: unless-stopped
     networks:
@@ -161,7 +171,8 @@ services:
     depends_on: [prometheus, loki]
 
   loki:
-    image: grafana/loki:latest
+    image: docker.io/grafana/loki:latest
+    pull_policy: never
     container_name: pia-loki
     restart: unless-stopped
     networks:
