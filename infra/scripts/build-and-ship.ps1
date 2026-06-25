@@ -41,7 +41,7 @@ if (-not $SkipBuild) {
         if ($LASTEXITCODE -ne 0) { Die "Frontend build failed" }
     } finally { Pop-Location }
 } else {
-    Log "Skipping frontend build (--SkipBuild)"
+    Log "Skipping frontend build [-SkipBuild]"
 }
 
 # ── 2. Build backend Docker image ─────────────────────────────────────────────
@@ -50,7 +50,7 @@ if (-not $SkipBuild) {
     docker build --platform linux/amd64 -t pia-backend:prod "$BackendDir"
     if ($LASTEXITCODE -ne 0) { Die "Backend image build failed" }
 } else {
-    Log "Skipping image build (--SkipBuild)"
+    Log "Skipping image build [-SkipBuild]"
 }
 
 # ── 3. Pull third-party images for linux/amd64 ───────────────────────────────
@@ -101,9 +101,9 @@ if (-not $SkipImages) {
     }
 
     $sizeMB = [math]::Round((Get-Item $TarFile).Length / 1MB, 0)
-    Log "Image bundle ready: $TarFile ($sizeMB MB)"
+    Log "Image bundle ready: $TarFile [$($sizeMB) MB]"
 } else {
-    Log "Skipping image export (--SkipImages)"
+    Log "Skipping image export [-SkipImages]"
 }
 
 # ── 5. Ensure remote directory exists ────────────────────────────────────────
