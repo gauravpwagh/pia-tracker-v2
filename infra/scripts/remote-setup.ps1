@@ -67,7 +67,7 @@ with open('/etc/nginx/conf.d/crs.conf', 'w') as f:
 print("crs.conf patched successfully")
 PYEOF
 '@
-        $rc = RunSsh$patchCmd
+        $rc = RunSsh $patchCmd
         if ($rc -ne 0) { Die "Failed to patch crs.conf" }
         Ok "crs.conf patched"
 
