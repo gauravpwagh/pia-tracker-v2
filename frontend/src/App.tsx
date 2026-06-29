@@ -1,30 +1,21 @@
-import React, { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import React, { lazy, Suspense, useEffect } from 'react';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Layout, Spin } from 'antd';
 
 import { TopBar } from '@components/shell/TopBar';
 import { Sidebar } from '@components/shell/Sidebar';
+import { useAuthStore } from '@stores/authStore';
 
-// Placeholder pages for v1 scaffolding; real implementations land per docs/phasing.md
 import { HomePage } from '@pages/Home';
 
-// Phase 1.7+: Projects list + create
+const LoginPage    = lazy(() => import('@pages/login/LoginPage'));
 const ProjectsPage = lazy(() => import('@pages/projects/ProjectsPage'));
-
-// Phase 1.9: Record Edit Page (code-split; RJSF is heavy)
 const RecordEditPage = lazy(() => import('@pages/records/RecordEditPage'));
-
-// Phase 1.12: Inbox page
-const InboxPage = lazy(() => import('@pages/inbox/InboxPage'));
-
-// Phase 1.14: Dashboard page
+const InboxPage    = lazy(() => import('@pages/inbox/InboxPage'));
 const DashboardPage = lazy(() => import('@pages/dashboard/DashboardPage'));
 
 const { Sider, Content, Header } = Layout;
 
-/** Wraps pages that need vertical scroll (Dashboard, Inbox).
- *  Pages that manage their own height (ProjectsPage, RecordEditPage)
- *  do NOT use this wrapper. */
 function ScrollPage({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden' }}>
@@ -33,7 +24,21 @@ function ScrollPage({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function App() {
+/** Redirects to /login if the user has no active session. Session is already
+ *  resolved by App before this renders, so currentUser is authoritative. */
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const location = useLocation();
+
+  if (!currentUser) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return <>{children}</>;
+}
+
+/** The main app shell (TopBar + Sidebar + content). */
+function AppShell() {
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Header style={{ padding: 0, height: 56, lineHeight: '56px' }}>
@@ -50,19 +55,51 @@ export default function App() {
           <Sidebar />
         </Sider>
         <Content style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <Suspense fallback={<Spin style={{ margin: 40 }} />}>
-            <Routes>
-              <Route path="/" element={<Navigate to="/projects" replace />} />
-              <Route path="/projects/*" element={<ProjectsPage />} />
-              <Route path="/records/:recordId/edit" element={<RecordEditPage />} />
-              <Route path="/inbox" element={<ScrollPage><InboxPage /></ScrollPage>} />
-              <Route path="/dashboard" element={<ScrollPage><DashboardPage /></ScrollPage>} />
-              <Route path="/admin/*" element={<HomePage />} />
-              <Route path="*" element={<HomePage />} />
-            </Routes>
-          </Suspense>
+          <Routes>
+            <Route path="/" element={<Navigate to="/projects" replace />} />
+            <Route path="/projects/*" element={<ProjectsPage />} />
+            <Route path="/records/:recordId/edit" element={<RecordEditPage />} />
+            <Route path="/inbox" element={<ScrollPage><InboxPage /></ScrollPage>} />
+            <Route path="/dashboard" element={<ScrollPage><DashboardPage /></ScrollPage>} />
+            <Route path="/admin/*" element={<HomePage />} />
+            <Route path="*" element={<HomePage />} />
+          </Routes>
         </Content>
       </Layout>
     </Layout>
+  );
+}
+
+export default function App() {
+  const { checkSession } = useAuthStore();
+
+  // Resolve existing session on app load before rendering anything.
+  const [checked, setChecked] = React.useState(false);
+  useEffect(() => {
+    void checkSession().finally(() => setChecked(true));
+  }, [checkSession]);
+
+  if (!checked) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  return (
+    <Suspense fallback={<Spin style={{ margin: 40 }} />}>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/*"
+          element={
+            <RequireAuth>
+              <AppShell />
+            </RequireAuth>
+          }
+        />
+      </Routes>
+    </Suspense>
   );
 }

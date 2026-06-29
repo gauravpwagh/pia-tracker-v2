@@ -9,6 +9,8 @@ export interface UserSummary {
   /** Human-readable short label, e.g. "EDGS/C-I", "Dy CE/C". */
   designationShortLabel: string;
   primaryZoneId: string | null;
+  /** Short zone name, e.g. "NR", "SCR". Null for system users. */
+  primaryZoneName: string | null;
 }
 
 export interface PrincipalInfo {

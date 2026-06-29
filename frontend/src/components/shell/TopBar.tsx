@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Avatar, Badge, Button, Dropdown, Select, Space, Tooltip, Typography } from 'antd';
+import { Avatar, Badge, Button, Dropdown, Space, Tooltip, Typography } from 'antd';
 import {
   BellOutlined,
   DownOutlined,
@@ -67,17 +67,12 @@ export function TopBar() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { currentUser, users, loadUsers, selectUser, logout, checkSession } = useAuthStore();
+  const { currentUser, users, logout } = useAuthStore();
 
   useEffect(() => {
-    void checkSession();
-    void loadUsers();
-  }, [checkSession, loadUsers]);
-
-  const userOptions = users.map((u) => ({
-    value: u.id,
-    label: `${u.name} (${u.designationShortLabel ?? u.designationCode})`,
-  }));
+    // users list is needed only to resolve the zone name label
+    // loadUsers is called from LoginPage; here we only need it if not yet loaded
+  }, []);
 
   // ── Notifications ─────────────────────────────────────────────────────────
 
@@ -116,6 +111,7 @@ export function TopBar() {
   // Resolve display strings for the current user
   const matchedUser = users.find((u) => u.id === currentUser?.userId);
   const designationLabel = matchedUser?.designationShortLabel ?? currentUser?.designationCode ?? '';
+
   const primaryZoneName = zonesData?.find((z) => z.id === currentUser?.primaryZoneId)?.shortName ?? '';
   const initials = currentUser
     ? currentUser.name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
@@ -210,19 +206,6 @@ export function TopBar() {
       </div>
 
       <Space align="center" size={12}>
-        {/* Role picker — dev/beta dummy auth */}
-        {users.length > 0 && (
-          <Select
-            aria-label="Select user role"
-            placeholder="Select user…"
-            style={{ minWidth: 200, maxWidth: 280 }}
-            value={currentUser?.userId ?? undefined}
-            options={userOptions}
-            onChange={(value: string) => void selectUser(value)}
-            size="small"
-          />
-        )}
-
         {/* Theme toggle */}
         <Tooltip title="Switch theme">
           <Dropdown
@@ -271,7 +254,7 @@ export function TopBar() {
                   icon: <LogoutOutlined />,
                   label: 'Logout',
                   danger: true,
-                  onClick: () => void logout(),
+                  onClick: () => void logout().then(() => navigate('/login')),
                 },
               ],
             }}

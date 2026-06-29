@@ -2,6 +2,7 @@ package `in`.gov.ir.pia.api
 
 import `in`.gov.ir.pia.repository.DesignationRepository
 import `in`.gov.ir.pia.repository.UserRepository
+import `in`.gov.ir.pia.repository.ZoneRepository
 import `in`.gov.ir.pia.security.DummyAuthFilter.Companion.SESSION_USER_ID_KEY
 import `in`.gov.ir.pia.security.PiaPrincipal
 import jakarta.servlet.http.HttpServletRequest
@@ -29,6 +30,8 @@ data class UserSummaryResponse(
     /** Human-readable label from designations.short_label, e.g. "EDGS/C-I", "Dy CE/C". */
     val designationShortLabel: String,
     val primaryZoneId: UUID?,
+    /** Short name of the user's primary zone, e.g. "NR", "SCR". Null for system users. */
+    val primaryZoneName: String?,
 )
 
 data class SelectUserRequest(
@@ -67,6 +70,7 @@ data class PrincipalResponse(
 class AuthController(
     private val userRepository: UserRepository,
     private val designationRepository: DesignationRepository,
+    private val zoneRepository: ZoneRepository,
 ) {
     /**
      * Returns active, non-deleted users for the role-picker dropdown.
@@ -85,6 +89,11 @@ class AuthController(
                 .findAllByOrderByDisplayOrder()
                 .associate { it.code to it.shortLabel }
 
+        val zoneNames: Map<UUID, String> =
+            zoneRepository
+                .findAllByIsActiveTrueOrderByDisplayOrder()
+                .associate { it.id to it.shortName }
+
         val users =
             if (designationCode != null) {
                 userRepository.findAllByDesignationCodeAndIsActiveTrueAndIsDeletedFalseOrderByName(designationCode)
@@ -100,6 +109,7 @@ class AuthController(
                 designationCode = user.designationCode,
                 designationShortLabel = shortLabels[user.designationCode] ?: user.designationCode,
                 primaryZoneId = user.primaryZoneId,
+                primaryZoneName = user.primaryZoneId?.let { zoneNames[it] },
             )
         }
     }

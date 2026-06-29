@@ -662,6 +662,7 @@ export default function ProjectsPage() {
     return {
       key: projectNodeKey(project.id),
       icon: null,
+      className: 'pia-project-node',
       title: (
         <ProjectNodeTitle
           project={project}
