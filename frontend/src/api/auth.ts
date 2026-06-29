@@ -11,6 +11,8 @@ export interface UserSummary {
   primaryZoneId: string | null;
   /** Short zone name, e.g. "NR", "SCR". Null for system users. */
   primaryZoneName: string | null;
+  /** True for seeded demo/test users; false for actual provisioned users. */
+  isDemo: boolean;
 }
 
 export interface PrincipalInfo {

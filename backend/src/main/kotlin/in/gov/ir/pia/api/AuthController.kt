@@ -32,6 +32,8 @@ data class UserSummaryResponse(
     val primaryZoneId: UUID?,
     /** Short name of the user's primary zone, e.g. "NR", "SCR". Null for system users. */
     val primaryZoneName: String?,
+    /** True for seeded demo/test users; false for actual provisioned users. */
+    val isDemo: Boolean,
 )
 
 data class SelectUserRequest(
@@ -110,6 +112,7 @@ class AuthController(
                 designationShortLabel = shortLabels[user.designationCode] ?: user.designationCode,
                 primaryZoneId = user.primaryZoneId,
                 primaryZoneName = user.primaryZoneId?.let { zoneNames[it] },
+                isDemo = user.isDemo,
             )
         }
     }

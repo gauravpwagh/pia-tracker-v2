@@ -7,6 +7,7 @@ import {
   Input,
   List,
   Space,
+  Tag,
   Typography,
 } from 'antd';
 import { LockOutlined, SearchOutlined, UserOutlined } from '@ant-design/icons';
@@ -59,21 +60,103 @@ export default function LoginPage() {
     );
   });
 
-  const grouped = new Map<string, UserSummary[]>();
-  for (const u of filtered) {
-    const existing = grouped.get(u.designationCode) ?? [];
-    existing.push(u);
-    grouped.set(u.designationCode, existing);
+  function buildGroups(list: UserSummary[]) {
+    const map = new Map<string, UserSummary[]>();
+    for (const u of list) {
+      const existing = map.get(u.designationCode) ?? [];
+      existing.push(u);
+      map.set(u.designationCode, existing);
+    }
+    const groups: Array<{ designation: string; label: string; users: UserSummary[] }> = [];
+    for (const code of DESIGNATION_ORDER) {
+      const g = map.get(code);
+      if (g) groups.push({ designation: code, label: g[0].designationShortLabel, users: g });
+    }
+    for (const [code, g] of map) {
+      if (!DESIGNATION_ORDER.includes(code))
+        groups.push({ designation: code, label: g[0].designationShortLabel, users: g });
+    }
+    return groups;
   }
 
-  const orderedGroups: Array<{ designation: string; label: string; users: UserSummary[] }> = [];
-  for (const code of DESIGNATION_ORDER) {
-    const group = grouped.get(code);
-    if (group) orderedGroups.push({ designation: code, label: group[0].designationShortLabel, users: group });
-  }
-  for (const [code, group] of grouped) {
-    if (!DESIGNATION_ORDER.includes(code))
-      orderedGroups.push({ designation: code, label: group[0].designationShortLabel, users: group });
+  const actualGroups = buildGroups(filtered.filter((u) => !u.isDemo));
+  const demoGroups   = buildGroups(filtered.filter((u) =>  u.isDemo));
+
+  function renderGroups(groups: Array<{ designation: string; label: string; users: UserSummary[] }>, isDemo: boolean) {
+    return groups.map(({ designation, label, users: groupUsers }) => (
+      <div key={(isDemo ? 'demo-' : '') + designation}>
+        <div style={{
+          padding: '5px 16px',
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          color: 'var(--ant-color-text-quaternary)',
+          background: 'var(--ant-color-bg-layout)',
+          borderBottom: '1px solid var(--ant-color-border-secondary)',
+        }}>
+          {label}
+        </div>
+        <List
+          dataSource={groupUsers}
+          renderItem={(u) => {
+            const isSelected = u.id === selectedUser?.id;
+            return (
+              <List.Item
+                onClick={() => setSelectedUser(isSelected ? null : u)}
+                onDoubleClick={() => { setSelectedUser(u); void handleSignIn(); }}
+                style={{
+                  padding: '8px 16px',
+                  cursor: 'pointer',
+                  background: isSelected ? 'var(--ant-color-primary-bg)' : 'transparent',
+                  borderLeft: isSelected ? '3px solid var(--ant-color-primary)' : '3px solid transparent',
+                  transition: 'background 0.12s',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--ant-color-bg-text-hover)';
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent';
+                }}
+              >
+                <Space size={10} style={{ width: '100%' }}>
+                  <Avatar size={32} style={{
+                    background: isSelected ? 'var(--ant-color-primary)' : 'var(--ant-color-bg-text-hover)',
+                    color: isSelected ? '#fff' : 'var(--ant-color-text-secondary)',
+                    fontWeight: 700, fontSize: 12, flexShrink: 0,
+                  }}>
+                    {getInitials(u.name)}
+                  </Avatar>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{
+                        fontSize: 13,
+                        fontWeight: isSelected ? 600 : 400,
+                        color: isSelected ? 'var(--ant-color-primary)' : 'var(--ant-color-text)',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {u.name}
+                      </span>
+                      {isDemo && (
+                        <Tag color="warning" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0, flexShrink: 0 }}>
+                          Demo
+                        </Tag>
+                      )}
+                    </div>
+                    <div style={{
+                      fontSize: 11, color: 'var(--ant-color-text-secondary)',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {u.primaryZoneName ?? 'System'}
+                    </div>
+                  </div>
+                </Space>
+              </List.Item>
+            );
+          }}
+        />
+      </div>
+    ));
   }
 
   const handleSignIn = async () => {
@@ -174,86 +257,32 @@ export default function LoginPage() {
 
           {/* User list */}
           <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-            {orderedGroups.length === 0 ? (
+            {actualGroups.length === 0 && demoGroups.length === 0 ? (
               <div style={{ padding: 24, textAlign: 'center' }}>
                 <Text type="secondary">No users found</Text>
               </div>
             ) : (
-              orderedGroups.map(({ designation, label, users: groupUsers }) => (
-                <div key={designation}>
-                  <div
-                    style={{
+              <>
+                {renderGroups(actualGroups, false)}
+                {demoGroups.length > 0 && (
+                  <>
+                    <div style={{
                       padding: '5px 16px',
                       fontSize: 10,
                       fontWeight: 700,
                       letterSpacing: '0.08em',
                       textTransform: 'uppercase',
-                      color: 'var(--ant-color-text-quaternary)',
-                      background: 'var(--ant-color-bg-layout)',
+                      color: 'var(--ant-color-warning)',
+                      background: 'var(--ant-color-warning-bg)',
+                      borderTop: actualGroups.length > 0 ? '1px solid var(--ant-color-border)' : undefined,
                       borderBottom: '1px solid var(--ant-color-border-secondary)',
-                    }}
-                  >
-                    {label}
-                  </div>
-                  <List
-                    dataSource={groupUsers}
-                    renderItem={(u) => {
-                      const isSelected = u.id === selectedUser?.id;
-                      return (
-                        <List.Item
-                          onClick={() => setSelectedUser(isSelected ? null : u)}
-                          onDoubleClick={() => { setSelectedUser(u); void handleSignIn(); }}
-                          style={{
-                            padding: '8px 16px',
-                            cursor: 'pointer',
-                            background: isSelected ? 'var(--ant-color-primary-bg)' : 'transparent',
-                            borderLeft: isSelected ? '3px solid var(--ant-color-primary)' : '3px solid transparent',
-                            transition: 'background 0.12s',
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--ant-color-bg-text-hover)';
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent';
-                          }}
-                        >
-                          <Space size={10} style={{ width: '100%' }}>
-                            <Avatar
-                              size={32}
-                              style={{
-                                background: isSelected ? 'var(--ant-color-primary)' : 'var(--ant-color-bg-text-hover)',
-                                color: isSelected ? '#fff' : 'var(--ant-color-text-secondary)',
-                                fontWeight: 700,
-                                fontSize: 12,
-                                flexShrink: 0,
-                              }}
-                            >
-                              {getInitials(u.name)}
-                            </Avatar>
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <div style={{
-                                fontSize: 13,
-                                fontWeight: isSelected ? 600 : 400,
-                                color: isSelected ? 'var(--ant-color-primary)' : 'var(--ant-color-text)',
-                                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                              }}>
-                                {u.name}
-                              </div>
-                              <div style={{
-                                fontSize: 11,
-                                color: 'var(--ant-color-text-secondary)',
-                                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                              }}>
-                                {u.primaryZoneName ?? 'System'}
-                              </div>
-                            </div>
-                          </Space>
-                        </List.Item>
-                      );
-                    }}
-                  />
-                </div>
-              ))
+                    }}>
+                      Demo Users
+                    </div>
+                    {renderGroups(demoGroups, true)}
+                  </>
+                )}
+              </>
             )}
           </div>
         </div>

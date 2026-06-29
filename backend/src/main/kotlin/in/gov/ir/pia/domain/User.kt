@@ -42,6 +42,8 @@ class User(
     var updatedAt: Instant = Instant.now(),
     @Column(name = "updated_by_user_id")
     var updatedByUserId: UUID? = null,
+    @Column(name = "is_demo")
+    val isDemo: Boolean = false,
     @Column(name = "is_deleted")
     val isDeleted: Boolean = false,
     @Column(name = "deleted_at")
