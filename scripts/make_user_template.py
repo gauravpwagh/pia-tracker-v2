@@ -64,6 +64,7 @@ ZONES = [
     ("SWR",  "South Western Railway"),
     ("WCR",  "West Central Railway"),
     ("WR",   "Western Railway"),
+    ("RB",   "Railway Board"),
 ]
 
 wb = openpyxl.Workbook()
