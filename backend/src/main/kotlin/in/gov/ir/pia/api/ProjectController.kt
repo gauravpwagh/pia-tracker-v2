@@ -8,6 +8,7 @@ import `in`.gov.ir.pia.service.project.DesignateNodalRequest
 import `in`.gov.ir.pia.service.project.ProjectAssignmentItem
 import `in`.gov.ir.pia.service.project.ProjectDetailResponse
 import `in`.gov.ir.pia.service.project.ProjectService
+import `in`.gov.ir.pia.service.project.RemoveProjectRequest
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
@@ -34,8 +35,8 @@ data class ProjectSummaryResponse(
     val chainageFromKm: java.math.BigDecimal?,
     val chainageToKm: java.math.BigDecimal?,
     val lengthKm: java.math.BigDecimal?,
+    val ipaDate: java.time.LocalDate?,
     val targetCompletionYear: Int?,
-    /** Creation timestamp — used on the UI to show days elapsed since zone assignment. */
     val createdAt: java.time.Instant,
 )
 
@@ -88,6 +89,7 @@ class ProjectController(
                     chainageFromKm = p.chainageFromKm,
                     chainageToKm = p.chainageToKm,
                     lengthKm = p.lengthKm,
+                    ipaDate = p.ipaDate,
                     targetCompletionYear = p.targetCompletionYear,
                     createdAt = p.createdAt,
                 )
@@ -120,6 +122,7 @@ class ProjectController(
             chainageFromKm = p.chainageFromKm,
             chainageToKm = p.chainageToKm,
             lengthKm = p.lengthKm,
+            ipaDate = p.ipaDate,
             recommendedByBoardOn = p.recommendedByBoardOn,
             targetCompletionYear = p.targetCompletionYear,
             lifecycleState = p.lifecycleState,
@@ -193,6 +196,18 @@ class ProjectController(
      * Deactivates the previous Nodal assignment and grants ROLE_NODAL_DY_CE_C
      * to the new Nodal user.
      */
+    /**
+     * Super-admin removes a project. Transitions lifecycle to REMOVED.
+     * Removed projects are invisible to all non-super-admin users.
+     */
+    @PostMapping("/{id}/remove")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.CREATE')")
+    fun remove(
+        @PathVariable id: UUID,
+        @RequestBody request: RemoveProjectRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): ProjectDetailResponse = projectService.removeProject(id, request.reason, principal)
+
     @PostMapping("/{id}/designate-nodal")
     @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.DESIGNATE_NODAL')")
     fun designateNodal(

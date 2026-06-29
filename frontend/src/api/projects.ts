@@ -45,6 +45,7 @@ export interface ProjectSummaryResponse {
   chainageFromKm: number | null;
   chainageToKm: number | null;
   lengthKm: number | null;
+  ipaDate: string | null;
   targetCompletionYear: number | null;
   createdAt: string;
 }
@@ -59,6 +60,7 @@ export interface ProjectDetailResponse {
   chainageFromKm: number | null;
   chainageToKm: number | null;
   lengthKm: number | null;
+  ipaDate: string | null;
   recommendedByBoardOn: string | null;
   targetCompletionYear: number | null;
   lifecycleState: string;
@@ -78,6 +80,7 @@ export interface CreateProjectRequest {
   chainageFromKm?: number;
   chainageToKm?: number;
   lengthKm?: number;
+  ipaDate?: string;
   targetCompletionYear?: number;
 }
 
@@ -146,6 +149,16 @@ export async function createProject(
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
+  });
+  return handleResponse<ProjectDetailResponse>(res);
+}
+
+export async function removeProject(id: string, reason: string): Promise<ProjectDetailResponse> {
+  const res = await fetch(`${BASE}/projects/${id}/remove`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
   });
   return handleResponse<ProjectDetailResponse>(res);
 }

@@ -55,6 +55,8 @@ class Project(
     val chainageToKm: BigDecimal? = null,
     @Column(name = "length_km", precision = 10, scale = 3)
     val lengthKm: BigDecimal? = null,
+    @Column(name = "ipa_date")
+    val ipaDate: LocalDate? = null,
     @Column(name = "recommended_by_board_on")
     val recommendedByBoardOn: LocalDate? = null,
     @Column(name = "target_completion_year")

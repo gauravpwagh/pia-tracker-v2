@@ -26,8 +26,10 @@ import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Button,
+  Dropdown,
   Empty,
   Input,
+  Modal,
   Segmented,
   Select,
   Space,
@@ -42,7 +44,9 @@ import type { ColumnsType } from 'antd/es/table';
 import type { DataNode } from 'antd/es/tree';
 import {
   AppstoreOutlined,
+  DeleteOutlined,
   ExportOutlined,
+  MoreOutlined,
   PlusOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
@@ -60,6 +64,7 @@ import {
   fetchActivities,
   fetchProjects,
   fetchZones,
+  removeProject,
   type ActivityDetailResponse,
   type ProjectSummaryResponse,
 } from '@api/projects';
@@ -84,6 +89,10 @@ const LIFECYCLE_BADGE: Record<string, { color: string; label: string }> = {
   AWAITING_CAO_ALLOCATION: { color: 'orange',  label: 'Awaiting Allocation' },
   AWAITING_CEC_ASSIGNMENT: { color: 'blue',    label: 'Awaiting Assignment' },
   ACTIVE:                  { color: 'green',   label: 'Active' },
+  ON_HOLD:                 { color: 'orange',  label: 'On Hold' },
+  COMPLETED:               { color: 'cyan',    label: 'Completed' },
+  DROPPED:                 { color: 'default', label: 'Dropped' },
+  REMOVED:                 { color: 'red',     label: 'Removed' },
   CLOSED:                  { color: 'default', label: 'Closed' },
 };
 
@@ -199,22 +208,18 @@ const RECORD_STATE_LABELS: Record<string, string> = {
 function ProjectNodeTitle({
   project,
   zoneShortName,
+  onRemove,
 }: {
   project: ProjectSummaryResponse;
   zoneShortName: string;
+  onRemove?: () => void;
 }) {
   const badge = LIFECYCLE_BADGE[project.lifecycleState] ?? { color: 'default', label: project.lifecycleState };
 
-  // Build subtitle parts: chainage range + length + zone
+  // Build subtitle: length + zone
   const subtitleParts: string[] = [];
-  if (project.chainageFromKm !== null && project.chainageToKm !== null) {
-    subtitleParts.push(`Km ${project.chainageFromKm}–${project.chainageToKm}`);
-  }
-  if (project.lengthKm !== null) {
-    subtitleParts.push(`${project.lengthKm} km`);
-  }
+  if (project.lengthKm !== null) subtitleParts.push(`${project.lengthKm} km`);
   if (zoneShortName) subtitleParts.push(zoneShortName);
-  subtitleParts.push(dayjs(project.createdAt).format('D MMM YYYY'));
   const subtitle = subtitleParts.join(' · ');
 
   return (
@@ -234,19 +239,44 @@ function ProjectNodeTitle({
         )}
       </div>
 
-      {/* Right: target year + days elapsed + lifecycle badge + more */}
+      {/* Right: target year + IPA date + lifecycle badge + super-admin menu */}
       <Space size={6} style={{ flexShrink: 0, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
         {project.targetCompletionYear && (
           <Text type="secondary" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
             {project.targetCompletionYear}
           </Text>
         )}
-        <Text type="secondary" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-          {dayjs().diff(dayjs(project.createdAt), 'day')}d
-        </Text>
+        {project.ipaDate && (
+          <Text type="secondary" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+            {dayjs(project.ipaDate).format('D MMM YY')}
+          </Text>
+        )}
         <Tag color={badge.color} style={{ margin: 0, fontSize: 11, lineHeight: '18px', padding: '0 6px' }}>
           {badge.label}
         </Tag>
+        {onRemove && project.lifecycleState !== 'REMOVED' && (
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                {
+                  key: 'remove',
+                  icon: <DeleteOutlined />,
+                  label: 'Remove project',
+                  danger: true,
+                  onClick: onRemove,
+                },
+              ],
+            }}
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<MoreOutlined />}
+              style={{ padding: '0 2px', height: 20, lineHeight: '20px', color: 'var(--ant-color-text-tertiary)' }}
+            />
+          </Dropdown>
+        )}
       </Space>
     </div>
   );
@@ -534,6 +564,24 @@ export default function ProjectsPage() {
   const [tableLoading, setTableLoading] = useState(false);
 
   const canCreate = currentUser?.permissions.includes('PROJECT.CREATE') ?? false;
+  const isSuperAdmin = currentUser?.isSuperAdmin ?? false;
+
+  const handleRemoveProject = (project: ProjectSummaryResponse) => {
+    Modal.confirm({
+      title: 'Remove project',
+      content: `Remove "${project.name}"? This will mark it as Removed and hide it from all other users. Enter a reason in the comments.`,
+      icon: <DeleteOutlined style={{ color: 'var(--ant-color-error)' }} />,
+      okText: 'Remove',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        const reason = window.prompt('Reason for removal (required):');
+        if (!reason?.trim()) return Promise.reject(new Error('Reason is required'));
+        await removeProject(project.id, reason.trim());
+        void queryClient.invalidateQueries({ queryKey: PROJECTS_QUERY_KEY });
+      },
+    });
+  };
 
   // ── Queries ─────────────────────────────────────────────────────────────────
 
@@ -621,13 +669,21 @@ export default function ProjectsPage() {
 
   // ── Tree data ─────────────────────────────────────────────────────────────────
 
-  const filteredProjects = (projectsQuery.data ?? []).filter((p) => {
-    const matchesSearch =
-      !searchText ||
-      p.name.toLowerCase().includes(searchText.toLowerCase());
-    const matchesZone = !zoneFilter || p.zoneId === zoneFilter;
-    return matchesSearch && matchesZone;
-  });
+  const filteredProjects = (projectsQuery.data ?? [])
+    .filter((p) => {
+      const matchesSearch =
+        !searchText ||
+        p.name.toLowerCase().includes(searchText.toLowerCase());
+      const matchesZone = !zoneFilter || p.zoneId === zoneFilter;
+      return matchesSearch && matchesZone;
+    })
+    .sort((a, b) => {
+      // Newest IPA date first; projects without IPA date go to the bottom.
+      if (a.ipaDate && b.ipaDate) return b.ipaDate.localeCompare(a.ipaDate);
+      if (a.ipaDate) return -1;
+      if (b.ipaDate) return 1;
+      return 0;
+    });
 
   const treeData: DataNode[] = filteredProjects.map((project) => {
     // undefined  → not yet loaded  (show expand arrow, trigger load on click)
@@ -667,6 +723,7 @@ export default function ProjectsPage() {
         <ProjectNodeTitle
           project={project}
           zoneShortName={zoneShortMap[project.zoneId] ?? ''}
+          onRemove={isSuperAdmin ? () => handleRemoveProject(project) : undefined}
         />
       ),
       // leaf only when we know there are zero activities

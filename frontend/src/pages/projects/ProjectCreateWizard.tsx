@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Button,
+  DatePicker,
   Divider,
   Form,
   InputNumber,
@@ -27,6 +28,7 @@ import {
   Input,
 } from 'antd';
 import { ArrowLeftOutlined, ArrowRightOutlined, CheckOutlined, InboxOutlined } from '@ant-design/icons';
+import dayjs, { type Dayjs } from 'dayjs';
 import {
   createProject,
   fetchDivisions,
@@ -34,6 +36,7 @@ import {
   type CreateProjectRequest,
   type ProjectDetailResponse,
 } from '@api/projects';
+import { useAuthStore } from '@stores/authStore';
 
 const { Text } = Typography;
 
@@ -62,6 +65,7 @@ interface Step1Values {
   projectType?: string;
   zoneId: string;
   divisionId?: string;
+  ipaDate?: Dayjs;
   targetCompletionYear?: number;
 }
 
@@ -97,6 +101,7 @@ export default function ProjectCreateWizard({
   const [form2] = Form.useForm<Step2Values>();
 
   const selectedZoneId = Form.useWatch('zoneId', form1);
+  const currentUser = useAuthStore((s) => s.currentUser);
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +111,14 @@ export default function ProjectCreateWizard({
     staleTime: 10 * 60 * 1000,
     enabled: open,
   });
+
+  // Super admin and board-level roles (EDGS/CI) with PROJECT.READ.ALL see all zones.
+  const hasAllZoneAccess = currentUser?.isSuperAdmin
+    || (currentUser?.permissions.includes('PROJECT.READ.ALL') ?? false);
+  const accessibleZoneIds = hasAllZoneAccess ? null : new Set(currentUser?.accessibleZoneIds ?? []);
+  const visibleZones = (zonesQuery.data ?? []).filter(
+    (z) => accessibleZoneIds === null || accessibleZoneIds.has(z.id),
+  );
 
   const divisionsQuery = useQuery({
     queryKey: ['divisions', selectedZoneId],
@@ -175,6 +188,7 @@ export default function ProjectCreateWizard({
       ...(step1Values.projectCode ? { projectCode: step1Values.projectCode } : {}),
       ...(step1Values.projectType ? { projectType: step1Values.projectType } : {}),
       ...(step1Values.divisionId ? { divisionId: step1Values.divisionId } : {}),
+      ...(step1Values.ipaDate ? { ipaDate: step1Values.ipaDate.format('YYYY-MM-DD') } : {}),
       ...(step1Values.targetCompletionYear ? { targetCompletionYear: step1Values.targetCompletionYear } : {}),
       ...(s2.chainageFromKm != null ? { chainageFromKm: s2.chainageFromKm } : {}),
       ...(s2.chainageToKm != null ? { chainageToKm: s2.chainageToKm } : {}),
@@ -292,7 +306,7 @@ export default function ProjectCreateWizard({
               onChange={() => {
                 form1.setFieldValue('divisionId', undefined);
               }}
-              options={zonesQuery.data?.map((z) => ({
+              options={visibleZones.map((z) => ({
                 value: z.id,
                 label: `${z.shortName} — ${z.name}`,
               }))}
@@ -318,6 +332,19 @@ export default function ProjectCreateWizard({
                 value: d.id,
                 label: `${d.code} — ${d.name}`,
               }))}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="ipaDate"
+            label={t('wizard.step1.ipaDateLabel', 'IPA Date')}
+            tooltip={t('wizard.step1.ipaDateTooltip', 'Investment Programme Approval date')}
+          >
+            <DatePicker
+              style={{ width: '100%' }}
+              format="DD-MM-YYYY"
+              placeholder={t('wizard.step1.ipaDatePlaceholder', 'Select IPA date')}
+              disabledDate={(d) => d.isAfter(dayjs())}
             />
           </Form.Item>
 

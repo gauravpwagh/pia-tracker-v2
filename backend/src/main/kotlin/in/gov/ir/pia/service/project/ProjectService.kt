@@ -28,8 +28,13 @@ data class CreateProjectRequest(
     val chainageFromKm: BigDecimal? = null,
     val chainageToKm: BigDecimal? = null,
     val lengthKm: BigDecimal? = null,
+    val ipaDate: LocalDate? = null,
     val recommendedByBoardOn: LocalDate? = null,
     val targetCompletionYear: Int? = null,
+)
+
+data class RemoveProjectRequest(
+    val reason: String,
 )
 
 data class AllocateProjectRequest(
@@ -67,6 +72,7 @@ data class ProjectDetailResponse(
     val chainageFromKm: BigDecimal?,
     val chainageToKm: BigDecimal?,
     val lengthKm: BigDecimal?,
+    val ipaDate: LocalDate?,
     val recommendedByBoardOn: LocalDate?,
     val targetCompletionYear: Int?,
     val lifecycleState: String,
@@ -110,24 +116,22 @@ class ProjectService(
      * - PROJECT.READ.OWN (CE/C, Dy CE/C, Nodal) → projects the user is
      *   actively assigned to via [project_assignments].
      */
-    fun listForPrincipal(principal: PiaPrincipal): List<Project> =
-        when {
+    fun listForPrincipal(principal: PiaPrincipal): List<Project> {
+        val all = when {
             principal.isSuperAdmin || principal.permissions.contains("PROJECT.READ.ALL") ->
                 projectRepository.findAllByIsDeletedFalseOrderByCreatedAtDesc()
 
             principal.permissions.contains("PROJECT.READ.ZONE") -> {
                 val zones = principal.accessibleZoneIds
-                if (zones.isEmpty()) {
-                    emptyList()
-                } else {
-                    projectRepository.findAllByZoneIdInAndIsDeletedFalse(zones)
-                }
+                if (zones.isEmpty()) emptyList()
+                else projectRepository.findAllByZoneIdInAndIsDeletedFalse(zones)
             }
 
-            else ->
-                // PROJECT.READ.OWN: show only projects the user is assigned to
-                projectRepository.findAllByAssignedUser(principal.userId)
+            else -> projectRepository.findAllByAssignedUser(principal.userId)
         }
+        return if (principal.isSuperAdmin) all
+        else all.filter { it.lifecycleState != "REMOVED" }
+    }
 
     /**
      * Returns a single project if [principal] can access it, or throws 404.
@@ -145,18 +149,26 @@ class ProjectService(
         principal: PiaPrincipal,
     ): Project {
         if (principal.isSuperAdmin || principal.permissions.contains("PROJECT.READ.ALL")) {
-            return projectRepository.findByIdAndIsDeletedFalse(id)
+            val project = projectRepository.findByIdAndIsDeletedFalse(id)
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+            // Non-super-admins cannot see REMOVED projects
+            if (!principal.isSuperAdmin && project.lifecycleState == "REMOVED")
+                throw ResponseStatusException(HttpStatus.NOT_FOUND)
+            return project
         }
         if (principal.permissions.contains("PROJECT.READ.ZONE")) {
             val zones = principal.accessibleZoneIds
             if (zones.isEmpty()) throw ResponseStatusException(HttpStatus.NOT_FOUND)
-            return projectRepository.findByIdInZones(id, zones)
+            val project = projectRepository.findByIdInZones(id, zones)
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+            if (project.lifecycleState == "REMOVED") throw ResponseStatusException(HttpStatus.NOT_FOUND)
+            return project
         }
-        // PROJECT.READ.OWN: must have an active assignment
-        return projectRepository.findByIdAndAssignedUser(id, principal.userId)
+        // PROJECT.READ.OWN: must have an active assignment; REMOVED never shown
+        val project = projectRepository.findByIdAndAssignedUser(id, principal.userId)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        if (project.lifecycleState == "REMOVED") throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return project
     }
 
     /**
@@ -205,7 +217,8 @@ class ProjectService(
         request: CreateProjectRequest,
         principal: PiaPrincipal,
     ): ProjectDetailResponse {
-        if (!principal.isSuperAdmin && !principal.canAccessZone(request.zoneId)) {
+        val hasAllZoneAccess = principal.isSuperAdmin || principal.permissions.contains("PROJECT.READ.ALL")
+        if (!hasAllZoneAccess && !principal.canAccessZone(request.zoneId)) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Zone not accessible")
         }
 
@@ -219,6 +232,7 @@ class ProjectService(
                 chainageFromKm = request.chainageFromKm,
                 chainageToKm = request.chainageToKm,
                 lengthKm = request.lengthKm,
+                ipaDate = request.ipaDate,
                 recommendedByBoardOn = request.recommendedByBoardOn,
                 targetCompletionYear = request.targetCompletionYear,
                 createdByUserId = principal.userId,
@@ -406,6 +420,35 @@ class ProjectService(
         return project.toDetailResponse(lifecycleState = currentLifecycle)
     }
 
+    /**
+     * Super-admin removes a project. Transitions the workflow to REMOVED state.
+     * Removed projects are hidden from all non-super-admin users.
+     */
+    @Transactional
+    fun removeProject(
+        projectId: UUID,
+        reason: String,
+        principal: PiaPrincipal,
+    ): ProjectDetailResponse {
+        if (!principal.isSuperAdmin) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Only super admin can remove projects")
+        }
+        val project = projectRepository.findByIdAndIsDeletedFalse(projectId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+        val wfInstanceId = instanceIdForProject(projectId)
+        val advanced = workflowService.transition(wfInstanceId, "remove", principal, comment = reason)
+
+        auditLogWriter.write(
+            actorUserId = principal.userId,
+            action = "PROJECT.REMOVE",
+            entityType = "PROJECT",
+            entityId = project.id,
+        )
+
+        return project.toDetailResponse(lifecycleState = advanced.currentState.code)
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     /**
@@ -436,6 +479,7 @@ class ProjectService(
             chainageFromKm = chainageFromKm,
             chainageToKm = chainageToKm,
             lengthKm = lengthKm,
+            ipaDate = ipaDate,
             recommendedByBoardOn = recommendedByBoardOn,
             targetCompletionYear = targetCompletionYear,
             lifecycleState = lifecycleState,
