@@ -147,9 +147,8 @@ dv_desig = DataValidation(
     type="list",
     formula1=f'"{ desig_codes }"',
     allow_blank=True,
-    showErrorMessage=True,
-    errorTitle="Invalid Designation",
-    error="Choose a code from the dropdown or see the Reference sheet.",
+    showErrorMessage=False,  # warning only — HR aliases are also accepted
+    showDropDown=False,
 )
 ws.add_data_validation(dv_desig)
 dv_desig.sqref = "C5:C204"
@@ -236,6 +235,45 @@ ref.column_dimensions["H"].width = 55
 for i, (field, desc) in enumerate(notes, 3):
     ref.cell(row=i, column=7).value  = field; ref.cell(row=i, column=7).font = ref_cell_font
     ref.cell(row=i, column=8).value  = desc;  ref.cell(row=i, column=8).font = ref_cell_font
+
+# Alias mapping table (column J–L)
+ALIASES = [
+    ("DY CE",                                     "DY_CE",   "Dy CE"),
+    ("DY CE(GS)",                                 "DY_CE",   "Dy CE"),
+    ("CAO/C",                                     "CAO_C",   "CAO/C"),
+    ("CAO",                                       "CAO_C",   "CAO/C"),
+    ("CAO(C)/RSP",                                "CAO_C",   "CAO/C"),
+    ("CE/C",                                      "CE_C",    "CE/C"),
+    ("CE/Con (ROAD SAFETY PROJECT)",              "CE_C",    "CE/C"),
+    ("EXECUTIVE DIRECTOR/GATI SHAKTI(CIVIL-III)", "EDGS_CI", "EDGS/C-I"),
+]
+
+ref.merge_cells("J1:L1")
+ref["J1"].value = "Designation Alias Mapping (HR labels accepted by import script)"
+ref["J1"].font  = ref_title_font
+ref["J1"].fill  = ref_title_fill
+ref["J1"].alignment = Alignment(horizontal="center")
+ref["K1"].fill  = ref_title_fill
+ref["L1"].fill  = ref_title_fill
+
+ref["J2"].value = "HR / External Label";  ref["J2"].font = Font(name="Arial", bold=True, size=10)
+ref["K2"].value = "System Code";          ref["K2"].font = Font(name="Arial", bold=True, size=10)
+ref["L2"].value = "System Label";         ref["L2"].font = Font(name="Arial", bold=True, size=10)
+
+for i, (alias, code, label) in enumerate(ALIASES, 3):
+    ref.cell(row=i, column=10).value = alias; ref.cell(row=i, column=10).font = ref_cell_font
+    ref.cell(row=i, column=11).value = code;  ref.cell(row=i, column=11).font = ref_cell_font
+    ref.cell(row=i, column=12).value = label; ref.cell(row=i, column=12).font = ref_cell_font
+
+ref.column_dimensions["J"].width = 48
+ref.column_dimensions["K"].width = 14
+ref.column_dimensions["L"].width = 14
+
+# Also update the Designation Code column header note in Users sheet
+ws["A2"].value = (
+    "Fill in the yellow columns (required). Grey columns are optional. "
+    "Designation accepts both system codes (e.g. DY_CE) and HR labels (e.g. DY CE, CAO/C) -- see Reference sheet."
+)
 
 wb.save(OUT)
 print(f"Template written to {OUT}")

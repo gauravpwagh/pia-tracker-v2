@@ -56,6 +56,54 @@ def fetch_set(container, db_user, db_name, sql) -> set:
     return {line.strip() for line in out.splitlines() if line.strip()}
 
 
+# ── Designation alias map ──────────────────────────────────────────────────────
+# Maps external / HR-system labels to system designation codes.
+# Keys are normalised to uppercase with extra spaces collapsed.
+
+DESIGNATION_ALIASES = {
+    # DY CE variants
+    "DY CE":                                    "DY_CE",
+    "DY. CE":                                   "DY_CE",
+    "DY CE(GS)":                                "DY_CE",
+    "DY CE (GS)":                               "DY_CE",
+    "DY CE(GATI SHAKTI)":                       "DY_CE",
+
+    # CAO variants
+    "CAO/C":                                    "CAO_C",
+    "CAO":                                      "CAO_C",
+    "CAO(C)":                                   "CAO_C",
+    "CAO(C)/RSP":                               "CAO_C",
+    "CAO(C) /RSP":                              "CAO_C",
+    "CAO(C)/ROAD SAFETY PROJECT":               "CAO_C",
+
+    # CE/C variants
+    "CE/C":                                     "CE_C",
+    "CE/CON":                                   "CE_C",
+    "CE/CON (ROAD SAFETY PROJECT)":             "CE_C",
+    "CE/CON(ROAD SAFETY PROJECT)":              "CE_C",
+    "CE/CON (RSP)":                             "CE_C",
+
+    # Executive Director variants
+    "EXECUTIVE DIRECTOR/GATI SHAKTI(CIVIL-III)": "EDGS_CI",
+    "EXECUTIVE DIRECTOR/GATI SHAKTI (CIVIL-III)": "EDGS_CI",
+    "ED/GATI SHAKTI(CIVIL-III)":                "EDGS_CI",
+    "ED/GATI SHAKTI (CIVIL-III)":               "EDGS_CI",
+    "EDGS/C-I":                                 "EDGS_CI",
+}
+
+def resolve_designation(raw: str) -> tuple[str, Optional[str]]:
+    """
+    Returns (system_code, alias_note).
+    alias_note is set when an alias was used so the caller can log it.
+    """
+    import re
+    normalised = re.sub(r"\s+", " ", raw.strip().upper())
+    if normalised in DESIGNATION_ALIASES:
+        code = DESIGNATION_ALIASES[normalised]
+        return code, f"mapped from '{raw}'"
+    return raw.strip(), None
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -93,32 +141,37 @@ def main():
 
         name         = str(cell(1)).strip() if cell(1) else ""
         email        = str(cell(2)).strip() if cell(2) else ""
-        desig        = str(cell(3)).strip() if cell(3) else ""
+        desig_raw    = str(cell(3)).strip() if cell(3) else ""
         zone         = str(cell(4)).strip() if cell(4) else None
         employee_id  = str(cell(5)).strip() if cell(5) else None
 
         # Skip completely empty rows
-        if not any([name, email, desig]):
+        if not any([name, email, desig_raw]):
             continue
         # Skip the italic sample row if user left it in
         if email == "rajesh.sharma@nr.railnet.gov.in":
             continue
 
+        desig, alias_note = resolve_designation(desig_raw)
+
         errors = []
+        notes  = []
+        if alias_note:
+            notes.append(alias_note)
         if not name:
             errors.append("Name is required")
         if not email:
             errors.append("Email is required")
         elif "@" not in email:
             errors.append("Email looks invalid")
-        if not desig:
+        if not desig_raw:
             errors.append("Designation Code is required")
         elif desig not in valid_designations:
-            errors.append(f"Unknown designation '{desig}'")
+            errors.append(f"Unknown designation '{desig_raw}'")
         if zone and zone not in valid_zones:
             errors.append(f"Unknown zone '{zone}'")
         if email and email.lower() in existing_emails:
-            errors.append(f"Email already exists in DB — skipped")
+            errors.append("Email already exists in DB -- skipped")
 
         rows.append({
             "row_num": row_num,
@@ -128,6 +181,7 @@ def main():
             "zone_code": zone or None,
             "employee_id": employee_id or None,
             "errors": errors,
+            "notes": notes,
         })
 
     if not rows:
@@ -144,9 +198,10 @@ def main():
     for r in rows:
         ok = not r["errors"]
         status = "OK" if ok else "SKIP"
-        notes  = "; ".join(r["errors"]) if r["errors"] else ""
+        all_notes = r["notes"] + r["errors"]
+        note_str  = "; ".join(all_notes) if all_notes else ""
         print(f"{r['row_num']:<5} {status:<10} {r['name'][:24]:<25} {r['email'][:39]:<40} "
-              f"{r['designation_code'][:14]:<15} {(r['zone_code'] or ''):<6}  {notes}")
+              f"{r['designation_code'][:14]:<15} {(r['zone_code'] or ''):<6}  {note_str}")
         if ok:
             valid_rows.append(r)
         else:
