@@ -84,6 +84,7 @@ class AuthController(
     @GetMapping("/users")
     fun listUsers(
         @RequestParam(required = false) designationCode: String?,
+        @RequestParam(required = false) zoneId: UUID?,
     ): List<UserSummaryResponse> {
         // Build a code → shortLabel lookup once; avoids N+1 per user.
         val shortLabels: Map<String, String> =
@@ -96,12 +97,16 @@ class AuthController(
                 .findAllByIsActiveTrueOrderByDisplayOrder()
                 .associate { it.id to it.shortName }
 
-        val users =
-            if (designationCode != null) {
+        val users = when {
+            designationCode != null && zoneId != null ->
+                userRepository.findAllByDesignationCodeAndPrimaryZoneIdAndIsActiveTrueAndIsDeletedFalseOrderByName(
+                    designationCode, zoneId,
+                )
+            designationCode != null ->
                 userRepository.findAllByDesignationCodeAndIsActiveTrueAndIsDeletedFalseOrderByName(designationCode)
-            } else {
+            else ->
                 userRepository.findAllByIsActiveTrueAndIsDeletedFalseOrderByDesignationCodeAscNameAsc()
-            }
+        }
 
         return users.map { user ->
             UserSummaryResponse(

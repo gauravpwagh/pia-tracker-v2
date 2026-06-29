@@ -47,7 +47,7 @@ import {
   designateNodalUser,
   type ActivityDetailResponse,
 } from '@api/projects';
-import { fetchUsers, fetchUsersByDesignation, type UserSummary } from '@api/auth';
+import { fetchUsers, fetchUsersByDesignation, fetchUsersByDesignationAndZone, type UserSummary } from '@api/auth';
 import type { PrincipalInfo } from '@api/auth';
 import ActivityCreateWizard from './ActivityCreateWizard';
 import dayjs from 'dayjs';
@@ -87,12 +87,12 @@ function StateBadge({ state }: { state: string }) {
 // ── Allocate modal ────────────────────────────────────────────────────────────
 
 function AllocateModal({
-  projectId, open, onClose, onSuccess,
-}: { projectId: string; open: boolean; onClose: () => void; onSuccess: () => void }) {
+  projectId, zoneId, open, onClose, onSuccess,
+}: { projectId: string; zoneId: string; open: boolean; onClose: () => void; onSuccess: () => void }) {
   const [form] = Form.useForm<{ ceUserId: string }>();
   const cecQuery = useQuery({
-    queryKey: ['users', 'CE_C'],
-    queryFn: () => fetchUsersByDesignation('CE_C'),
+    queryKey: ['users', 'CE_C', zoneId],
+    queryFn: () => fetchUsersByDesignationAndZone('CE_C', zoneId),
     staleTime: 5 * 60_000,
     enabled: open,
   });
@@ -134,12 +134,12 @@ function AllocateModal({
 // ── Assign Dy CE/C modal ──────────────────────────────────────────────────────
 
 function AssignDyceModal({
-  projectId, open, onClose, onSuccess,
-}: { projectId: string; open: boolean; onClose: () => void; onSuccess: () => void }) {
+  projectId, zoneId, open, onClose, onSuccess,
+}: { projectId: string; zoneId: string; open: boolean; onClose: () => void; onSuccess: () => void }) {
   const [form] = Form.useForm<{ dyceUserIds: string[] }>();
   const dyceQuery = useQuery({
-    queryKey: ['users', 'DY_CE_C'],
-    queryFn: () => fetchUsersByDesignation('DY_CE_C'),
+    queryKey: ['users', 'DY_CE_C', zoneId],
+    queryFn: () => fetchUsersByDesignationAndZone('DY_CE_C', zoneId),
     staleTime: 5 * 60_000,
     enabled: open,
   });
@@ -571,12 +571,14 @@ export function ProjectDetailPanel({
         <>
           <AllocateModal
             projectId={project.id}
+            zoneId={project.zoneId}
             open={modal === 'allocate'}
             onClose={() => setModal(null)}
             onSuccess={handleActionSuccess}
           />
           <AssignDyceModal
             projectId={project.id}
+            zoneId={project.zoneId}
             open={modal === 'assignDyce'}
             onClose={() => setModal(null)}
             onSuccess={handleActionSuccess}

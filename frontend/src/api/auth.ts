@@ -49,6 +49,15 @@ export async function fetchUsersByDesignation(designationCode: string): Promise<
   return handleResponse<UserSummary[]>(res);
 }
 
+/** Returns users filtered to a specific designation AND zone. */
+export async function fetchUsersByDesignationAndZone(designationCode: string, zoneId: string): Promise<UserSummary[]> {
+  const params = new URLSearchParams({ designationCode, zoneId });
+  const res = await fetch(`${BASE}/auth/users?${params.toString()}`, {
+    credentials: 'include',
+  });
+  return handleResponse<UserSummary[]>(res);
+}
+
 /** Selects a user for the current session and returns the resolved principal. */
 export async function selectUser(userId: string): Promise<PrincipalInfo> {
   const res = await fetch(`${BASE}/auth/select-user`, {

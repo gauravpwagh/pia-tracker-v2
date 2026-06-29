@@ -10,4 +10,9 @@ interface UserRepository : JpaRepository<User, UUID> {
     fun findAllByIsActiveTrueAndIsDeletedFalseOrderByDesignationCodeAscNameAsc(): List<User>
 
     fun findAllByDesignationCodeAndIsActiveTrueAndIsDeletedFalseOrderByName(designationCode: String): List<User>
+
+    fun findAllByDesignationCodeAndPrimaryZoneIdAndIsActiveTrueAndIsDeletedFalseOrderByName(
+        designationCode: String,
+        primaryZoneId: UUID,
+    ): List<User>
 }
