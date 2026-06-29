@@ -51,10 +51,14 @@ export default function LoginPage() {
   const usernameValue = selectedUser ? selectedUser.name : '';
 
   const filtered = users.filter((u) => {
-    const q = search.toLowerCase();
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    const zoneName = (u.primaryZoneName ?? '').toLowerCase();
+    // Zone match: exact match on the short zone name (e.g. "ECR" must not match "SECR")
+    const zoneMatch = zoneName === q;
     return (
       u.name.toLowerCase().includes(q) ||
-      (u.primaryZoneName ?? '').toLowerCase().includes(q) ||
+      zoneMatch ||
       u.designationShortLabel.toLowerCase().includes(q) ||
       u.designationCode.toLowerCase().includes(q)
     );
