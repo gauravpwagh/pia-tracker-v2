@@ -17,8 +17,9 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Alert, Button, Form, Input, Modal, Select, Space, Typography } from 'antd';
+import { Alert, Button, DatePicker, Form, Input, Modal, Select, Space, Typography } from 'antd';
 import { CheckOutlined } from '@ant-design/icons';
+import type { Dayjs } from 'dayjs';
 import {
   createProject,
   fetchNextSerial,
@@ -60,6 +61,7 @@ interface FormValues {
   name: string;
   projectType?: string;
   zoneId: string;
+  ipaDate?: Dayjs;
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -85,6 +87,7 @@ export default function ProjectCreateWizard({
   const name = Form.useWatch('name', form);
   const projectType = Form.useWatch('projectType', form);
   const zoneId = Form.useWatch('zoneId', form);
+  const ipaDate = Form.useWatch('ipaDate', form);
 
   // ── Data ───────────────────────────────────────────────────────────────────
 
@@ -157,6 +160,7 @@ export default function ProjectCreateWizard({
       zoneId,
       projectType,
       projectCode,
+      ipaDate: ipaDate ? ipaDate.format('YYYY-MM-DD') : undefined,
     };
     mutation.mutate(request);
   };
@@ -251,6 +255,17 @@ export default function ProjectCreateWizard({
               value: z.id,
               label: `${z.shortName} — ${z.name}`,
             }))}
+          />
+        </Form.Item>
+
+        <Form.Item
+          name="ipaDate"
+          label={t('wizard.step1.ipaDateLabel', 'IPA date')}
+        >
+          <DatePicker
+            style={{ width: '100%' }}
+            format="D MMM YYYY"
+            placeholder={t('wizard.step1.ipaDatePlaceholder', 'Select IPA date')}
           />
         </Form.Item>
       </Form>

@@ -1,117 +1,113 @@
-# Session Handover — PIA Tracker frontend/backend polish
+# Session Handover — PIA Tracker (data setup + UI polish + IPA date + serial fix)
 
-Working session on `D:\Sagar\Project\Claude\pia-tracker-beta`, deployed locally via Docker Compose at
-**https://pia.local**. This file exists purely to resume work in a new session without re-deriving
-context. Delete it once everything below is confirmed done and no longer needed.
+Working dir: `D:\Sagar\Project\Claude\pia-tracker-beta`. Deployed locally via Docker Compose at
+**https://pia.local**. This file exists so a new session resumes without re-deriving context.
+Delete it once everything below is confirmed done.
 
-## How to resume
+## How to resume (paste this as the first message of the new session)
 
-Start the new session with:
+> Read HANDOVER.md at the root of D:\Sagar\Project\Claude\pia-tracker-beta and continue from where I left off. Keep answers short and precise.
 
-> Read HANDOVER.md at the root of D:\Sagar\Project\Claude\pia-tracker-beta and continue from where I left off — verify the pending items, then keep addressing my feedback as I give it.
+## Environment state (as of this handover)
 
-## Environment state
+- Stack is **up and healthy** (`make up`). Images were rebuilt after every code change this session
+  (`make build-images` → `make up`).
+- **Dev loop all session:** edit → `npx tsc --noEmit` (frontend, run from `frontend/`) or
+  `backend/gradlew compileKotlin` (backend) → `make build-images` → `make up`. Frontend is built
+  **inside Docker** (a `pia-frontend-build` container emits the dist), so host `node_modules` aren't
+  needed to run.
+- Postgres talks to the app via container `pia-postgres`. Bulk DB ops this session were done with
+  `docker exec -i pia-postgres psql -U pia -d pia` (note the **`-i`** — heredocs need stdin).
+- **I cannot log into the app in this environment** (dummy-auth needs an interactive browser we don't
+  have), so *every* change below was verified only by tsc/compile + DB queries + grepping the built
+  bundle — **none was clicked through live.** First action next session: ask the user to click through
+  and confirm.
 
-- Docker stack is up (`make up` last run successfully; all containers healthy at last check).
-- Latest code is built into the running images (`make build-images` was run after every change).
-- If containers aren't running, `cd D:\Sagar\Project\Claude\pia-tracker-beta && make up`.
-- If you touch backend or frontend code, rebuild with `make build-images` then `make up` before
-  asking the user to re-check anything — the dev workflow all session has been: edit → `tsc --noEmit`
-  (frontend) / `./gradlew compileKotlin` (backend) → `make build-images` → `make up`.
-- Windows checkout gotcha already fixed once: shell scripts must stay LF (`.gitattributes` has
-  `*.sh text eol=lf`) — Alpine containers have no bash/CRLF tolerance. If a fresh `make setup`/`reset`
-  ever fails with a role/auth error again, check for CRLF creeping back into `infra/**/*.sh`.
+## Data state
 
-## What's been built (chronological, most recent last)
+- **Users: 816 real officers + 2 system (admin, super-admin).** Imported from
+  `D:/Downloads/civilpersextended.csv` via `scripts/import_users.py`. Do NOT wipe users.
+- **Projects: 1 kept** — `pia.06.00.15.26.1.00.001` (user asked to keep it). All other project data was
+  truncated on request.
+- To wipe **projects only** (keep users) the exact command used repeatedly:
+  ```bash
+  docker exec -i pia-postgres psql -U pia -d pia -v ON_ERROR_STOP=1 <<'SQL'
+  BEGIN;
+  TRUNCATE TABLE activity_records, project_activities, project_assignments, projects,
+    workflow_instances, workflow_history, notifications, comments, attachments, export_jobs CASCADE;
+  COMMIT;
+  SQL
+  ```
+  (Truncate cascades to all `*_summary` and `*_details` tables. Never truncate `users`/`user_roles`.)
 
-1. **New Project wizard** — auto-generates Project ID (`pia.<zone>.<div=00>.<planHead>.<year>.<authority=1>.<agency=00>.<serial>`)
-   from Zone + Project Type as they're picked; serial fetched from new backend endpoint
-   `GET /projects/next-serial?prefix=...`. Manual fields reduced to Name/Type/Zone.
-2. **Workspace layout fixes** — Activity scope panel moved above filters (full width, now laid out
-   horizontally), tab bar fixed height, record list narrower, project list/detail two-column grids,
-   Record detail Descriptions widened to 2 columns.
-3. **Project list rewritten as a real Ant Design `<Table>`** (`ProjectsPage.tsx`) — was a hand-rolled
-   flex layout that kept drifting out of alignment with its header; Table guarantees column alignment
-   structurally. Columns: Project | Project ID | PH No. & Name | Zone | Executing Agency | Created | Status.
-   ("CAO Zone" column removed per latest feedback, replaced with "Created" date.)
-4. **Multi-CE/Dy-CE assignment model** (backend + frontend):
-   - Backend: `allocate()` now takes `ceUserIds: List<UUID>` + `primaryCeUserId`; new
-     `designate-primary-ce` endpoint/permission (`PROJECT.DESIGNATE_PRIMARY_CE`, migration
-     `V084_001__seed_project_designate_primary_ce_permission.sql`).
-   - **Real bug fixed**: `project_assignments` has `unique(project_id, user_id, assignment_role)`
-     with no `is_active` filter — the old "deactivate old row, insert new row" pattern for
-     re-designating the same Nodal/Primary threw a 500 (unique violation). Replaced with a proper
-     upsert-in-place helper (`upsertAssignment`/`deactivateAssignment` in `ProjectService.kt`).
-   - Frontend: single combined modal for CE/C + Primary, and Dy CE/C + Nodal (was 3 separate modals).
-     Modals now pre-populate with current assignments (so people can be deselected/changed).
-   - Officer list on Overview dedups by person and orders CAO → CE (primary first) → Dy (nodal first).
-5. **Record workflow / immutability**:
-   - Backend now rejects PATCH/DELETE on a record once its own `recordState` is `VERIFIED` or
-     `AUTHENTICATED` (previously only gated at the whole-activity level) — `ActivityService.kt`.
-   - "Submit for Verification" button hidden in `RecordDetailPanel.tsx` (explicit ask: not needed
-     "currently").
-   - Verify requires confirmation + a best-effort mandatory-fields check (`missingRequiredFields()`
-     in `RecordDetailPanel.tsx`) before enabling the button.
-   - Edit button → "Edit Data"; once locked, shows "View Data" (same blue styling) which opens the
-     record read-only but **keeps workflow actions visible** (so a CE/C can review before
-     Authenticating) — `RecordEditor` gained a `readOnly` prop.
-   - "Locked after verification" text replaced with a lock icon + tooltip.
-   - Fixed several places where invalidating `['record', id]` alone left the record-list badge and
-     Overview stats stale after a workflow action — now also invalidates `['records', activityId]`
-     and `['activities']`.
-6. **`GET /projects/{id}/history` backend endpoint added** — unions audit_log rows for the project
-   itself, its activities (`entity_type IN ('ACTIVITY','PROJECT_ACTIVITY')` — codebase inconsistently
-   uses both strings for the same thing), and all its records. Wired into the workspace's History tab,
-   replacing the old static placeholder.
-7. **Critical bug fixed**: opening Edit/View Data caused the tab to hang ("page unresponsive"). Root
-   cause: `PiaFieldTemplate.tsx` looked up RJSF's default `FieldTemplate` via
-   `getTemplate('FieldTemplate', registry, uiSchema)` — but the registry now has `PiaFieldTemplate`
-   itself registered under that name (see `RjsfForm.tsx`), so it recursed into itself infinitely.
-   Fixed by importing `Templates.FieldTemplate` directly from `@rjsf/antd` instead of resolving
-   through the registry. **This shipped in the last deploy — needs live re-verification.**
-8. **Two-column RJSF edit-form layout** — `PiaObjectFieldTemplate.tsx` now renders fields in a CSS
-   grid (`repeat(auto-fit, minmax(260px,1fr))`); `PiaFieldTemplate.tsx` forces nested objects/arrays
-   and long-text fields (name matches `/status|comment|remark|reason|note|description/i`, or
-   `ui:widget === 'textarea'`) to span the full row via `gridColumn: '1 / -1'` so they don't get
-   squeezed into a lopsided half-width cell next to an unrelated scalar field.
-9. Misc styling: notification badges changed from red→blue (SLA-breach badge→orange), "Assign
-   officers"/"Assign CE/C(s)"/"Primary CE/C"/"Assign Dy CE/C(s)" buttons all given a solid blue
-   background (`#1565c0`), Overview "Project details" card now shows Zone/Project ID/PH/Length/IPA
-   Date/Status, Map sidebar item opens `https://indianrailways.gov.in/index/index.html` in a new tab
-   (explicit placeholder per user — "we will change later"), Utility/Drawing type pickers use full
-   panel width with a minimum chip width instead of a cramped scrollable dropdown, SRP-style nested
-   sections given full-row spacing, record-detail Descriptions given a visible gap between field-pairs
-   in the same row (bordered-table CSS override in `theme/global.css`).
+## What was built/changed this session (most recent last)
 
-## Verification status — IMPORTANT
+1. **User import (CSV support).** `scripts/import_users.py` now reads the HRMS **CSV** (headers:
+   `emp_hrms_id, employee_name, desig_code, desig_desc, zone_code, …`) as well as XLSX. It:
+   - generates email as `{emp_hrms_id}@{zone_code}.railnet.gov.in` (CSV has no email column),
+   - sets `employee_id = emp_hrms_id`,
+   - collapses designations to the role-bearing family code (roles resolve at login from
+     `designation_default_roles`, so granular codes only carry ROLE_APPROVER_GENERIC):
+     `DY CE*→DY_CE_C`, `CE*→CE_C`, `CAO*→CAO_C`, `ED*/Executive Director*→EDGS_CI`.
+   Result: 816 imported (516 DY_CE_C, 245 CE_C, 37 CAO_C, 18 EDGS_CI). Details in memory
+   `project_pia_user_import.md`.
+2. **Form-layout rework** (`frontend/src/forms/`):
+   - `ChainageWidget.tsx` — **single box** (decimal km, 3 decimals = metres; stores same `km+m`
+     string). Was two boxes that overflowed.
+   - `PiaObjectFieldTemplate.tsx` — section is **single-column iff it has a nested *object* child**
+     (e.g. SRP + Gazette); otherwise 2-per-row grid. Arrays (Forest "Queries from Approving
+     Authority") do NOT force single-column — they span full width while scalars stay 2-col.
+   - `PiaFieldTemplate.tsx` — full-width span for nested objects/arrays, attachment/gazette/textarea
+     widgets, and long-text names (`status|comment|remark|reason|note|description|execution|summary|objection`).
+     **Reverted an earlier inline-label experiment** — labels are back stacked above inputs.
+3. **Record detail panel** (`frontend/src/pages/projects/RecordDetailPanel.tsx`):
+   - Detail blocks are now compact plain text (`bordered={false} colon`) instead of boxed tables.
+   - Drawing view: Observations + Sanction share one row (2fr/1fr grid); sanction is compact
+     "Received: date".
+   - ⋯ menu now has **Rename** (opens inline record-name edit via `startEditing`) + Delete.
+4. **Drawing observations** (`DrawingObservationsPanel.tsx`) — heading renamed **"Queries from
+   Approving Authority"** with the **Add** button on the same row (shrink-safe). **Approvers**
+   (`DrawingApproversPanel.tsx`) now render 2 cards per row.
+5. **Record edit page** (`frontend/src/pages/records/RecordEditPage.tsx`):
+   - Fixed invalid CSS var names (`--colorBorder`→`--ant-color-border`, etc. — also in
+     `SendBackModal.tsx`) → the header separator now actually renders.
+   - **Details** button is solid blue (`#1565c0`).
+   - **Confirm popups** (Popconfirm) added to Submit-for-verification, Verify, and Authenticate.
+6. **New Project wizard** (`ProjectCreateWizard.tsx`) — added an optional **IPA date** picker (sent as
+   `ipaDate` `YYYY-MM-DD`; backend already supported it). **Project list** (`ProjectsPage.tsx`) now
+   shows **IPA Date** instead of Created.
+7. **Backend bug fix** (`ProjectService.kt` `nextSerial`) — the serial query matched `project_code
+   LIKE '<prefix>%'` but codes start with `pia.`, so it always returned `001` and the 2nd project in a
+   prefix hit a `uq_projects_code` 500. Now `LIKE 'pia.' || ? || '%'`. Verified: next serial for the
+   existing prefix returns `002`.
 
-**Nothing in this session was clicked through live in a browser.** This environment has no way to
-authenticate against the dummy-auth login (no interactive browser session was available), so every
-change was verified only by:
-- `npx tsc --noEmit` (frontend) — clean on every change.
-- `./gradlew compileKotlin` (backend) — clean on every change.
-- Grepping the deployed bundle inside the nginx container to confirm the built JS actually contains
-  the fix (done for the header-alignment fix and the infinite-recursion fix specifically).
+## Open / pending items
 
-**First thing to do in the new session: ask the user to actually click through the app and confirm
-each fix, starting with the Edit Data / View Data crash fix (item 7 above), since that was the most
-severe bug and the fix is unverified live.**
+- **Live verification of ALL of the above** — nothing was clicked live. Start here.
+- **Git → new repo (not done).** `origin` = `github.com/gauravpwagh/pia-tracker-beta`. User wants to
+  link a **new repo on a different GitHub account**, keeping both remotes. Plan agreed:
+  1. Commit current work (there are ~50+ uncommitted changes — this whole session).
+  2. Create an **empty** repo on the new account (**No .gitignore, No license** — repo already has a
+     `.gitignore`; a non-empty repo would reject the push).
+  3. `git remote add neworigin <url>` then `git push -u neworigin main` (keeps `origin` too).
+  4. Auth as the new account via PAT or SSH (Windows Credential Manager may cache the old account).
+  Only **code** moves via git — not Docker images/containers or the DB (the 816 users live in a
+  volume, not git; the new PC re-seeds admin/super-admin then re-imports the CSV).
+- **New-PC setup:** prereqs docker/mkcert/node20/JDK21/make/git → `git clone` → `make setup` (does
+  certs, hosts, .env, build, migrate, seed, up). Windows gotchas: hosts file needs admin edit
+  (`127.0.0.1 pia.local`), `mkcert -install`.
+- **LAN access** (explained, no code change): other PCs can't reach `https://pia.local` because
+  (a) `pia.local` is only in this PC's hosts file (mapped to 127.0.0.1), and (b) the mkcert CA/cert is
+  trusted only locally. Fix per client: add `192.168.0.216  pia.local` to their hosts, import this
+  PC's `rootCA.pem` (`mkcert -CAROOT`) into Trusted Root, and open inbound TCP 80/443 on the host
+  firewall (Private profile). nginx already publishes on `0.0.0.0`. Host LAN IP = **192.168.0.216**
+  (ignore 172.25.128.1 — WSL/Hyper-V).
 
-## Known gaps / explicitly deferred (don't be surprised if asked about these again)
+## Conventions to keep
 
-- Inbox vs. topbar-bell discrepancy (an item flagged notified but not showing in Inbox) — investigated
-  architecturally (query looks correct, joins on `workflow_states.role_required_code`), never
-  reproduced live. If raised again, ask the user for exact repro steps.
-- "Executing Agency" and "CAO Zone" columns/labels are placeholders showing `CAO <zone shortname>` —
-  there's no real per-zone CAO assignment model in the backend yet. User acknowledged this can wait.
-- Map is a static external link, not an in-app map view — explicitly deferred by the user.
-- `.gitattributes` LF-enforcement is a one-time infra fix; no further action needed unless it
-  regresses.
-
-## Next steps
-
-1. Get the user to verify the Edit Data / View Data flow doesn't crash anymore (the infinite-loop fix).
-2. Walk through their newest feedback batch (already applied in code, listed in item 9 above) and get
-   confirmation, since none of it was visually verified.
-3. Continue iterating on whatever feedback they give next — this has been a long back-and-forth UI
-   polish session; expect more small, specific complaints rather than large new features.
+- Windows checkout: shell scripts must stay LF (`.gitattributes` has `*.sh text eol=lf`) — Alpine
+  containers have no CRLF tolerance.
+- Roles come from `designation_default_roles` at login (see `RoleMembershipResolver.kt`) — don't
+  insert `user_roles` on import; just set the right `designation_code`.
+- Long UI-polish back-and-forth: expect more small, specific visual complaints; apply → tsc →
+  `make build-images` → `make up` → ask user to verify.

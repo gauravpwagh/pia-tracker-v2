@@ -192,11 +192,11 @@ function useProjectColumns({
       render: (zoneId: string) => (zoneShortMap[zoneId] ? `CAO ${zoneShortMap[zoneId]}` : '—'),
     },
     {
-      title: 'Created',
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      render: (createdAt: string) => dayjs(createdAt).format('D MMM YYYY'),
-      sorter: (a, b) => a.createdAt.localeCompare(b.createdAt),
+      title: 'IPA Date',
+      dataIndex: 'ipaDate',
+      key: 'ipaDate',
+      render: (ipaDate: string | null) => (ipaDate ? dayjs(ipaDate).format('D MMM YYYY') : '—'),
+      sorter: (a, b) => (a.ipaDate ?? '').localeCompare(b.ipaDate ?? ''),
     },
     {
       title: 'Status',

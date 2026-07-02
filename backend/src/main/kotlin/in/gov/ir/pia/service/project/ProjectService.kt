@@ -259,10 +259,15 @@ class ProjectService(
      * Project ID in the create-project wizard.
      */
     fun nextSerial(prefix: String): String {
+        // The wizard composes the full code as "pia.<prefix><serial>", so the
+        // stored project_code always begins with "pia." + prefix. Match on that
+        // full form — matching on the bare prefix never hits (codes start with
+        // "pia."), which made the count always 0 and every project in a prefix
+        // collide on the "001" serial.
         val count = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM projects WHERE project_code LIKE ?",
+            "SELECT COUNT(*) FROM projects WHERE project_code LIKE 'pia.' || ? || '%'",
             Int::class.java,
-            "$prefix%",
+            prefix,
         ) ?: 0
         return (count + 1).toString().padStart(3, '0')
     }
