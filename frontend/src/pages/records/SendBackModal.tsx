@@ -56,7 +56,7 @@ export function SendBackModal({
       onCancel={handleCancel}
       destroyOnClose
     >
-      <p style={{ marginBottom: 12, color: 'var(--colorTextSecondary)' }}>
+      <p style={{ marginBottom: 12, color: 'var(--ant-color-text-secondary)' }}>
         {sectionLabel}
       </p>
       <Form layout="vertical">

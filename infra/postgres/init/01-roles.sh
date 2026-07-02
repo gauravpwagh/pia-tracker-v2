@@ -1,7 +1,8 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Runs once on first container start (docker-entrypoint-initdb.d).
 # Creates the application roles used by Flyway (migrator) and Spring Boot (app).
-set -euo pipefail
+# NOTE: postgres:16-alpine only ships /bin/sh (no bash) — keep this POSIX sh.
+set -eu
 
 MIGRATOR_USER="${POSTGRES_MIGRATOR_USER:-pia_migrator}"
 MIGRATOR_PASS="${POSTGRES_MIGRATOR_PASSWORD:-pia_migrator}"

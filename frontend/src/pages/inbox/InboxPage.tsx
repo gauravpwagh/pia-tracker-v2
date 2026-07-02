@@ -123,7 +123,7 @@ export default function InboxPage() {
     {
       key: 'awaiting',
       label: (
-        <Badge count={awaiting.length} offset={[8, 0]} size="small">
+        <Badge count={awaiting.length} offset={[8, 0]} size="small" color="blue">
           {t('inbox.tabs.awaiting')}
         </Badge>
       ),
@@ -157,7 +157,7 @@ export default function InboxPage() {
     {
       key: 'slaBreached',
       label: (
-        <Badge count={slaBreached.length} offset={[8, 0]} size="small" color="red">
+        <Badge count={slaBreached.length} offset={[8, 0]} size="small" color="orange">
           {t('inbox.tabs.slaBreached')}
         </Badge>
       ),

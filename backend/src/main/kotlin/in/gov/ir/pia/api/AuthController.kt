@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpSession
 import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -73,13 +74,18 @@ class AuthController(
     private val userRepository: UserRepository,
     private val designationRepository: DesignationRepository,
     private val zoneRepository: ZoneRepository,
+    private val jdbc: JdbcTemplate,
 ) {
     /**
      * Returns active, non-deleted users for the role-picker dropdown.
      *
-     * @param designationCode Optional filter — when supplied, returns only users with
-     *   that designation (e.g. "CE_C" for the allocation picker, "DY_CE_C" for the
-     *   assign-Dy-CE/C picker).  Omit to get all users.
+     * @param designationCode Optional filter — when supplied, returns users with that
+     *   designation AND any other designation that shares the same default role(s)
+     *   (e.g. "CE_C" for the allocation picker, "DY_CE_C" for the assign-Dy-CE/C
+     *   picker). This matters because most HRMS-imported users carry a general
+     *   designation code like "DY_CE" rather than the exact "DY_CE_C", even though
+     *   `designation_default_roles` grants them ROLE_DY_CE_C — see [resolveEquivalentDesignationCodes].
+     *   Omit to get all users.
      */
     @GetMapping("/users")
     fun listUsers(
@@ -99,11 +105,13 @@ class AuthController(
 
         val users = when {
             designationCode != null && zoneId != null ->
-                userRepository.findAllByDesignationCodeAndPrimaryZoneIdAndIsActiveTrueAndIsDeletedFalseOrderByName(
-                    designationCode, zoneId,
+                userRepository.findAllByDesignationCodeInAndPrimaryZoneIdAndIsActiveTrueAndIsDeletedFalseOrderByName(
+                    resolveEquivalentDesignationCodes(designationCode), zoneId,
                 )
             designationCode != null ->
-                userRepository.findAllByDesignationCodeAndIsActiveTrueAndIsDeletedFalseOrderByName(designationCode)
+                userRepository.findAllByDesignationCodeInAndIsActiveTrueAndIsDeletedFalseOrderByName(
+                    resolveEquivalentDesignationCodes(designationCode),
+                )
             else ->
                 userRepository.findAllByIsActiveTrueAndIsDeletedFalseOrderByDesignationCodeAscNameAsc()
         }
@@ -120,6 +128,34 @@ class AuthController(
                 isDemo = user.isDemo,
             )
         }
+    }
+
+    /**
+     * Expands [designationCode] to every designation code that shares at least one
+     * of its `designation_default_roles` role(s) — e.g. "DY_CE_C" expands to
+     * {"DY_CE_C", "DY_CE", "DY_CE_GS"} because all three grant ROLE_DY_CE_C.
+     *
+     * Without this, role pickers (assign CE/C, assign Dy CE/C) would only match
+     * users whose designation_code is the exact literal string, missing the bulk
+     * of HRMS-imported users who carry a general designation like "DY_CE".
+     */
+    private fun resolveEquivalentDesignationCodes(designationCode: String): Set<String> {
+        val roleCodes =
+            jdbc.queryForList(
+                "SELECT role_code FROM designation_default_roles WHERE designation_code = ?",
+                String::class.java,
+                designationCode,
+            )
+        if (roleCodes.isEmpty()) return setOf(designationCode)
+
+        val placeholders = roleCodes.joinToString(",") { "?" }
+        val equivalentCodes =
+            jdbc.queryForList(
+                "SELECT DISTINCT designation_code FROM designation_default_roles WHERE role_code IN ($placeholders)",
+                String::class.java,
+                *roleCodes.toTypedArray(),
+            )
+        return (equivalentCodes + designationCode).toSet()
     }
 
     /**

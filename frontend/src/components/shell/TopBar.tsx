@@ -4,11 +4,20 @@ import { Avatar, Badge, Button, Dropdown, Space, Tooltip, Typography } from 'ant
 import {
   BellOutlined,
   DownOutlined,
+  HomeOutlined,
   LaptopOutlined,
   LogoutOutlined,
   MoonOutlined,
+  QuestionCircleOutlined,
   SunOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
+import irLogo from '../../assets/images/IRLOGO_new.png';
+
+// IRPSM chrome palette — matches the login page header (independent of theme tokens)
+const BAR_GRADIENT = 'linear-gradient(90deg, #0d3b8c 0%, #1565c0 100%)';
+const BAR_TEXT = '#ffffff';
+const BAR_TEXT_DIM = 'rgba(255,255,255,0.75)';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useThemeStore } from '@stores/themeStore';
 import { useAuthStore } from '@stores/authStore';
@@ -42,7 +51,6 @@ const { Text } = Typography;
 export function TopBar() {
   const { mode: storedMode, setMode, effectiveMode } = useThemeStore();
   const mode = effectiveMode();
-  const logoSrc = mode === 'dark' ? '/logo-icon-dark.svg' : '/logo-icon.svg';
 
   const themeMenuItems = [
     {
@@ -176,36 +184,46 @@ export function TopBar() {
   ];
 
   return (
-    <Space
-      align="center"
+    <div
       style={{
+        display: 'flex',
+        alignItems: 'center',
         height: 56,
         padding: '0 16px',
         width: '100%',
         justifyContent: 'space-between',
-        borderBottom: '1px solid var(--ant-color-border)',
-        background: 'var(--ant-color-bg-container)',
+        background: BAR_GRADIENT,
+        overflow: 'hidden',
       }}
     >
-      {/* Brand block — icon + stacked wordmark, vertically centred in 56 px bar */}
+      {/* Brand block — IR logo + stacked wordmark, vertically centred in 56 px bar */}
       <div
-        style={{ display: 'flex', alignItems: 'center', gap: 6, height: 56, cursor: 'pointer' }}
+        style={{ display: 'flex', alignItems: 'center', gap: 12, height: 56, cursor: 'pointer', minWidth: 0, flex: 1 }}
         onClick={() => navigate('/')}
         role="link"
-        aria-label="PIA Tracker home"
+        aria-label="IRPSM home"
       >
-        <img src={logoSrc} alt="" height={40} style={{ display: 'block' }} />
-        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1 }}>
-          <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--ant-color-text)', lineHeight: 1.1 }}>
-            PIA
+        <img src={irLogo} alt="Indian Railways" height={42} style={{ display: 'block', flexShrink: 0 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.02em', color: BAR_TEXT, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            IRPSM : Indian Railways Projects Sanctions &amp; Management
           </span>
-          <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: '0.18em', color: 'var(--ant-color-text-secondary)', lineHeight: 1.4 }}>
-            TRACKER
+          <span style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.06em', color: BAR_TEXT_DIM, lineHeight: 1.4 }}>
+            Pre Investment Activities
           </span>
         </div>
       </div>
 
-      <Space align="center" size={12}>
+      <Space align="center" size={12} style={{ flexShrink: 0 }}>
+        {/* Home — back to the project list */}
+        <Button
+          icon={<HomeOutlined />}
+          style={{ height: 40, color: BAR_TEXT, background: 'transparent', border: '1px solid rgba(255,255,255,0.75)' }}
+          onClick={() => navigate('/projects')}
+        >
+          Home
+        </Button>
+
         {/* Theme toggle */}
         <Tooltip title="Switch theme">
           <Dropdown
@@ -221,6 +239,7 @@ export function TopBar() {
               type="text"
               size="small"
               aria-label="Switch theme"
+              style={{ color: BAR_TEXT }}
             />
           </Dropdown>
         </Tooltip>
@@ -232,12 +251,13 @@ export function TopBar() {
             trigger={['click']}
             overlayStyle={{ maxHeight: 480, overflow: 'auto', minWidth: 340 }}
           >
-            <Badge count={unreadCount} size="small" offset={[-2, 2]}>
+            <Badge count={unreadCount} size="small" offset={[-2, 2]} color="blue">
               <Button
                 icon={<BellOutlined />}
                 type="text"
                 size="small"
                 aria-label="Notifications"
+                style={{ color: BAR_TEXT }}
               />
             </Badge>
           </Dropdown>
@@ -249,6 +269,19 @@ export function TopBar() {
             trigger={['click']}
             menu={{
               items: [
+                {
+                  key: 'profile',
+                  icon: <UserOutlined />,
+                  label: 'My Profile',
+                  onClick: () => navigate('/profile'),
+                },
+                {
+                  key: 'help',
+                  icon: <QuestionCircleOutlined />,
+                  label: 'Help',
+                  onClick: () => navigate('/help'),
+                },
+                { type: 'divider' },
                 {
                   key: 'logout',
                   icon: <LogoutOutlined />,
@@ -269,13 +302,13 @@ export function TopBar() {
                 borderRadius: 8,
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'var(--ant-color-bg-text-hover)'; }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.12)'; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
             >
               <Avatar
                 size={34}
                 style={{
-                  background: 'var(--ant-color-primary)',
+                  background: 'rgba(255,255,255,0.18)',
                   color: '#fff',
                   fontWeight: 700,
                   fontSize: 13,
@@ -285,22 +318,22 @@ export function TopBar() {
                 {initials}
               </Avatar>
               <div style={{ lineHeight: 1.3, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ant-color-text)', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: BAR_TEXT, whiteSpace: 'nowrap' }}>
                   {currentUser.name}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--ant-color-text-secondary)', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 11, color: BAR_TEXT_DIM, whiteSpace: 'nowrap' }}>
                   {designationLabel}{primaryZoneName ? ` · ${primaryZoneName}` : ''}
                 </div>
               </div>
-              <DownOutlined style={{ fontSize: 10, color: 'var(--ant-color-text-secondary)', flexShrink: 0 }} />
+              <DownOutlined style={{ fontSize: 10, color: BAR_TEXT_DIM, flexShrink: 0 }} />
             </div>
           </Dropdown>
         ) : (
-          <Text type="secondary" style={{ fontSize: 13 }}>
+          <Text style={{ fontSize: 13, color: BAR_TEXT_DIM }}>
             Not logged in
           </Text>
         )}
       </Space>
-    </Space>
+    </div>
   );
 }

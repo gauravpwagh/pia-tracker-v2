@@ -15,4 +15,11 @@ interface UserRepository : JpaRepository<User, UUID> {
         designationCode: String,
         primaryZoneId: UUID,
     ): List<User>
+
+    fun findAllByDesignationCodeInAndIsActiveTrueAndIsDeletedFalseOrderByName(designationCodes: Collection<String>): List<User>
+
+    fun findAllByDesignationCodeInAndPrimaryZoneIdAndIsActiveTrueAndIsDeletedFalseOrderByName(
+        designationCodes: Collection<String>,
+        primaryZoneId: UUID,
+    ): List<User>
 }

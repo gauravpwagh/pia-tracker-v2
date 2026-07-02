@@ -39,8 +39,10 @@ data class RemoveProjectRequest(
 )
 
 data class AllocateProjectRequest(
-    /** User ID of the CE/C to allocate this project to. */
-    val ceUserId: UUID,
+    /** User IDs of the CE/Cs to allocate this project to. At least one required. */
+    val ceUserIds: List<UUID>,
+    /** Which of [ceUserIds] is primary. Defaults to the first entry if omitted. */
+    val primaryCeUserId: UUID? = null,
 )
 
 data class AssignDyceRequest(
@@ -53,7 +55,20 @@ data class DesignateNodalRequest(
     val nodalUserId: UUID,
 )
 
+data class DesignatePrimaryCeRequest(
+    /** User ID of the CE/C to designate as primary. Must already be a CE_C on this project. */
+    val primaryCeUserId: UUID,
+)
+
 // ── Response model ─────────────────────────────────────────────────────────────
+
+data class ProjectHistoryEntry(
+    val at: Instant,
+    val actorName: String?,
+    val action: String,
+    val entityType: String,
+    val details: String?,
+)
 
 data class ProjectAssignmentItem(
     val id: UUID,
@@ -194,6 +209,64 @@ class ProjectService(
             }
     }
 
+    /**
+     * Unified audit history for a project: its own audit rows, plus everything
+     * logged against its activities and their records (each of those is a
+     * separate `entity_type` in `audit_log`, keyed by its own id — not the
+     * project's — so a plain per-entity query, which is all [AuditController]
+     * offers, can't show a project-wide timeline).
+     */
+    fun history(
+        projectId: UUID,
+        principal: PiaPrincipal,
+    ): List<ProjectHistoryEntry> {
+        getForPrincipal(projectId, principal) // zone-check; throws 404 if inaccessible
+        return jdbc.query(
+            """
+            SELECT al.at, u.name AS actor_name, al.action, al.entity_type,
+                   al.change_summary_json::text AS details
+              FROM audit_log al
+              LEFT JOIN users u ON u.id = al.actor_user_id
+             WHERE (al.entity_type = 'PROJECT' AND al.entity_id = ?)
+                OR (al.entity_type IN ('ACTIVITY', 'PROJECT_ACTIVITY') AND al.entity_id IN (
+                        SELECT id FROM project_activities WHERE project_id = ?))
+                OR (al.entity_type = 'ACTIVITY_RECORD' AND al.entity_id IN (
+                        SELECT ar.id FROM activity_records ar
+                          JOIN project_activities pa ON pa.id = ar.project_activity_id
+                         WHERE pa.project_id = ?))
+             ORDER BY al.at DESC
+             LIMIT 500
+            """.trimIndent(),
+            { rs, _ ->
+                ProjectHistoryEntry(
+                    at = rs.getTimestamp("at").toInstant(),
+                    actorName = rs.getString("actor_name"),
+                    action = rs.getString("action"),
+                    entityType = rs.getString("entity_type"),
+                    details = rs.getString("details"),
+                )
+            },
+            projectId,
+            projectId,
+            projectId,
+        )
+    }
+
+    /**
+     * Returns the next serial number (3-digit, 1-based) for the given Project ID
+     * prefix, e.g. prefix "01.00.11.26.1.00." -> "007" if 6 projects already
+     * exist with that prefix. Used to auto-fill the last segment of the
+     * Project ID in the create-project wizard.
+     */
+    fun nextSerial(prefix: String): String {
+        val count = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM projects WHERE project_code LIKE ?",
+            Int::class.java,
+            "$prefix%",
+        ) ?: 0
+        return (count + 1).toString().padStart(3, '0')
+    }
+
     // ── Write ─────────────────────────────────────────────────────────────────
 
     /**
@@ -259,10 +332,17 @@ class ProjectService(
     }
 
     /**
-     * CAO/C allocates the project to a CE/C.
+     * CAO/C allocates the project to one or more CE/Cs, nominating one as primary.
      *
-     * Advances the workflow: AWAITING_CAO_ALLOCATION → AWAITING_CEC_ASSIGNMENT.
-     * Inserts a CE_C row into `project_assignments`.
+     * Advances the workflow: AWAITING_CAO_ALLOCATION → AWAITING_CEC_ASSIGNMENT — but
+     * only on the first call; a subsequent call (re-allocating / changing the CE set)
+     * finds the workflow already past that state and just updates the assignments,
+     * mirroring how [designateNodal] never advances the workflow. This keeps the door
+     * open for a future "CAO/C changes the CE/C set" action without a schema change.
+     *
+     * Inserts a CE_C row for each requested user, skipping ones already active
+     * (idempotent for re-calls with an overlapping user set), then delegates the
+     * primary flag to [designatePrimaryCe].
      */
     @Transactional
     fun allocate(
@@ -270,18 +350,40 @@ class ProjectService(
         request: AllocateProjectRequest,
         principal: PiaPrincipal,
     ): ProjectDetailResponse {
+        if (request.ceUserIds.isEmpty()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one ceUserId is required")
+        }
+        val primaryCeUserId = request.primaryCeUserId ?: request.ceUserIds.first()
+        if (primaryCeUserId !in request.ceUserIds) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "primaryCeUserId must be one of ceUserIds")
+        }
+
         val project = getForPrincipal(projectId, principal)
         val wfInstanceId = instanceIdForProject(projectId)
-        val advanced = workflowService.transition(wfInstanceId, "allocate", principal)
 
-        assignmentRepository.save(
-            ProjectAssignment(
-                projectId = project.id,
-                userId = request.ceUserId,
-                assignmentRole = "CE_C",
-                assignedByUserId = principal.userId,
-            ),
-        )
+        val existingCes =
+            assignmentRepository
+                .findAllByProjectIdAndAssignmentRoleAndIsActiveTrue(projectId, "CE_C")
+                .map { it.userId }
+                .toSet()
+        val removedCes = existingCes - request.ceUserIds.toSet()
+
+        request.ceUserIds
+            .filter { it !in existingCes }
+            .forEach { ceUserId -> upsertAssignment(project.id, ceUserId, "CE_C", principal.userId) }
+
+        // CE/Cs dropped from the selection are deactivated (not deleted, so
+        // re-adding them later goes through the reactivate path above, never
+        // hitting the unique-constraint bug this replaces).
+        removedCes.forEach { ceUserId -> deactivateAssignment(project.id, ceUserId, "CE_C") }
+
+        val currentState = workflowService.currentState("PROJECT", projectId)?.code ?: project.lifecycleState
+        val lifecycleState =
+            if (currentState == "AWAITING_CAO_ALLOCATION") {
+                workflowService.transition(wfInstanceId, "allocate", principal).currentState.code
+            } else {
+                currentState
+            }
 
         auditLogWriter.write(
             actorUserId = principal.userId,
@@ -290,7 +392,71 @@ class ProjectService(
             entityId = project.id,
         )
 
-        return project.toDetailResponse(lifecycleState = advanced.currentState.code)
+        designatePrimaryCeInternal(project.id, primaryCeUserId, principal)
+
+        return project.toDetailResponse(lifecycleState = lifecycleState)
+    }
+
+    /**
+     * CAO/C designates which of the assigned CE/Cs is primary.
+     *
+     * Mirrors [designateNodal]: deactivates the previous PRIMARY_CE_C assignment (if
+     * any) and inserts a new one. Unlike Nodal, primary doesn't carry extra
+     * permissions — all CE/Cs already have the full CE/C permission set via their
+     * designation's default role — so no `user_roles` grant is needed here.
+     * Does **not** advance the workflow.
+     */
+    @Transactional
+    fun designatePrimaryCe(
+        projectId: UUID,
+        request: DesignatePrimaryCeRequest,
+        principal: PiaPrincipal,
+    ): ProjectDetailResponse {
+        val project = getForPrincipal(projectId, principal)
+        val activeCes =
+            assignmentRepository
+                .findAllByProjectIdAndAssignmentRoleAndIsActiveTrue(projectId, "CE_C")
+                .map { it.userId }
+                .toSet()
+        if (request.primaryCeUserId !in activeCes) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "primaryCeUserId must be an assigned CE/C on this project")
+        }
+
+        designatePrimaryCeInternal(project.id, request.primaryCeUserId, principal)
+
+        auditLogWriter.write(
+            actorUserId = principal.userId,
+            action = "PROJECT.DESIGNATE_PRIMARY_CE",
+            entityType = "PROJECT",
+            entityId = project.id,
+        )
+
+        val currentLifecycle = workflowService.currentState("PROJECT", projectId)?.code ?: project.lifecycleState
+        return project.toDetailResponse(lifecycleState = currentLifecycle)
+    }
+
+    private fun designatePrimaryCeInternal(
+        projectId: UUID,
+        primaryCeUserId: UUID,
+        principal: PiaPrincipal,
+    ) {
+        val existingPrimary =
+            assignmentRepository.findAllByProjectIdAndAssignmentRoleAndIsActiveTrue(projectId, "PRIMARY_CE_C").firstOrNull()
+        if (existingPrimary?.userId == primaryCeUserId) return // already primary — nothing to do
+
+        if (existingPrimary != null) {
+            jdbc.update(
+                """
+                UPDATE project_assignments
+                   SET is_active = false, deactivated_at = ?
+                 WHERE id = ?
+                """.trimIndent(),
+                java.sql.Timestamp.from(Instant.now()),
+                existingPrimary.id,
+            )
+        }
+
+        upsertAssignment(projectId, primaryCeUserId, "PRIMARY_CE_C", principal.userId)
     }
 
     /**
@@ -319,21 +485,32 @@ class ProjectService(
                 .findAllByProjectIdAndAssignmentRoleAndIsActiveTrue(projectId, "DY_CE_C")
                 .map { it.userId }
                 .toSet()
+        val removedDyces = existingDyces - request.dyceUserIds.toSet()
 
         request.dyceUserIds
             .filter { it !in existingDyces }
-            .forEach { dyceUserId ->
-                assignmentRepository.save(
-                    ProjectAssignment(
-                        projectId = project.id,
-                        userId = dyceUserId,
-                        assignmentRole = "DY_CE_C",
-                        assignedByUserId = principal.userId,
-                    ),
-                )
-            }
+            .forEach { dyceUserId -> upsertAssignment(project.id, dyceUserId, "DY_CE_C", principal.userId) }
 
-        val advanced = workflowService.transition(wfInstanceId, "assign_dyces", principal)
+        // Dy CE/Cs dropped from the selection are deactivated. If the removed user
+        // was the Nodal, drop that designation too (and its extra permission grant).
+        removedDyces.forEach { dyceUserId ->
+            deactivateAssignment(project.id, dyceUserId, "DY_CE_C")
+            val wasNodal = assignmentRepository.findActiveNodalForProject(project.id)?.userId == dyceUserId
+            if (wasNodal) {
+                deactivateAssignment(project.id, dyceUserId, "NODAL_DY_CE_C")
+                jdbc.update("DELETE FROM user_roles WHERE user_id = ? AND role_code = 'ROLE_NODAL_DY_CE_C'", dyceUserId)
+            }
+        }
+
+        // Only advance on the first call — a later re-call (adding/changing Dy CE/Cs
+        // once already ACTIVE) just updates the assignments, mirroring allocate().
+        val currentState = workflowService.currentState("PROJECT", projectId)?.code ?: project.lifecycleState
+        val lifecycleState =
+            if (currentState == "AWAITING_CEC_ASSIGNMENT") {
+                workflowService.transition(wfInstanceId, "assign_dyces", principal).currentState.code
+            } else {
+                currentState
+            }
 
         auditLogWriter.write(
             actorUserId = principal.userId,
@@ -342,7 +519,7 @@ class ProjectService(
             entityId = project.id,
         )
 
-        return project.toDetailResponse(lifecycleState = advanced.currentState.code)
+        return project.toDetailResponse(lifecycleState = lifecycleState)
     }
 
     /**
@@ -368,7 +545,9 @@ class ProjectService(
 
         // 1 & 2: Deactivate old Nodal and revoke their system role
         val existingNodal = assignmentRepository.findActiveNodalForProject(projectId)
-        if (existingNodal != null) {
+        // If re-designating the SAME user who's already nodal, there's nothing to do —
+        // skip straight through so step 3's upsert doesn't chase its own tail.
+        if (existingNodal != null && existingNodal.userId != request.nodalUserId) {
             jdbc.update(
                 """
                 UPDATE project_assignments
@@ -385,15 +564,8 @@ class ProjectService(
             )
         }
 
-        // 3: Insert new NODAL_DY_CE_C assignment
-        assignmentRepository.save(
-            ProjectAssignment(
-                projectId = project.id,
-                userId = request.nodalUserId,
-                assignmentRole = "NODAL_DY_CE_C",
-                assignedByUserId = principal.userId,
-            ),
-        )
+        // 3: Insert (or reactivate) the NODAL_DY_CE_C assignment for the new nodal.
+        upsertAssignment(project.id, request.nodalUserId, "NODAL_DY_CE_C", principal.userId)
 
         // 4: Grant ROLE_NODAL_DY_CE_C to the new Nodal (idempotent)
         jdbc.update(
@@ -451,6 +623,66 @@ class ProjectService(
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Inserts a `project_assignments` row for (projectId, userId, role), or
+     * reactivates the existing one if it already exists (active or not).
+     *
+     * `project_assignments` has `unique (project_id, user_id, assignment_role)`
+     * with NO partial/is_active filter, so a naive "deactivate old row, INSERT a
+     * new one" sequence throws a unique-constraint violation the moment the same
+     * user is re-designated (e.g. re-picking the same Nodal, or re-adding a Dy
+     * CE/C who was previously removed) — the old, now-inactive row still holds
+     * the key. Reactivating in place avoids that entirely.
+     */
+    private fun upsertAssignment(
+        projectId: UUID,
+        userId: UUID,
+        role: String,
+        assignedByUserId: UUID,
+    ) {
+        val rowsUpdated =
+            jdbc.update(
+                """
+                UPDATE project_assignments
+                   SET is_active = true, deactivated_at = null,
+                       assigned_by_user_id = ?, assigned_at = now()
+                 WHERE project_id = ? AND user_id = ? AND assignment_role = ?
+                """.trimIndent(),
+                assignedByUserId,
+                projectId,
+                userId,
+                role,
+            )
+        if (rowsUpdated == 0) {
+            assignmentRepository.save(
+                ProjectAssignment(
+                    projectId = projectId,
+                    userId = userId,
+                    assignmentRole = role,
+                    assignedByUserId = assignedByUserId,
+                ),
+            )
+        }
+    }
+
+    private fun deactivateAssignment(
+        projectId: UUID,
+        userId: UUID,
+        role: String,
+    ) {
+        jdbc.update(
+            """
+            UPDATE project_assignments
+               SET is_active = false, deactivated_at = ?
+             WHERE project_id = ? AND user_id = ? AND assignment_role = ? AND is_active = true
+            """.trimIndent(),
+            java.sql.Timestamp.from(Instant.now()),
+            projectId,
+            userId,
+            role,
+        )
+    }
 
     /**
      * Retrieves the workflow instance ID for a project.

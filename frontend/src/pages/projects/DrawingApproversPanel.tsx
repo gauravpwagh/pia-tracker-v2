@@ -127,8 +127,8 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
         )}
       </div>
 
-      {/* Approver rows */}
-      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+      {/* Approver rows — two per row on wider panes to cut vertical scrolling */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 8 }}>
         {data.approvers.map((approver) => {
           const row = getRow(approver);
           const isSaving = saveMutation.isPending && saveMutation.variables?.approverId === approver.id;
@@ -206,7 +206,7 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
             </div>
           );
         })}
-      </Space>
+      </div>
 
       {saveMutation.isError && (
         <Alert

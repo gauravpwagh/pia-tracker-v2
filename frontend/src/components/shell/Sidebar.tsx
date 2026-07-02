@@ -95,8 +95,9 @@ export function Sidebar() {
   return (
     <Menu
       mode="inline"
+      theme="dark"
       selectedKeys={[selectedKey]}
-      style={{ height: '100%', borderRight: 0 }}
+      style={{ height: '100%', borderRight: 0, background: '#1047ae' }}
       onClick={({ key }) => navigate(`/${key}`)}
       items={items}
     />

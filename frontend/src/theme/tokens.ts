@@ -18,8 +18,8 @@ export const tokens = {
     colorBgContainer: '#ffffff',
     colorBgElevated: '#ffffff',
     colorBgSpotlight: '#1a2733',   // Tooltip/popover bg — must be dark for white-text contrast
-    colorBorder: '#e1e8f0',
-    colorBorderSecondary: '#eef2f7',
+    colorBorder: '#b4c1d4',
+    colorBorderSecondary: '#cdd7e5',
     colorText: '#1a2733',
     colorTextSecondary: '#5a6b7d',
     colorTextTertiary: '#8b9aab',

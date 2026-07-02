@@ -15,23 +15,19 @@ The script:
 """
 
 import argparse
+import csv
 import subprocess
 import sys
 import uuid
 from pathlib import Path
 from typing import Optional
 
-try:
-    import openpyxl
-except ImportError:
-    sys.exit("openpyxl is required: pip install openpyxl")
-
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def parse_args():
     p = argparse.ArgumentParser(description="Import users from XLSX into PIA Tracker DB.")
-    p.add_argument("xlsx", help="Path to the filled-in XLSX file")
+    p.add_argument("xlsx", help="Path to the filled-in XLSX or CSV file")
     p.add_argument("--dry-run", action="store_true", help="Validate only, no DB writes")
     p.add_argument("--container", default="pia-postgres", help="Docker container name (default: pia-postgres)")
     p.add_argument("--db-user",  default="pia",           help="PostgreSQL user (default: pia)")
@@ -60,35 +56,18 @@ def fetch_set(container, db_user, db_name, sql) -> set:
 # Maps external / HR-system labels to system designation codes.
 # Keys are normalised to uppercase with extra spaces collapsed.
 
+# Coarse family map. Designation codes drive role resolution via
+# designation_default_roles, so every officer must land on the *_C family code
+# that carries the operational role (not the granular sub-codes, which only
+# carry ROLE_APPROVER_GENERIC):
+#   DY CE*  -> DY_CE_C  (ROLE_DY_CE_C)
+#   CE*     -> CE_C     (ROLE_CE_C)
+#   CAO*    -> CAO_C    (ROLE_CAO_C)
+#   ED*     -> EDGS_CI  (ROLE_EDGS_CI)
+# The prefix rules in resolve_designation() do the heavy lifting; this table is
+# only for exact one-offs that the prefixes would otherwise misclassify.
 DESIGNATION_ALIASES = {
-    # DY CE variants
-    "DY CE":                                    "DY_CE",
-    "DY. CE":                                   "DY_CE",
-    "DY CE(GS)":                                "DY_CE",
-    "DY CE (GS)":                               "DY_CE",
-    "DY CE(GATI SHAKTI)":                       "DY_CE",
-
-    # CAO variants
-    "CAO/C":                                    "CAO_C",
-    "CAO":                                      "CAO_C",
-    "CAO(C)":                                   "CAO_C",
-    "CAO(C)/RSP":                               "CAO_C",
-    "CAO(C) /RSP":                              "CAO_C",
-    "CAO(C)/ROAD SAFETY PROJECT":               "CAO_C",
-
-    # CE/C variants
-    "CE/C":                                     "CE_C",
-    "CE/CON":                                   "CE_C",
-    "CE/CON (ROAD SAFETY PROJECT)":             "CE_C",
-    "CE/CON(ROAD SAFETY PROJECT)":              "CE_C",
-    "CE/CON (RSP)":                             "CE_C",
-
-    # Executive Director variants
-    "EXECUTIVE DIRECTOR/GATI SHAKTI(CIVIL-III)": "EDGS_CI",
-    "EXECUTIVE DIRECTOR/GATI SHAKTI (CIVIL-III)": "EDGS_CI",
-    "ED/GATI SHAKTI(CIVIL-III)":                "EDGS_CI",
-    "ED/GATI SHAKTI (CIVIL-III)":               "EDGS_CI",
-    "EDGS/C-I":                                 "EDGS_CI",
+    "EDGS/C-I": "EDGS_CI",
 }
 
 def resolve_designation(raw: str) -> tuple[str, Optional[str]]:
@@ -101,7 +80,115 @@ def resolve_designation(raw: str) -> tuple[str, Optional[str]]:
     if normalised in DESIGNATION_ALIASES:
         code = DESIGNATION_ALIASES[normalised]
         return code, f"mapped from '{raw}'"
+
+    # Coarse prefix collapse to the role-bearing family code. Order matters:
+    # "DY CE" must be tested before "CE"; "ED"/Executive Director before "CE".
+    n = normalised
+    if n.startswith("DY CE") or n.startswith("DY. CE"):
+        return "DY_CE_C", f"mapped from '{raw}'"
+    if n.startswith("CAO"):
+        return "CAO_C", f"mapped from '{raw}'"
+    if n.startswith("ED") or "EXECUTIVE DIRECTOR" in n:
+        return "EDGS_CI", f"mapped from '{raw}'"
+    if n.startswith("CE"):
+        return "CE_C", f"mapped from '{raw}'"
+
     return raw.strip(), None
+
+
+# ── Row loaders (XLSX + CSV) ─────────────────────────────────────────────────────
+# Both return a list of dicts: {name, email, desig_raw, zone, employee_id}.
+
+# Header aliases → canonical field. Matching is case-insensitive with spaces/
+# underscores/punctuation stripped, so "Employee ID", "employee_id", "EmpId" all match.
+HEADER_ALIASES = {
+    "name": "name", "fullname": "name", "officername": "name",
+    "employeename": "name", "empname": "name",
+    "email": "email", "emailid": "email", "mail": "email",
+    # Prefer the human-readable designation text; the numeric desig_code is ignored.
+    "designation": "desig_raw", "designationcode": "desig_raw", "desig": "desig_raw",
+    "desigdesc": "desig_raw", "designationdesc": "desig_raw",
+    "zone": "zone", "zonecode": "zone", "railway": "zone",
+    "employeeid": "employee_id", "empid": "employee_id", "pfno": "employee_id",
+    "employeeno": "employee_id", "hrmsid": "employee_id", "emphrmsid": "employee_id",
+}
+
+
+def _norm_header(h: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]", "", (h or "").strip().lower())
+
+
+def load_csv_rows(path: Path) -> list[dict]:
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        reader = csv.reader(f)
+        try:
+            header = next(reader)
+        except StopIteration:
+            return []
+        # Map each column index to a canonical field name via the alias table.
+        col_map: dict[int, str] = {}
+        for i, h in enumerate(header):
+            field = HEADER_ALIASES.get(_norm_header(h))
+            if field:
+                col_map[i] = field
+        present = set(col_map.values())
+        missing = {"name", "desig_raw"} - present
+        if missing:
+            sys.exit(
+                f"CSV header is missing required column(s): {', '.join(sorted(missing))}.\n"
+                f"Found headers: {header}\n"
+                f"Expected something matching: Name, Designation (+ Zone, Employee ID)."
+            )
+        # Email may be absent — it is generated from employee_id + zone (see main()).
+        if "email" not in present and not {"employee_id", "zone"} <= present:
+            sys.exit(
+                "CSV has no Email column, and can't generate one: need both an "
+                "Employee ID (hrms id) column and a Zone column to synthesise "
+                "{hrms_id}@{zone}.railnet.gov.in.\n"
+                f"Found headers: {header}"
+            )
+        rows = []
+        for values in reader:
+            rec = {"name": "", "email": "", "desig_raw": "", "zone": None, "employee_id": None}
+            for i, field in col_map.items():
+                if i < len(values):
+                    rec[field] = (values[i] or "").strip()
+            if not any([rec["name"], rec["email"], rec["desig_raw"]]):
+                continue
+            rows.append(rec)
+        return rows
+
+
+def load_xlsx_rows(path: Path) -> list[dict]:
+    try:
+        import openpyxl
+    except ImportError:
+        sys.exit("openpyxl is required for .xlsx files: pip install openpyxl")
+    wb = openpyxl.load_workbook(path, data_only=True)
+    if "Users" not in wb.sheetnames:
+        sys.exit('XLSX must contain a sheet named "Users".')
+    ws = wb["Users"]
+    rows = []
+    # Row 3 = headers, row 4 = sample — data starts at row 5
+    for row_num in range(5, ws.max_row + 1):
+        def cell(col): return ws.cell(row=row_num, column=col).value
+        name  = str(cell(1)).strip() if cell(1) else ""
+        email = str(cell(2)).strip() if cell(2) else ""
+        desig = str(cell(3)).strip() if cell(3) else ""
+        zone  = str(cell(4)).strip() if cell(4) else None
+        emp   = str(cell(5)).strip() if cell(5) else None
+        if not any([name, email, desig]):
+            continue
+        rows.append({"name": name, "email": email, "desig_raw": desig,
+                     "zone": zone or None, "employee_id": emp or None})
+    return rows
+
+
+def load_rows(path: Path) -> list[dict]:
+    if path.suffix.lower() == ".csv":
+        return load_csv_rows(path)
+    return load_xlsx_rows(path)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -128,29 +215,26 @@ def main():
     print(f"  {len(valid_designations)} designations, {len(valid_zones)} zones, "
           f"{len(existing_emails)} existing users loaded.\n")
 
-    # ── Read XLSX ─────────────────────────────────────────────────────────────
-    wb = openpyxl.load_workbook(xlsx_path, data_only=True)
-    if "Users" not in wb.sheetnames:
-        sys.exit('XLSX must contain a sheet named "Users".')
-    ws = wb["Users"]
+    # ── Read input file (XLSX or CSV) ─────────────────────────────────────────
+    raw_rows = load_rows(xlsx_path)
 
     rows = []
-    # Row 3 = headers, row 4 = sample — data starts at row 5
-    for row_num in range(5, ws.max_row + 1):
-        def cell(col): return ws.cell(row=row_num, column=col).value
+    for idx, rec in enumerate(raw_rows, start=1):
+        name        = rec["name"]
+        email       = rec["email"]
+        desig_raw   = rec["desig_raw"]
+        zone        = rec["zone"]
+        employee_id = rec["employee_id"]
+        row_num     = idx  # 1-based data row for display
 
-        name         = str(cell(1)).strip() if cell(1) else ""
-        email        = str(cell(2)).strip() if cell(2) else ""
-        desig_raw    = str(cell(3)).strip() if cell(3) else ""
-        zone         = str(cell(4)).strip() if cell(4) else None
-        employee_id  = str(cell(5)).strip() if cell(5) else None
-
-        # Skip completely empty rows
-        if not any([name, email, desig_raw]):
-            continue
         # Skip the italic sample row if user left it in
         if email == "rajesh.sharma@nr.railnet.gov.in":
             continue
+
+        # Generate email when the source has none: {hrms_id}@{zone}.railnet.gov.in
+        # (matches the existing seeded users; hrms_id is unique so email stays unique).
+        if not email and employee_id and zone:
+            email = f"{employee_id.lower()}@{zone.lower()}.railnet.gov.in"
 
         desig, alias_note = resolve_designation(desig_raw)
 

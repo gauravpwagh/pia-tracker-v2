@@ -18,8 +18,21 @@ export function PiaObjectFieldTemplate({
   description,
   properties,
   uiSchema,
+  schema,
 }: ObjectFieldTemplateProps) {
   const uiDescription = uiSchema?.['ui:description'] as string | undefined;
+
+  // Single-column when the section contains a nested *object* child (a scalar
+  // sitting next to a multi-field sub-block — e.g. SRP's date beside its
+  // Gazette object — looks lopsided). Arrays (e.g. Forest's "Queries from
+  // Approving Authority") do NOT force single-column: they span the full width
+  // on their own row (see PiaFieldTemplate) while the section's scalar fields
+  // stay two-per-row.
+  const props = (schema?.properties ?? {}) as Record<string, { type?: string; $ref?: string }>;
+  const hasNestedObject = Object.values(props).some(
+    (p) => p?.type === 'object' || typeof p?.$ref === 'string',
+  );
+  const gridColumns = hasNestedObject ? '1fr' : 'repeat(auto-fit, minmax(260px, 1fr))';
 
   return (
     <div>
@@ -27,7 +40,7 @@ export function PiaObjectFieldTemplate({
         <Divider
           orientation="left"
           orientationMargin={0}
-          style={{ fontSize: 13, color: 'var(--ant-color-text-secondary)', margin: '12px 0 8px' }}
+          style={{ fontSize: 13, color: 'var(--ant-color-text-secondary)', margin: '6px 0 4px' }}
         >
           {title}
         </Divider>
@@ -51,7 +64,15 @@ export function PiaObjectFieldTemplate({
           {description}
         </p>
       )}
-      {properties.map((prop) => prop.content)}
+      {/* Two (or more, space permitting) fields per row instead of RJSF's default
+          one-per-row — cuts vertical scrolling substantially on long forms.
+          auto-fit/minmax lets a field that needs more room (e.g. a textarea)
+          still wrap to its own row via the browser's natural grid flow. */}
+      <div style={{ display: 'grid', gridTemplateColumns: gridColumns, columnGap: 20, rowGap: 0 }}>
+        {properties.map((prop) => (
+          <div key={prop.name}>{prop.content}</div>
+        ))}
+      </div>
     </div>
   );
 }

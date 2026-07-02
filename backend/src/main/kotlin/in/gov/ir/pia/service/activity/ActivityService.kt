@@ -675,6 +675,14 @@ class ActivityService(
                 "This activity has been authenticated and records can no longer be edited.",
             )
         }
+        // A record is locked the moment it's individually Verified or Authenticated,
+        // even if the parent activity as a whole hasn't reached its terminal state yet.
+        if (existing.recordState == "VERIFIED" || existing.recordState == "AUTHENTICATED") {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "This record has been ${existing.recordState.lowercase()} and can no longer be edited.",
+            )
+        }
 
         val dataJsonString = objectMapper.writeValueAsString(request.dataJson)
 
@@ -751,6 +759,13 @@ class ActivityService(
             throw ResponseStatusException(
                 HttpStatus.CONFLICT,
                 "This activity has been authenticated. Records cannot be deleted.",
+            )
+        }
+        // A record is locked the moment it's individually Verified or Authenticated.
+        if (record.recordState == "VERIFIED" || record.recordState == "AUTHENTICATED") {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "This record has been ${record.recordState.lowercase()} and cannot be deleted.",
             )
         }
 

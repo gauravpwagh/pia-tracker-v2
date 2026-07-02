@@ -153,6 +153,13 @@ export async function createProject(
   return handleResponse<ProjectDetailResponse>(res);
 }
 
+/** Next serial (3-digit, 1-based) for a Project ID prefix. See ProjectController.nextSerial. */
+export async function fetchNextSerial(prefix: string): Promise<string> {
+  const res = await fetch(`${BASE}/projects/next-serial?prefix=${encodeURIComponent(prefix)}`, { credentials: 'include' });
+  const body = await handleResponse<{ serial: string }>(res);
+  return body.serial;
+}
+
 export async function removeProject(id: string, reason: string): Promise<ProjectDetailResponse> {
   const res = await fetch(`${BASE}/projects/${id}/remove`, {
     method: 'POST',
@@ -176,6 +183,19 @@ export interface ProjectAssignmentItem {
 export async function fetchProjectAssignments(projectId: string): Promise<ProjectAssignmentItem[]> {
   const res = await fetch(`${BASE}/projects/${projectId}/assignments`, { credentials: 'include' });
   return handleResponse<ProjectAssignmentItem[]>(res);
+}
+
+export interface ProjectHistoryEntry {
+  at: string;
+  actorName: string | null;
+  action: string;
+  entityType: string;
+  details: string | null;
+}
+
+export async function fetchProjectHistory(projectId: string): Promise<ProjectHistoryEntry[]> {
+  const res = await fetch(`${BASE}/projects/${projectId}/history`, { credentials: 'include' });
+  return handleResponse<ProjectHistoryEntry[]>(res);
 }
 
 // ── Activities ────────────────────────────────────────────────────────────────
@@ -235,13 +255,27 @@ export async function createActivity(
 
 export async function allocateProject(
   projectId: string,
-  ceUserId: string,
+  ceUserIds: string[],
+  primaryCeUserId?: string,
 ): Promise<ProjectDetailResponse> {
   const res = await fetch(`${BASE}/projects/${projectId}/allocate`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ceUserId }),
+    body: JSON.stringify({ ceUserIds, primaryCeUserId }),
+  });
+  return handleResponse<ProjectDetailResponse>(res);
+}
+
+export async function designatePrimaryCe(
+  projectId: string,
+  primaryCeUserId: string,
+): Promise<ProjectDetailResponse> {
+  const res = await fetch(`${BASE}/projects/${projectId}/designate-primary-ce`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ primaryCeUserId }),
   });
   return handleResponse<ProjectDetailResponse>(res);
 }

@@ -1,0 +1,4 @@
+# Shell scripts must keep LF endings — several run inside Alpine containers
+# (postgres:16-alpine, entrypoint scripts) that lack CRLF-tolerant shells.
+# A Windows checkout without this rule silently breaks container init scripts.
+*.sh text eol=lf

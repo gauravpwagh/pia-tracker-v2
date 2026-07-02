@@ -20,6 +20,7 @@ import type { IChangeEvent, FormProps } from '@rjsf/core';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { customWidgets } from './widgets';
 import { PiaObjectFieldTemplate } from './PiaObjectFieldTemplate';
+import { PiaFieldTemplate } from './PiaFieldTemplate';
 import { ApprovalChainField } from './fields/ApprovalChainField';
 
 export interface RjsfFormHandle {
@@ -70,13 +71,14 @@ export const RjsfForm = forwardRef<RjsfFormHandle, RjsfFormProps>(function RjsfF
   return (
     <Form
       ref={formRef}
+      className="pia-rjsf-form"
       schema={schema}
       uiSchema={mergedUiSchema}
       formData={formData}
       validator={validator}
       widgets={customWidgets}
       fields={{ approvalChain: ApprovalChainField }}
-      templates={{ ObjectFieldTemplate: PiaObjectFieldTemplate }}
+      templates={{ ObjectFieldTemplate: PiaObjectFieldTemplate, FieldTemplate: PiaFieldTemplate }}
       onChange={handleChange}
       onSubmit={handleSubmit}
       formContext={formContext}

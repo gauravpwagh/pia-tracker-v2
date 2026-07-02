@@ -34,6 +34,7 @@ import {
   Skeleton,
   Space,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import {
@@ -43,6 +44,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   FileTextOutlined,
+  LockOutlined,
   MoreOutlined,
   RollbackOutlined,
   SafetyOutlined,
@@ -53,6 +55,7 @@ import { useTranslation } from 'react-i18next';
 
 import { deleteRecord, fetchRecord, patchRecord, type ActivityRecordDetail } from '@api/activityRecords';
 import { fetchActivityById, updateActivity } from '@api/projects';
+import { fetchFormDefinitionById } from '@api/formDefinitions';
 import { fetchWorkflowState, performWorkflowAction, type SectionWorkflowState, type WorkflowActionCode } from '@api/workflow';
 import { fetchAttachments, getAttachmentDownloadUrl } from '@api/attachments';
 import { useAuthStore } from '@stores/authStore';
@@ -88,7 +91,7 @@ const RECORD_STATE_COLORS: Record<string, string> = {
 const RECORD_STATE_LABELS: Record<string, string> = {
   DRAFT:                      'Draft',
   SUBMITTED_FOR_VERIFICATION: 'Submitted',
-  VERIFIED:                   'Pending Authentication',
+  VERIFIED:                   'Verified',
   AUTHENTICATED:              'Authenticated',
   SENT_BACK_TO_DYCE:          'Sent Back to Dy CE/C',
   SENT_BACK_TO_NODAL:         'Sent Back to Nodal',
@@ -98,6 +101,43 @@ function recordLabel(record: ActivityRecordDetail): string {
   if (record.name)          return record.name;
   if (record.recordSubtype) return record.recordSubtype.replace(/_/g, ' ');
   return 'Record';
+}
+
+/**
+ * Best-effort check of whether every mandatory field is filled, before letting
+ * the Nodal Dy CE/C verify a record.
+ *
+ * PIA Tracker's forms are sectioned (each top-level schema property is a
+ * section, e.g. "srp", "cala", each with its own `required` array) — this
+ * walks both that shape and a flat top-level `required` array. It does NOT
+ * evaluate JSON Schema conditionals (allOf/if-then), so a field that's only
+ * conditionally required won't be caught here — acceptable for a pre-verify
+ * nudge, not a substitute for the RJSF form's own validation on submit.
+ */
+function missingRequiredFields(
+  schemaJson: Record<string, unknown>,
+  dataJson: Record<string, unknown>,
+): string[] {
+  const isEmpty = (v: unknown) => v === undefined || v === null || v === '';
+  const missing: string[] = [];
+  const properties = (schemaJson.properties ?? {}) as Record<string, { properties?: unknown; required?: string[] }>;
+
+  for (const [sectionKey, sectionSchema] of Object.entries(properties)) {
+    if (!sectionSchema || typeof sectionSchema !== 'object' || !sectionSchema.properties) continue;
+    const required = sectionSchema.required ?? [];
+    const sectionData = (dataJson[sectionKey] ?? {}) as Record<string, unknown>;
+    for (const field of required) {
+      if (isEmpty(sectionData[field])) missing.push(`${sectionKey}.${field}`);
+    }
+  }
+
+  const topRequired = (schemaJson.required as string[] | undefined) ?? [];
+  for (const field of topRequired) {
+    if (properties[field]?.properties) continue; // already walked as a section above
+    if (isEmpty(dataJson[field])) missing.push(field);
+  }
+
+  return missing;
 }
 
 // ── Divider style ─────────────────────────────────────────────────────────────
@@ -166,6 +206,11 @@ interface RecordDetailPanelProps {
   canEdit: boolean;
   onClose: () => void;
   onDelete?: () => void;
+  /** If provided, the Edit Data button calls this (inline editing) instead of navigating to the edit page. */
+  onEdit?: () => void;
+  /** If provided, the View Data button (shown once Verified/Authenticated) calls this
+   * to open the same form read-only — otherwise falls back to onEdit. */
+  onViewData?: () => void;
 }
 
 function AttachFileRow({ f, onDownload }: { f: import('@api/attachments').AttachmentDto; onDownload: (id: string) => void }) {
@@ -226,7 +271,7 @@ function FcAttachmentSectionPanel({ recordId, fields, title }: { recordId: strin
   return (
     <>
       <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
-      <Descriptions size="small" column={1} bordered>
+      <Descriptions size="small" column={2} bordered={false} colon>
         {fields.map(({ key, label }, i) => {
           const files = data?.[i] ?? [];
           return (
@@ -315,7 +360,7 @@ function LaSectionBlock({
   return (
     <>
       <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
-      <Descriptions size="small" column={1} bordered>
+      <Descriptions size="small" column={2} bordered={false} colon>
         {entries.map((e, i) => (
           <Descriptions.Item key={i} label={e.label}>{e.value}</Descriptions.Item>
         ))}
@@ -471,7 +516,7 @@ function FcSectionBlock({
   return (
     <>
       <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
-      <Descriptions size="small" column={1} bordered>
+      <Descriptions size="small" column={2} bordered={false} colon>
         {entries.map((e, i) => (
           <Descriptions.Item key={i} label={e.label}>{e.value}</Descriptions.Item>
         ))}
@@ -585,6 +630,8 @@ export function RecordDetailPanel({
   canEdit,
   onClose,
   onDelete,
+  onEdit,
+  onViewData,
 }: RecordDetailPanelProps) {
   const { t } = useTranslation('forms');
   const navigate = useNavigate();
@@ -626,6 +673,16 @@ export function RecordDetailPanel({
   });
 
   const activeSectionState: SectionWorkflowState | undefined = workflowState?.instances[0];
+
+  const formDefQuery = useQuery({
+    queryKey: ['form-definition', record?.formDefinitionId],
+    queryFn: () => fetchFormDefinitionById(record!.formDefinitionId),
+    enabled: !!record?.formDefinitionId && (activeSectionState?.availableActions.includes('verify') ?? false),
+    staleTime: 5 * 60_000,
+  });
+  const missingFields = formDefQuery.data
+    ? missingRequiredFields(formDefQuery.data.schemaJson, (record?.dataJson ?? {}) as Record<string, unknown>)
+    : [];
 
   // ── Save mutation ──────────────────────────────────────────────────────────
   const saveMutation = useMutation({
@@ -675,6 +732,9 @@ export function RecordDetailPanel({
       content: 'This cannot be undone.',
       okText: 'Delete',
       okButtonProps: { danger: true },
+      icon: null,
+      transitionName: '',
+      maskTransitionName: '',
       onOk: () => deleteMutation.mutate(),
     });
   };
@@ -686,12 +746,24 @@ export function RecordDetailPanel({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['workflow', recordId] });
       void queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+      // The record-list badge (in the activity pane's left list) and the
+      // project-level Overview stats both read from these caches — without
+      // invalidating them the state change doesn't show until something else
+      // happens to trigger a refetch.
+      if (record) void queryClient.invalidateQueries({ queryKey: ['records', record.projectActivityId] });
+      void queryClient.invalidateQueries({ queryKey: ['activities'] });
       notifApi.success({ message: 'Action completed', duration: 2 });
     },
     onError: (err: Error) => {
       notifApi.error({ message: 'Action failed', description: err.message, duration: 5 });
     },
   });
+
+  const startEditing = () => {
+    setEditName(record?.name ?? '');
+    setEditMetadata({});
+    setEditing(true);
+  };
 
   const cancelEditing = () => {
     setEditing(false);
@@ -705,6 +777,8 @@ export function RecordDetailPanel({
   const displayName = record ? recordLabel(record) : '…';
   const typeLabel   = activity?.activityTypeCode.replace(/_/g, ' ') ?? '';
   const isTerminal  = activeSectionState?.isTerminal ?? false;
+  // Once Verified or Authenticated, the record is locked — no further edits or deletion.
+  const isImmutable = record?.recordState === 'VERIFIED' || record?.recordState === 'AUTHENTICATED';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -753,21 +827,54 @@ export function RecordDetailPanel({
           </Space>
         )}
 
-        {/* Primary: Edit (opens RJSF form) + ⋯ overflow with Edit details */}
-        {canEdit && record && !editing && (
+        {/* Once verified (or authenticated), the record is locked — no editing or
+            deleting, but the data must still be viewable (e.g. so a CE/C can review
+            before Authenticating). */}
+        {isImmutable && record && !editing && (
+          <Space size={8}>
+            <Tooltip title="Locked after verification">
+              <LockOutlined style={{ color: 'var(--ant-color-text-tertiary)', fontSize: 14 }} />
+            </Tooltip>
+            <Button
+              size="small"
+              type="primary"
+              icon={<EditOutlined />}
+              onClick={() => {
+                if (onViewData) onViewData();
+                else if (onEdit) onEdit();
+                else navigate(`/records/${recordId}/edit`, { state: { returnPath: window.location.pathname } });
+              }}
+            >
+              View Data
+            </Button>
+          </Space>
+        )}
+
+        {/* Primary: Edit Data (opens RJSF form) + ⋯ overflow with Delete */}
+        {canEdit && record && !editing && !isImmutable && (
           <Space size={4}>
             <Button
               size="small"
               type="primary"
               icon={<EditOutlined />}
-              onClick={() => navigate(`/records/${recordId}/edit`, { state: { returnPath: window.location.pathname } })}
+              onClick={() => {
+                if (onEdit) onEdit();
+                else navigate(`/records/${recordId}/edit`, { state: { returnPath: window.location.pathname } });
+              }}
             >
-              Edit
+              Edit Data
             </Button>
             <Dropdown
               trigger={['click']}
               menu={{
                 items: [
+                  {
+                    key: 'rename',
+                    icon: <EditOutlined />,
+                    label: 'Rename',
+                    onClick: startEditing,
+                  },
+                  { type: 'divider' },
                   {
                     key: 'delete',
                     icon: <DeleteOutlined />,
@@ -824,7 +931,7 @@ export function RecordDetailPanel({
                 </Form>
               ) : null}
 
-              <Descriptions size="small" column={1} bordered>
+              <Descriptions size="small" column={2} bordered={false} colon>
                 {record.recordSubtype && (
                   <Descriptions.Item label="Type">
                     {record.recordSubtype.replace(/_/g, ' ')}
@@ -908,7 +1015,7 @@ export function RecordDetailPanel({
                       .filter((k) => data[k] !== null && data[k] !== undefined && data[k] !== '')
                       .map((k) => [k, data[k]] as [string, unknown]);
                     return hasData ? (
-                      <Descriptions size="small" column={1} bordered>
+                      <Descriptions size="small" column={2} bordered={false} colon>
                         {orderedEntries.map(([k, v]) => {
                             const display =
                               k === 'utility_type'     ? (UTILITY_TYPE_LABELS[String(v)] ?? String(v)) :
@@ -954,7 +1061,7 @@ export function RecordDetailPanel({
                       undefined;
 
                     return hasData ? (
-                      <Descriptions size="small" column={1} bordered>
+                      <Descriptions size="small" column={2} bordered={false} colon>
                         {data.record_name !== undefined && data.record_name !== '' && (
                           <Descriptions.Item label="Record Name">
                             {String(data.record_name)}
@@ -1007,7 +1114,7 @@ export function RecordDetailPanel({
                     const data = (record.dataJson ?? {}) as Record<string, unknown>;
                     const hasData = Object.keys(data).length > 0;
                     return hasData ? (
-                      <Descriptions size="small" column={1} bordered>
+                      <Descriptions size="small" column={2} bordered={false} colon>
                         {data.package_name !== undefined && data.package_name !== '' && (
                           <Descriptions.Item label="Package Name">
                             {String(data.package_name)}
@@ -1120,7 +1227,7 @@ export function RecordDetailPanel({
                             Drawing Details
                           </Divider>
                           {detailEntries.length > 0 ? (
-                            <Descriptions size="small" column={1} bordered>
+                            <Descriptions size="small" column={2} bordered={false} colon>
                               {detailEntries.map(([k, display]) => (
                                 <Descriptions.Item key={k} label={DA_LABELS[k] ?? k}>
                                   {display}
@@ -1146,34 +1253,33 @@ export function RecordDetailPanel({
                           />
                         </div>
 
-                        {/* Section 3: Observations */}
-                        <div>
-                          <Divider orientation="left" orientationMargin={0} style={{ ...DIVIDER_STYLE, margin: '0 0 8px' }}>
-                            Observations
-                          </Divider>
+                        {/* Sections 3 & 4: Observations + Sanction share one row
+                            (two columns) to keep them on one page. Observations
+                            takes the wider column; Sanction is a compact box. */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', gap: 20, alignItems: 'start' }}>
+                          {/* Observations — panel renders its own heading + Add button */}
                           <DrawingObservationsPanel
                             recordId={recordId}
                             observations={observations}
                             canEdit={canEdit}
                           />
-                        </div>
 
-                        {/* Section 4: Sanction */}
-                        <div>
-                          <Divider orientation="left" orientationMargin={0} style={{ ...DIVIDER_STYLE, margin: '0 0 8px' }}>
-                            Sanction
-                          </Divider>
-                          {sanctionDate ? (
-                            <Descriptions size="small" column={1} bordered>
-                              <Descriptions.Item label="Sanction Received Date">
-                                {dayjs(sanctionDate).format('D MMM YYYY')}
-                              </Descriptions.Item>
-                            </Descriptions>
-                          ) : (
-                            <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
-                              Sanction not yet received.
-                            </Text>
-                          )}
+                          {/* Sanction */}
+                          <div>
+                            <Divider orientation="left" orientationMargin={0} style={{ ...DIVIDER_STYLE, margin: '0 0 8px' }}>
+                              Sanction
+                            </Divider>
+                            {sanctionDate ? (
+                              <div style={{ fontSize: 12 }}>
+                                <Text type="secondary" style={{ fontSize: 12 }}>Received: </Text>
+                                <Text strong style={{ fontSize: 12 }}>{dayjs(sanctionDate).format('D MMM YYYY')}</Text>
+                              </div>
+                            ) : (
+                              <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                                Sanction not yet received.
+                              </Text>
+                            )}
+                          </div>
                         </div>
                       </Space>
                     );
@@ -1250,13 +1356,9 @@ export function RecordDetailPanel({
                 {/* Workflow action buttons */}
                 {canEdit && !isTerminal && activeSectionState.availableActions.length > 0 && (
                   <Space direction="vertical" style={{ width: '100%', marginTop: 12 }} size={8}>
-                    {activeSectionState.availableActions.includes('submit') && (
-                      <Button type="primary" icon={<SendOutlined />} block
-                        loading={workflowMutation.isPending}
-                        onClick={() => workflowMutation.mutate({ action: 'submit' })}>
-                        Submit for Verification
-                      </Button>
-                    )}
+                    {/* "Submit for Verification" is hidden for now — not needed in the
+                        current workflow. Restore the 'submit' block below if it's
+                        needed again. */}
                     {activeSectionState.availableActions.includes('resubmit') && (
                       <Button icon={<SendOutlined />} block
                         loading={workflowMutation.isPending}
@@ -1265,11 +1367,22 @@ export function RecordDetailPanel({
                       </Button>
                     )}
                     {activeSectionState.availableActions.includes('verify') && (
-                      <Button type="primary" icon={<CheckCircleOutlined />} block
-                        loading={workflowMutation.isPending}
-                        onClick={() => workflowMutation.mutate({ action: 'verify' })}>
-                        Submit for Authentication
-                      </Button>
+                      <>
+                        <Popconfirm
+                          title="Verify this record?"
+                          description="Confirm every mandatory field has been checked."
+                          okText="Verify" cancelText="Cancel"
+                          disabled={missingFields.length > 0}
+                          onConfirm={() => workflowMutation.mutate({ action: 'verify' })}>
+                          <Tooltip title={missingFields.length > 0 ? `${missingFields.length} mandatory field(s) still empty` : undefined}>
+                            <Button type="primary" icon={<CheckCircleOutlined />} block
+                              disabled={missingFields.length > 0}
+                              loading={workflowMutation.isPending || formDefQuery.isLoading}>
+                              Verify
+                            </Button>
+                          </Tooltip>
+                        </Popconfirm>
+                      </>
                     )}
                     {activeSectionState.availableActions.includes('re_verify') && (
                       <Button icon={<CheckCircleOutlined />} block

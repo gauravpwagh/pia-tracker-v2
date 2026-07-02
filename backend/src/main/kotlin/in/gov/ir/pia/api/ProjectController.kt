@@ -5,8 +5,10 @@ import `in`.gov.ir.pia.service.project.AllocateProjectRequest
 import `in`.gov.ir.pia.service.project.AssignDyceRequest
 import `in`.gov.ir.pia.service.project.CreateProjectRequest
 import `in`.gov.ir.pia.service.project.DesignateNodalRequest
+import `in`.gov.ir.pia.service.project.DesignatePrimaryCeRequest
 import `in`.gov.ir.pia.service.project.ProjectAssignmentItem
 import `in`.gov.ir.pia.service.project.ProjectDetailResponse
+import `in`.gov.ir.pia.service.project.ProjectHistoryEntry
 import `in`.gov.ir.pia.service.project.ProjectService
 import `in`.gov.ir.pia.service.project.RemoveProjectRequest
 import org.springframework.http.HttpStatus
@@ -38,6 +40,10 @@ data class ProjectSummaryResponse(
     val ipaDate: java.time.LocalDate?,
     val targetCompletionYear: Int?,
     val createdAt: java.time.Instant,
+)
+
+data class NextSerialResponse(
+    val serial: String,
 )
 
 // ─── Controller ────────────────────────────────────────────────────────────────
@@ -145,6 +151,30 @@ class ProjectController(
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): List<ProjectAssignmentItem> = projectService.listAssignments(id, principal)
 
+    /**
+     * Unified audit history for a project: the project's own audit rows, plus
+     * everything logged against its activities and their records. The History
+     * tab in the workspace renders this directly.
+     */
+    @GetMapping("/{id}/history")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.READ.OWN')")
+    fun history(
+        @PathVariable id: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): List<ProjectHistoryEntry> = projectService.history(id, principal)
+
+    /**
+     * Returns the next serial number for a Project ID prefix (see
+     * [ProjectService.nextSerial]). Used by the create-project wizard to
+     * auto-fill the last segment of the Project ID as the user picks
+     * zone / plan head / year.
+     */
+    @GetMapping("/next-serial")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.CREATE')")
+    fun nextSerial(
+        @org.springframework.web.bind.annotation.RequestParam prefix: String,
+    ): NextSerialResponse = NextSerialResponse(projectService.nextSerial(prefix))
+
     // ── Write ─────────────────────────────────────────────────────────────────
 
     /**
@@ -215,4 +245,17 @@ class ProjectController(
         @RequestBody request: DesignateNodalRequest,
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): ProjectDetailResponse = projectService.designateNodal(id, request, principal)
+
+    /**
+     * CAO/C designates which of the assigned CE/Cs is primary.
+     *
+     * Does not advance the workflow — the project's lifecycle state is unchanged.
+     */
+    @PostMapping("/{id}/designate-primary-ce")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.DESIGNATE_PRIMARY_CE')")
+    fun designatePrimaryCe(
+        @PathVariable id: UUID,
+        @RequestBody request: DesignatePrimaryCeRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): ProjectDetailResponse = projectService.designatePrimaryCe(id, request, principal)
 }

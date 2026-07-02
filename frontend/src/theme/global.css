@@ -104,3 +104,47 @@ button {
     display: none !important;
   }
 }
+
+/* Record edit form (RJSF) — antd's default Form.Item spacing (24px bottom
+ * margin, generous label padding) makes long forms scroll far more than
+ * necessary. Tighten it up so more fields fit on screen at once. */
+.pia-rjsf-form .ant-form-item {
+  margin-bottom: 8px;
+}
+.pia-rjsf-form .ant-form-item-label {
+  padding-bottom: 2px;
+}
+.pia-rjsf-form .ant-form-item-label > label {
+  height: auto;
+  line-height: 1.3;
+}
+.pia-rjsf-form .ant-form-item-explain,
+.pia-rjsf-form .ant-form-item-extra {
+  min-height: 0;
+  font-size: 11px;
+}
+
+/* Record edit view: separator under the record heading, matching the detail
+ * view (which has a divider between the record title and its data). */
+.pia-record-edit-header {
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+/* Record detail Descriptions (bordered, 2-column) render as one continuous
+ * HTML table by default, so adjacent field-pairs in the same row (e.g.
+ * "Created" | "Last updated") touch with no visible gap. border-spacing is
+ * ignored under border-collapse, so fake the gap with a transparent border
+ * between logical column-pairs instead. */
+.ant-descriptions-bordered .ant-descriptions-view table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.ant-descriptions-bordered .ant-descriptions-item-label,
+.ant-descriptions-bordered .ant-descriptions-item-content {
+  position: relative;
+}
+.ant-descriptions-bordered .ant-descriptions-row > .ant-descriptions-item-label:not(:first-child) {
+  border-left: 10px solid var(--ant-color-bg-layout);
+}

@@ -41,11 +41,19 @@ function Root() {
           hashed: false,
           components: {
             Layout: {
-              // Make the Sider and its collapse trigger follow the active theme
-              // instead of hardcoding a dark background.
-              siderBg:      palette.colorBgContainer,
-              triggerBg:    palette.colorBgContainer,
-              triggerColor: palette.colorText,
+              // Sider + collapse trigger use the IRPSM blue chrome.
+              siderBg:      '#1047ae',
+              triggerBg:    '#0d3a90',
+              triggerColor: '#ffffff',
+            },
+            Menu: {
+              // Dark sidebar menu on the #1047ae Sider.
+              darkItemBg:            '#1047ae',
+              darkSubMenuItemBg:     '#0d3a90',
+              darkItemSelectedBg:    '#2a63d6',
+              darkItemHoverBg:       '#1a54c4',
+              darkItemColor:         'rgba(255,255,255,0.85)',
+              darkItemSelectedColor: '#ffffff',
             },
           },
         }}

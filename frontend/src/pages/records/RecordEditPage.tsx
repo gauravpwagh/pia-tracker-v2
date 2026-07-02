@@ -50,6 +50,7 @@ import {
   Col,
   Divider,
   Flex,
+  Popconfirm,
   Row,
   Space,
   Spin,
@@ -60,6 +61,7 @@ import {
 import {
   CheckOutlined,
   CloseOutlined,
+  FileTextOutlined,
   LeftOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -134,7 +136,7 @@ const STATE_COLORS: Record<string, string> = {
 const STATE_LABELS: Record<string, string> = {
   DRAFT:                        'Draft',
   SUBMITTED_FOR_VERIFICATION:   'Pending Nodal Verification',
-  VERIFIED:                     'Pending CE/C Authentication',
+  VERIFIED:                     'Verified',
   AUTHENTICATED:                'Authenticated',
   SENT_BACK_TO_DYCE:            'Sent Back to Dy CE/C',
   SENT_BACK_TO_NODAL:           'Sent Back to Nodal Dy CE/C',
@@ -207,7 +209,7 @@ function SectionSteps({ sectionCodes, activeSection, onSelect, sectionStates, fo
   if (sectionCodes.length === 0) return null;
 
   return (
-    <div style={{ padding: '20px 16px' }}>
+    <div style={{ padding: '12px 16px' }}>
       {sectionCodes.map((code, idx) => {
         const inst   = sectionStates[code];
         const status = sectionStepStatus(code, activeSection, inst, formData);
@@ -220,24 +222,24 @@ function SectionSteps({ sectionCodes, activeSection, onSelect, sectionStates, fo
             <div
               role="button"
               onClick={() => onSelect(code)}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', width: '100%' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: '100%' }}
             >
               {/* Circle icon */}
               <div style={{
-                width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+                width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
                 background: colors.bg,
                 border: `2px solid ${colors.border}`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                {status === 'finish' && <CheckOutlined style={{ fontSize: 11, color: colors.color }} />}
-                {status === 'error'  && <CloseOutlined style={{ fontSize: 11, color: colors.color }} />}
+                {status === 'finish' && <CheckOutlined style={{ fontSize: 10, color: colors.color }} />}
+                {status === 'error'  && <CloseOutlined style={{ fontSize: 10, color: colors.color }} />}
                 {status === 'process' && (
-                  <span style={{ fontSize: 11, fontWeight: 700, color: colors.color, lineHeight: 1 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: colors.color, lineHeight: 1 }}>
                     {idx + 1}
                   </span>
                 )}
                 {status === 'wait' && (
-                  <span style={{ fontSize: 11, color: colors.color, lineHeight: 1 }}>
+                  <span style={{ fontSize: 10, color: colors.color, lineHeight: 1 }}>
                     {idx + 1}
                   </span>
                 )}
@@ -259,11 +261,11 @@ function SectionSteps({ sectionCodes, activeSection, onSelect, sectionStates, fo
             {!isLast && (
               <div style={{
                 width: 2,
-                height: 20,
+                height: 8,
                 background: status === 'finish' ? '#52c41a' : '#f0f0f0',
-                marginLeft: 11,
-                marginTop: 2,
-                marginBottom: 2,
+                marginLeft: 9,
+                marginTop: 1,
+                marginBottom: 1,
               }} />
             )}
           </div>
@@ -415,15 +417,19 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
     <>
       <Space>
         {canSubmit && (
-          <Tooltip title={t('record.actions.submitTooltip')}>
-            <Button
-              type="primary"
-              loading={loading}
-              onClick={() => onAction('submit')}
-            >
-              {t('record.actions.submitSection')}
-            </Button>
-          </Tooltip>
+          <Popconfirm
+            title="Submit for verification?"
+            description="Once submitted, this section is locked for verification."
+            okText="Submit"
+            cancelText="Cancel"
+            onConfirm={() => onAction('submit')}
+          >
+            <Tooltip title={t('record.actions.submitTooltip')}>
+              <Button type="primary" loading={loading}>
+                {t('record.actions.submitSection')}
+              </Button>
+            </Tooltip>
+          </Popconfirm>
         )}
         {canResubmit && (
           <Button loading={loading} onClick={() => onAction('resubmit')}>
@@ -431,15 +437,19 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
           </Button>
         )}
         {canVerify && (
-          <Tooltip title={t('record.actions.verifyTooltip')}>
-            <Button
-              type="primary"
-              loading={loading}
-              onClick={() => onAction('verify')}
-            >
-              {t('record.actions.verify')}
-            </Button>
-          </Tooltip>
+          <Popconfirm
+            title="Verify this section?"
+            description="Confirm the data is correct before verifying."
+            okText="Verify"
+            cancelText="Cancel"
+            onConfirm={() => onAction('verify')}
+          >
+            <Tooltip title={t('record.actions.verifyTooltip')}>
+              <Button type="primary" loading={loading}>
+                {t('record.actions.verify')}
+              </Button>
+            </Tooltip>
+          </Popconfirm>
         )}
         {canReVerify && (
           <Button loading={loading} onClick={() => onAction('re-verify')}>
@@ -447,15 +457,19 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
           </Button>
         )}
         {canAuth && (
-          <Tooltip title={t('record.actions.authenticateTooltip')}>
-            <Button
-              type="primary"
-              loading={loading}
-              onClick={() => onAction('authenticate')}
-            >
-              {t('record.actions.authenticate')}
-            </Button>
-          </Tooltip>
+          <Popconfirm
+            title="Authenticate this section?"
+            description="Authentication is final — confirm the data is correct."
+            okText="Authenticate"
+            cancelText="Cancel"
+            onConfirm={() => onAction('authenticate')}
+          >
+            <Tooltip title={t('record.actions.authenticateTooltip')}>
+              <Button type="primary" loading={loading}>
+                {t('record.actions.authenticate')}
+              </Button>
+            </Tooltip>
+          </Popconfirm>
         )}
         {canSendBack && (
           <Tooltip title={t('record.actions.sendBackTooltip')}>
@@ -523,11 +537,39 @@ function filterUsSchema(
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+/**
+ * Thin routed wrapper — reads the URL params and renders the shared editor in
+ * full-page layout.  All editor logic lives in <RecordEditor/> so it can also
+ * be embedded inline (e.g. inside the project workspace record pane).
+ */
 export default function RecordEditPage() {
   const { recordId } = useParams<{ recordId: string }>();
   const navigate = useNavigate();
   const { state: routeState } = useLocation();
   const returnPath: string = (routeState as { returnPath?: string } | null)?.returnPath ?? '/projects';
+  if (!recordId) return null;
+  // key={recordId} forces a full remount when navigating from one record straight
+  // to another (e.g. clicking a different Inbox item) — otherwise React Router
+  // keeps the same RecordEditor instance alive and its internal state (formData,
+  // active section, etc.) doesn't reset, so the page keeps showing the old record.
+  return <RecordEditor key={recordId} recordId={recordId} layout="page" onBack={() => navigate(returnPath)} />;
+}
+
+export interface RecordEditorProps {
+  recordId: string;
+  /** 'page' = full-viewport routed page; 'inline' = fits inside a pane. */
+  layout?: 'page' | 'inline';
+  /** Called by the Back button. */
+  onBack?: () => void;
+  /** Renders the form fields disabled and hides the Save-draft button — for
+   * viewing a Verified/Authenticated record's data without editing it. Workflow
+   * actions (e.g. Authenticate) stay visible, since that's exactly how a CE/C
+   * reviews the fields before authenticating. */
+  readOnly?: boolean;
+}
+
+export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = false }: RecordEditorProps) {
+  const inline = layout === 'inline';
   const { t } = useTranslation(['forms', 'common']);
   const queryClient = useQueryClient();
 
@@ -540,7 +582,7 @@ export default function RecordEditPage() {
     refetch: refetchRecord,
   } = useQuery({
     queryKey: ['record', recordId],
-    queryFn: () => fetchRecord(recordId!),
+    queryFn: () => fetchRecord(recordId),
     enabled: !!recordId,
   });
 
@@ -569,7 +611,7 @@ export default function RecordEditPage() {
 
   const { data: workflowState } = useQuery({
     queryKey: ['workflow', recordId],
-    queryFn: () => fetchWorkflowState(recordId!),
+    queryFn: () => fetchWorkflowState(recordId),
     enabled: !!recordId,
     refetchOnWindowFocus: false,
   });
@@ -667,7 +709,7 @@ export default function RecordEditPage() {
           : (typeCode === 'LAND_ACQUISITION' || typeCode === 'FOREST_CLEARANCE')
           ? ((formDataRef.current.acquisition_details as Record<string, unknown> | undefined)?.record_name as string | undefined)
           : (formDataRef.current.record_name as string | undefined);
-      await patchRecord(recordId!, formDataRef.current, recordName || undefined);
+      await patchRecord(recordId, formDataRef.current, recordName || undefined);
     }, [recordId, formDef?.activityTypeCode]),
   });
 
@@ -707,7 +749,7 @@ export default function RecordEditPage() {
       action: WorkflowActionCode;
       comment?: string;
     }) =>
-      performWorkflowAction(recordId!, action, {
+      performWorkflowAction(recordId, action, {
         sectionCode: activeSectionResolved || null,
         comment: comment ?? null,
       }),
@@ -719,6 +761,11 @@ export default function RecordEditPage() {
       // Refresh comments panel (send-back auto-creates a comment) and history tab
       void queryClient.invalidateQueries({ queryKey: ['comments', 'ACTIVITY_RECORD', recordId] });
       void queryClient.invalidateQueries({ queryKey: ['recordHistory', recordId] });
+      // The record-list badge (activity pane's left list) and Overview stats
+      // both read from these caches — invalidate so the state change shows
+      // immediately instead of only after something else triggers a refetch.
+      if (record) void queryClient.invalidateQueries({ queryKey: ['records', record.projectActivityId] });
+      void queryClient.invalidateQueries({ queryKey: ['activities'] });
     },
   });
 
@@ -814,47 +861,91 @@ export default function RecordEditPage() {
   // ── Bottom bar height (used for scroll padding) ──────────────────────────
   const BOTTOM_BAR_H = 56;
 
+  // Centre content — the RJSF form (or the drawing custom panels). Shared by both layouts.
+  const centreContent =
+    activeSectionResolved === 'approvals' ? (
+      <DrawingApproversPanel
+        recordId={recordId}
+        canEdit={activeSectionState?.isTerminal !== true}
+        recordCreatedAt={record?.createdAt}
+      />
+    ) : activeSectionResolved === 'observations' ? (
+      <DrawingObservationsPanel
+        recordId={recordId}
+        observations={
+          Array.isArray((record?.dataJson as Record<string, unknown> | undefined)?.observations)
+            ? ((record.dataJson as Record<string, unknown>).observations as DrawingObservation[])
+            : []
+        }
+        canEdit={activeSectionState?.isTerminal !== true}
+      />
+    ) : (
+      <RjsfForm
+        ref={formRef}
+        schema={(effectiveSchema ?? sectionSchema) as RJSFSchema}
+        uiSchema={sectionUiSchema}
+        formData={
+          hasSections && activeSectionResolved
+            ? ((formData[activeSectionResolved] ?? {}) as Record<string, unknown>)
+            : formData
+        }
+        onChange={handleFormChange}
+        formContext={{ entityType: 'ACTIVITY_RECORD', entityId: recordId }}
+        disabled={readOnly || autosaveStatus === 'conflict' || activeSectionState?.isTerminal === true}
+      />
+    );
+
   return (
-    // Outer shell: full viewport height, flex column so header + body + bar
-    // stack without overflow.  No padding — each zone controls its own.
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+    // Outer shell: page = full viewport; inline = fills the host pane.
+    <div style={{ display: 'flex', flexDirection: 'column', height: inline ? '100%' : '100vh', overflow: 'hidden' }}>
 
       {/* ── Header (fixed height, never scrolls) ── */}
-      <div style={{ flexShrink: 0, padding: '12px 24px 0', borderBottom: '1px solid var(--colorBorder)', background: 'var(--colorBgContainer)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <Button
-            size="small"
-            icon={<LeftOutlined />}
-            onClick={() => navigate(returnPath)}
-          >
-            {returnPath === '/inbox' ? 'Inbox' : 'Projects'}
-          </Button>
-        </div>
-        <Breadcrumb
-          items={[
-            {
-              title: (
-                <a onClick={() => navigate('/projects')}>
-                  {project?.name ?? t('forms:record.breadcrumb.project')}
-                </a>
-              ),
-            },
-            {
-              title: (
-                <a onClick={() => navigate(returnPath)}>
-                  {activity?.name ?? t('forms:record.breadcrumb.activity')}
-                </a>
-              ),
-            },
-            { title: record.recordSubtype ?? t('forms:record.breadcrumb.record') },
-          ]}
-        />
-        <Flex justify="space-between" align="center" style={{ margin: '6px 0 10px' }}>
-          <Title level={1} style={{ margin: 0, fontSize: 16, fontWeight: 600, lineHeight: '1.5' }}>
-            {activity?.name ?? '—'}
-          </Title>
-          <RecordStateBadge state={record.recordState} />
-        </Flex>
+      <div style={{ flexShrink: 0, padding: inline ? '10px 16px 0' : '12px 24px 0', borderBottom: '1px solid var(--ant-color-border)', background: 'var(--ant-color-bg-container)' }}>
+        {inline ? (
+          <Flex justify="space-between" align="center" style={{ marginBottom: 10, gap: 8 }}>
+            <Space size={8} align="center" style={{ minWidth: 0 }}>
+              <Title level={1} style={{ margin: 0, fontSize: 15, fontWeight: 600, lineHeight: '1.4', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {record.name || activity?.name || record.recordSubtype || 'Record'}
+              </Title>
+            </Space>
+            <Space size={8} align="center">
+              <RecordStateBadge state={record.recordState} />
+              {readOnly && <Tag>View only</Tag>}
+              {onBack && (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<FileTextOutlined />}
+                  onClick={onBack}
+                  style={{ background: '#1565c0', borderColor: '#1565c0' }}
+                >
+                  Details
+                </Button>
+              )}
+            </Space>
+          </Flex>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              {onBack && (
+                <Button size="small" icon={<LeftOutlined />} onClick={onBack}>Back</Button>
+              )}
+            </div>
+            <Breadcrumb
+              items={[
+                { title: project?.name ?? t('forms:record.breadcrumb.project') },
+                { title: <a onClick={onBack}>{activity?.name ?? t('forms:record.breadcrumb.activity')}</a> },
+                { title: record.recordSubtype ?? t('forms:record.breadcrumb.record') },
+              ]}
+            />
+            <Flex justify="space-between" align="center" style={{ margin: '6px 0 10px' }}>
+              <Title level={1} style={{ margin: 0, fontSize: 16, fontWeight: 600, lineHeight: '1.5' }}>
+                {activity?.name ?? '—'}
+              </Title>
+              <RecordStateBadge state={record.recordState} />
+            </Flex>
+          </>
+        )}
 
         {/* Alerts live here so they push content down rather than overlapping */}
         {autosaveStatus === 'conflict' && (
@@ -885,82 +976,48 @@ export default function RecordEditPage() {
 
       {/* ── Scrollable body ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
-        <Row gutter={0} style={{ flex: 1, overflow: 'hidden', margin: 0, width: '100%' }}>
-
-          {/* Left: section progress steps — scrolls independently */}
-          {hasSections && (
-            <Col
-              span={leftColSpan}
-              style={{
-                height: '100%',
-                overflowY: 'auto',
-                borderRight: '1px solid var(--colorBorder)',
-              }}
-            >
-              <SectionSteps
-                sectionCodes={sectionCodes}
-                activeSection={activeSectionResolved}
-                onSelect={setActiveSection}
-                sectionStates={sectionStates}
-                formData={formData}
-              />
-            </Col>
-          )}
-
-          {/* Centre: form (or custom panel for non-RJSF sections) — scrolls independently */}
-          <Col
-            span={centreColSpan}
-            style={{ height: '100%', overflowY: 'auto', padding: '16px 20px' }}
-          >
-            {activeSectionResolved === 'approvals' ? (
-              <DrawingApproversPanel
-                recordId={recordId!}
-                canEdit={activeSectionState?.isTerminal !== true}
-                recordCreatedAt={record?.createdAt}
-              />
-            ) : activeSectionResolved === 'observations' ? (
-              <DrawingObservationsPanel
-                recordId={recordId!}
-                observations={
-                  Array.isArray((record?.dataJson as Record<string, unknown> | undefined)?.observations)
-                    ? ((record!.dataJson as Record<string, unknown>).observations as DrawingObservation[])
-                    : []
-                }
-                canEdit={activeSectionState?.isTerminal !== true}
-              />
-            ) : (
-              <RjsfForm
-                ref={formRef}
-                schema={(effectiveSchema ?? sectionSchema) as RJSFSchema}
-                uiSchema={sectionUiSchema}
-                formData={
-                  hasSections && activeSectionResolved
-                    ? ((formData[activeSectionResolved] ?? {}) as Record<string, unknown>)
-                    : formData
-                }
-                onChange={handleFormChange}
-                formContext={{ entityType: 'ACTIVITY_RECORD', entityId: recordId ?? '' }}
-                disabled={
-                  autosaveStatus === 'conflict' ||
-                  activeSectionState?.isTerminal === true
-                }
-              />
+        {inline ? (
+          /* Inline: sections as a vertical left nav (matches the standalone edit page), form fills the rest. */
+          <div style={{ flex: 1, display: 'flex', minWidth: 0 }}>
+            {hasSections && (
+              <div style={{ width: 180, flexShrink: 0, height: '100%', overflowY: 'auto', borderRight: '1px solid var(--ant-color-border)' }}>
+                <SectionSteps
+                  sectionCodes={sectionCodes}
+                  activeSection={activeSectionResolved}
+                  onSelect={setActiveSection}
+                  sectionStates={sectionStates}
+                  formData={formData}
+                />
+              </div>
             )}
-          </Col>
-
-          {/* Right: comments / history / workflow — scrolls independently */}
-          <Col
-            span={rightColSpan}
-            style={{
-              height: '100%',
-              overflowY: 'auto',
-              borderLeft: '1px solid var(--colorBorder)',
-              padding: '8px 12px',
-            }}
-          >
-            <RightPanel activeSectionState={activeSectionState} recordId={recordId!} />
-          </Col>
-        </Row>
+            <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '14px 16px' }}>
+              {centreContent}
+            </div>
+          </div>
+        ) : (
+          <Row gutter={0} style={{ flex: 1, overflow: 'hidden', margin: 0, width: '100%' }}>
+            {/* Left: section progress steps — scrolls independently */}
+            {hasSections && (
+              <Col span={leftColSpan} style={{ height: '100%', overflowY: 'auto', borderRight: '1px solid var(--ant-color-border)' }}>
+                <SectionSteps
+                  sectionCodes={sectionCodes}
+                  activeSection={activeSectionResolved}
+                  onSelect={setActiveSection}
+                  sectionStates={sectionStates}
+                  formData={formData}
+                />
+              </Col>
+            )}
+            {/* Centre: form (or custom panel for non-RJSF sections) — scrolls independently */}
+            <Col span={centreColSpan} style={{ height: '100%', overflowY: 'auto', padding: '16px 20px' }}>
+              {centreContent}
+            </Col>
+            {/* Right: comments / history / workflow — scrolls independently */}
+            <Col span={rightColSpan} style={{ height: '100%', overflowY: 'auto', borderLeft: '1px solid var(--ant-color-border)', padding: '8px 12px' }}>
+              <RightPanel activeSectionState={activeSectionState} recordId={recordId} />
+            </Col>
+          </Row>
+        )}
       </div>
 
       {/* ── Bottom action bar (always visible, never overlaps content) ── */}
@@ -972,8 +1029,8 @@ export default function RecordEditPage() {
           display: 'flex',
           alignItems: 'center',
           gap: 12,
-          background: 'var(--colorBgContainer)',
-          borderTop: '1px solid var(--colorBorder)',
+          background: 'var(--ant-color-bg-container)',
+          borderTop: '1px solid var(--ant-color-border)',
         }}
       >
         {/* Back — hidden on first section */}
@@ -983,14 +1040,16 @@ export default function RecordEditPage() {
           </Button>
         )}
 
-        {/* Save draft — always present */}
-        <Button
-          onClick={() => void saveNow()}
-          disabled={autosaveStatus === 'saving' || autosaveStatus === 'conflict'}
-          loading={autosaveStatus === 'saving'}
-        >
-          {t('forms:record.actions.saveDraft')}
-        </Button>
+        {/* Save draft — hidden in read-only (view data) mode */}
+        {!readOnly && (
+          <Button
+            onClick={() => void saveNow()}
+            disabled={autosaveStatus === 'saving' || autosaveStatus === 'conflict'}
+            loading={autosaveStatus === 'saving'}
+          >
+            {t('forms:record.actions.saveDraft')}
+          </Button>
+        )}
 
         {/* Next — all sections except last */}
         {hasSections && !isLastSection && (
@@ -999,7 +1058,9 @@ export default function RecordEditPage() {
           </Button>
         )}
 
-        {/* Workflow actions — last section only (or when no sections) */}
+        {/* Workflow actions — last section only (or when no sections). Still shown in
+            read-only ("View Data") mode: that's precisely how a CE/C reviews a
+            Verified record's fields before Authenticating. */}
         {(!hasSections || isLastSection) && (
           <WorkflowActions
             sectionState={activeSectionState}

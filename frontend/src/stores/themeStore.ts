@@ -20,7 +20,7 @@ function detectSystemMode(): ThemeMode {
 export const useThemeStore = create<ThemeStore>()(
   persist(
     (set, get) => ({
-      mode: 'system',
+      mode: 'light',
       setMode: (mode) => set({ mode }),
       effectiveMode: () => {
         const m = get().mode;

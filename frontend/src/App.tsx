@@ -9,7 +9,9 @@ import { useAuthStore } from '@stores/authStore';
 import { HomePage } from '@pages/Home';
 
 const LoginPage    = lazy(() => import('@pages/login/LoginPage'));
+const LoginSearchPage = lazy(() => import('@pages/login/LoginSearchPage'));
 const ProjectsPage = lazy(() => import('@pages/projects/ProjectsPage'));
+const ProjectWorkspace = lazy(() => import('@pages/projects/ProjectWorkspace'));
 const RecordEditPage = lazy(() => import('@pages/records/RecordEditPage'));
 const InboxPage    = lazy(() => import('@pages/inbox/InboxPage'));
 const DashboardPage = lazy(() => import('@pages/dashboard/DashboardPage'));
@@ -50,7 +52,7 @@ function AppShell() {
           collapsible
           breakpoint="lg"
           collapsedWidth={64}
-          style={{ background: 'var(--ant-color-bg-container)', borderRight: '1px solid var(--ant-color-border)' }}
+          style={{ background: '#1047ae', borderRight: 'none' }}
         >
           <Sidebar />
         </Sider>
@@ -91,6 +93,15 @@ export default function App() {
     <Suspense fallback={<Spin style={{ margin: 40 }} />}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/login/search" element={<LoginSearchPage />} />
+        <Route
+          path="/workspace/:projectCode"
+          element={
+            <RequireAuth>
+              <ProjectWorkspace />
+            </RequireAuth>
+          }
+        />
         <Route
           path="/*"
           element={

@@ -97,7 +97,7 @@ function AllocateModal({
     enabled: open,
   });
   const mutation = useMutation({
-    mutationFn: ({ ceUserId }: { ceUserId: string }) => allocateProject(projectId, ceUserId),
+    mutationFn: ({ ceUserId }: { ceUserId: string }) => allocateProject(projectId, [ceUserId]),
     onSuccess: () => { form.resetFields(); onSuccess(); onClose(); },
   });
   return (

@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PIA Tracker — Workspace Mockup</title>
+<style>
+  :root{
+    --bar1:#0d3b8c; --bar2:#1565c0; --side:#1047ae; --side-hover:#1a54c4; --side-sel:#2a63d6;
+    --ink:#1f2937; --muted:#6b7280; --line:#b4c1d4; --line-strong:#94a3b8; --bg:#f4f6fa;
+    --primary:#1565c0; --card:#ffffff; --tabbar-bg:#eaf1fb; --sidew:180px;
+  }
+  *{box-sizing:border-box;font-family:'Segoe UI',Roboto,Arial,sans-serif}
+  body{margin:0;background:var(--bg);color:var(--ink)}
+
+  /* ---------- Top bar ---------- */
+  .topbar{height:56px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 16px;color:#fff;background:linear-gradient(90deg,var(--bar1),var(--bar2))}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand .logo{width:40px;height:40px;border-radius:8px;background:rgba(255,255,255,.15);
+    display:flex;align-items:center;justify-content:center;font-size:20px}
+  .brand .t1{font-size:15px;font-weight:700}
+  .brand .t2{font-size:11px;color:rgba(255,255,255,.75)}
+  .topacts{display:flex;align-items:center;gap:14px}
+  .topacts .ic{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;
+    justify-content:center;cursor:pointer;color:#fff}
+  .topacts .ic:hover{background:rgba(255,255,255,.12)}
+  .user{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:8px;cursor:pointer}
+  .user .av{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.18);
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px}
+  .user .un{font-size:13px;font-weight:600}
+  .user .ud{font-size:11px;color:rgba(255,255,255,.75)}
+
+  /* ---------- Project bar ---------- */
+  .projbar{height:48px;display:flex;align-items:center;background:#fff;
+    border-bottom:2px solid var(--line-strong);box-shadow:0 2px 4px rgba(15,23,42,.06)}
+  .back{width:var(--sidew);height:100%;flex-shrink:0;border:none;border-right:1px solid var(--line);
+    background:#f4f7fb;cursor:pointer;font-size:12px;font-weight:600;color:var(--primary);
+    display:flex;align-items:center;justify-content:center;gap:6px}
+  .back:hover{background:#e7eefb}
+  .projname{font-size:16px;font-weight:700;margin-left:16px}
+  .projmeta{font-size:12px;color:var(--muted)}
+  .spacer{flex:1}
+  .status{margin-right:16px;padding:3px 14px;border-radius:20px;font-size:13px;font-weight:600;
+    background:#dcfce7;color:#166534}
+
+  /* ---------- Shell ---------- */
+  .shell{display:flex;height:calc(100vh - 106px)}
+  .side{width:var(--sidew);flex-shrink:0;background:var(--side);color:#fff;
+    display:flex;flex-direction:column}
+  .side .nav{flex:1;padding:10px 0}
+  .side a{display:flex;align-items:center;gap:10px;padding:11px 16px;color:rgba(255,255,255,.85);
+    font-size:13px;cursor:pointer;border-left:3px solid transparent}
+  .side a:hover{background:var(--side-hover)}
+  .side a.active{background:var(--side-sel);border-left-color:#fff;font-weight:600;color:#fff}
+  .side a .ic{width:16px;text-align:center}
+  .side .collapse{border-top:1px solid rgba(255,255,255,.15);padding:11px 16px;font-size:12px;
+    color:rgba(255,255,255,.8);cursor:pointer}
+  .side .collapse:hover{background:var(--side-hover)}
+
+  .main{flex:1;overflow-y:auto;background:var(--bg)}
+  .view{display:none}
+  .view.active{display:block}
+
+  /* ---------- Tabs ---------- */
+  .tabbar{display:flex;background:var(--tabbar-bg);border-bottom:3px solid var(--line-strong);
+    padding:0 12px;position:sticky;top:0;z-index:2;box-shadow:0 2px 4px rgba(15,23,42,.05);overflow-x:auto}
+  .tab{padding:11px 15px;font-size:13px;cursor:pointer;border-bottom:4px solid transparent;
+    margin-bottom:-3px;color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:7px;position:relative}
+  .tab:not(:first-child)::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:1px;background:var(--line)}
+  .tab:hover{color:var(--ink)}
+  .tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600;background:#fff}
+  .tab .cnt{background:#dbe6fb;color:var(--primary);border-radius:10px;font-size:11px;padding:0 7px}
+  .tab.active .cnt{background:#c7dbff}
+  .tab.add{color:var(--primary);font-weight:600}
+
+  /* ---------- Records pane: header + master-detail ---------- */
+  .panehead{display:flex;align-items:center;gap:14px;padding:14px 20px 12px}
+  .panehead h3{margin:0;font-size:15px}
+  .stats{display:flex;gap:8px;flex:1}
+  .stat{border:1px solid var(--line);border-radius:8px;padding:6px 12px;background:#fff;
+    display:flex;align-items:center;gap:6px;font-size:13px}
+  .stat .l{color:var(--muted)} .stat .n{font-weight:700;font-size:15px}
+  .stat.draft .n{color:#6b7280} .stat.sub .n{color:#1d4ed8} .stat.auth .n{color:#166534}
+
+  .split{display:flex;gap:14px;padding:0 20px 18px;align-items:flex-start}
+  .list{width:450px;flex-shrink:0}
+  .detail{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;background:#fff;
+    min-height:360px;display:flex;flex-direction:column}
+
+  .rec{display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--line);
+    border-radius:8px;margin-bottom:6px;cursor:pointer;background:#fff;transition:border-color .12s,box-shadow .12s}
+  .rec:hover{border-color:var(--primary)}
+  .rec.sel{border-color:var(--primary);border-left:5px solid var(--primary);
+    box-shadow:0 2px 10px rgba(21,101,192,.28);background:#e3effd}
+  .rec.sel .nm{color:var(--primary)}
+  .rec .ricon{width:26px;height:26px;border-radius:6px;background:#eef2ff;color:var(--primary);
+    display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+  .rec .nm{font-weight:600;font-size:13px;line-height:17px}
+  .rec .mt{font-size:11px;color:#8b9aab}
+  .pill{padding:0 11px;border-radius:20px;font-size:12px;font-weight:600;line-height:22px;flex-shrink:0}
+  .pill.draft{background:#f3f4f6;color:#6b7280}
+  .pill.sub{background:#dbeafe;color:#1d4ed8}
+  .pill.auth{background:#dcfce7;color:#166534}
+
+  .btn{border:none;border-radius:6px;padding:7px 15px;font-size:13px;cursor:pointer;font-weight:600}
+  .btn.primary{background:var(--primary);color:#fff}
+  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--ink)}
+  .btn.sm{padding:5px 11px;font-size:12px}
+  .btn.primary:hover{background:#0d4ea3}
+
+  /* detail content */
+  .dhead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .dhead h4{margin:0;font-size:14px;flex:1}
+  .dbody{padding:16px;overflow:auto}
+  .dempty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);gap:6px;text-align:center}
+  .form{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
+  .fld{display:flex;flex-direction:column;gap:5px}
+  .fld.full{grid-column:1/3}
+  .fld label{font-size:12px;font-weight:600;color:#374151}
+  .fld input,.fld select,.fld textarea{border:1px solid var(--line-strong);border-radius:6px;padding:8px 10px;font-size:13px;font-family:inherit}
+  .fld input:focus,.fld select:focus{outline:none;border-color:var(--primary)}
+  .readgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px 20px}
+  .readgrid .g label{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .readgrid .g div{font-size:13px;font-weight:600;margin-top:2px}
+  .dacts{display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--line);padding:12px 16px}
+
+  /* ---------- Overview ---------- */
+  .ovwrap{padding:20px;display:grid;grid-template-columns:2fr 1fr;gap:16px}
+  .box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .box h4{margin:0 0 12px;font-size:14px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;grid-column:1/3}
+  .kbox{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .kbox .n{font-size:24px;font-weight:800;color:var(--primary)}
+  .kbox .l{font-size:12px;color:var(--muted)}
+  table.off{width:100%;border-collapse:collapse;font-size:13px}
+  table.off th,table.off td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
+  table.off th{font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.03em}
+  .bar{height:10px;border-radius:6px;background:#eef2f7;overflow:hidden;margin-top:4px}
+  .bar > span{display:block;height:100%;background:var(--primary)}
+
+  /* ---------- History ---------- */
+  .timeline{padding:20px;max-width:760px}
+  .tl{display:flex;gap:12px;padding-bottom:16px;position:relative}
+  .tl::before{content:"";position:absolute;left:11px;top:22px;bottom:-4px;width:2px;background:var(--line)}
+  .tl:last-child::before{display:none}
+  .tl .dot{width:24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;z-index:1}
+  .tl .c{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 14px;flex:1}
+  .tl .c .t{font-size:13px;font-weight:600}
+  .tl .c .m{font-size:12px;color:var(--muted);margin-top:2px}
+
+  table.logtable{width:100%;border-collapse:collapse;font-size:12px}
+  table.logtable th,table.logtable td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);vertical-align:top}
+  table.logtable th:last-child,table.logtable td:last-child{border-right:none}
+  table.logtable th{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);background:#f6f9fe}
+  table.logtable tbody tr:hover{background:#f8fbff}
+  table.logtable td:first-child{color:var(--muted);white-space:nowrap}
+  .dotact{color:var(--c);font-weight:600;white-space:nowrap}
+
+  .scopecard{margin:0 20px 4px;background:#f0f6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 16px;display:none}
+  .scopecard.open{display:block}
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="brand">
+    <div class="logo">🚆</div>
+    <div><div class="t1">IRPSM : Indian Railways Projects Sanctions &amp; Management</div>
+      <div class="t2">Pre Investment Activities</div></div>
+  </div>
+  <div class="topacts">
+    <div class="ic" title="Home" style="width:auto;gap:6px;padding:0 12px;font-size:13px;font-weight:600">🏠 Home</div><div class="ic" title="Theme">☀️</div><div class="ic" title="Notifications">🔔</div>
+    <div class="user"><div class="av">SM</div><div><div class="un">Sagar M.</div><div class="ud">Admin · CR</div></div><span style="font-size:10px">▾</span></div>
+  </div>
+</div>
+
+<!-- PROJECT BAR -->
+<div class="projbar">
+  <button class="back" onclick="alert('Back to project list')">← Back to Project list</button>
+  <span class="projname">Bhusawal – Khandwa 3rd Line</span>
+  <span class="projmeta"> &nbsp;·&nbsp; NL · 132 km · Central Railway</span>
+  <div class="spacer"></div>
+  <span class="status">● Active</span>
+</div>
+
+<!-- SHELL -->
+<div class="shell">
+  <div class="side">
+    <div class="nav">
+      <a onclick="nav('overview',this)"><span class="ic">▤</span> Overview</a>
+      <a class="active" onclick="nav('records',this)"><span class="ic">📋</span> Records</a>
+      <a onclick="nav('history',this)"><span class="ic">🕘</span> History</a>
+      <a onclick="alert('Map — to be linked later')"><span class="ic">🗺️</span> Map</a>
+    </div>
+    <div class="collapse">«  Collapse</div>
+  </div>
+
+  <div class="main">
+    <!-- ===== RECORDS VIEW ===== -->
+    <div id="v-records" class="view active">
+      <div id="tabbar" class="tabbar"></div>
+
+      <div class="panehead">
+        <h3 id="paneTitle">Land Acquisition</h3>
+        <div class="stats">
+          <div class="stat total"><span class="l">Total :</span><span class="n" id="kTotal">0</span></div>
+          <div class="stat draft"><span class="l">Draft :</span><span class="n" id="kDraft">0</span></div>
+          <div class="stat sub"><span class="l">Submitted :</span><span class="n" id="kSub">0</span></div>
+          <div class="stat auth"><span class="l">Authenticated :</span><span class="n" id="kAuth">0</span></div>
+        </div>
+        <button class="btn ghost sm" onclick="toggleScope()">✎ Scope details</button>
+        <button class="btn primary" onclick="addRecord()">＋ Add Record</button>
+      </div>
+
+      <!-- Inline scope editor (the fields the Add-Activity popup used to ask) -->
+      <div id="scopecard" class="scopecard">
+        <div style="display:flex;align-items:center;margin-bottom:10px">
+          <div style="font-weight:600;flex:1">Activity scope — <span id="scopeAct">Land Acquisition</span></div>
+          <span onclick="toggleScope()" title="Close" style="cursor:pointer;font-size:16px;color:var(--muted);line-height:1;padding:2px 6px">✕</span>
+        </div>
+        <div class="form">
+          <div class="fld"><label>Scope / section</label><input value="Km 0 – 45, Bhusawal end"></div>
+          <div class="fld"><label>Chainage from → to (km)</label><input value="0 → 45"></div>
+          <div class="fld"><label>Target completion</label><input type="date"></div>
+          <div class="fld"><label>Priority</label><select><option>Normal</option><option>High</option></select></div>
+          <div class="fld full"><label>Scope notes</label><textarea rows="2">3rd line land acquisition for the Bhusawal end section.</textarea></div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+          <button class="btn ghost sm" onclick="toggleScope()">Cancel</button>
+          <button class="btn primary sm" onclick="toggleScope()">Save scope</button>
+        </div>
+      </div>
+
+      <!-- Record filters (labels on the left, separated) -->
+      <div style="display:flex;align-items:center;gap:16px;padding:0 20px 12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Search</label>
+          <input id="fSearch" oninput="renderList()" placeholder="Search records…"
+            style="width:240px;border:1px solid var(--line-strong);border-radius:6px;padding:7px 10px;font-size:10px">
+        </div>
+        <div style="width:1px;align-self:stretch;background:var(--line);margin:2px 0"></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:12px;font-weight:600;color:var(--muted)">Status</label>
+          <select id="fStatus" onchange="renderList()"
+            style="width:160px;border:1px solid var(--line-strong);border-radius:6px;padding:7px 10px;font-size:10px">
+            <option value="all">All</option><option value="draft">Draft</option>
+            <option value="sub">Submitted</option><option value="auth">Authenticated</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="split">
+        <div id="list" class="list"></div>
+        <div id="detail" class="detail">
+          <div class="dempty"><div style="font-size:30px">🗂️</div>
+            <div>Select a record to view its details,<br>or click <b>＋ Add Record</b> to create one.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== OVERVIEW VIEW ===== -->
+    <div id="v-overview" class="view">
+      <div class="ovwrap">
+        <div class="kpis">
+          <div class="kbox"><div class="n">6</div><div class="l">Activities</div></div>
+          <div class="kbox"><div class="n">14</div><div class="l">Total records</div></div>
+          <div class="kbox"><div class="n">5</div><div class="l">Authenticated</div></div>
+          <div class="kbox"><div class="n">62%</div><div class="l">Overall progress</div></div>
+        </div>
+        <div class="box">
+          <h4>Activity progress</h4>
+          <div style="font-size:12px">Land Acquisition <span style="float:right;color:var(--muted)">3/6</span><div class="bar"><span style="width:50%"></span></div></div>
+          <div style="font-size:12px;margin-top:10px">Utility Shifting <span style="float:right;color:var(--muted)">1/4</span><div class="bar"><span style="width:25%"></span></div></div>
+          <div style="font-size:12px;margin-top:10px">Forest Clearance <span style="float:right;color:var(--muted)">1/1</span><div class="bar"><span style="width:100%"></span></div></div>
+          <div style="font-size:12px;margin-top:10px">Drawing Approval <span style="float:right;color:var(--muted)">2/5</span><div class="bar"><span style="width:40%"></span></div></div>
+        </div>
+        <div class="box">
+          <h4>Designated officers</h4>
+          <table class="off">
+            <tr><th>Role</th><th>Officer</th></tr>
+            <tr><td>CE / C (in-charge)</td><td>R. Iyer</td></tr>
+            <tr><td>Dy.CE / C – Land</td><td>S. Deshmukh</td></tr>
+            <tr><td>Dy.CE / C – Utility</td><td>A. Khan</td></tr>
+            <tr><td>Nodal (Design)</td><td>P. Rao</td></tr>
+          </table>
+        </div>
+        <div class="box" style="grid-column:1/3">
+          <h4>Project details</h4>
+          <div class="readgrid">
+            <div class="g"><label>Project type</label><div>New Line</div></div>
+            <div class="g"><label>Length</label><div>132 km</div></div>
+            <div class="g"><label>Zone / Division</label><div>Central Railway · Bhusawal</div></div>
+            <div class="g"><label>IPA date</label><div>12 Mar 2026</div></div>
+            <div class="g"><label>Target completion</label><div>2029</div></div>
+            <div class="g"><label>Lifecycle</label><div>Active</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== HISTORY VIEW ===== -->
+    <div id="v-history" class="view">
+      <div style="padding:20px">
+        <div class="box" style="padding:0;overflow:hidden">
+          <table class="logtable">
+            <thead><tr>
+              <th style="width:160px">Date &amp; Time</th>
+              <th style="width:150px">Officer</th>
+              <th style="width:130px">Role</th>
+              <th style="width:150px">Action</th>
+              <th>Details</th>
+              <th style="width:150px">State change</th>
+              <th>Remarks</th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td>01 Jul 2026, 03:52 pm</td><td>Anita Sharma</td><td>Dy.CE/C — Land</td>
+                <td><span class="dotact" style="--c:#0e7c66">● Data entry</span></td>
+                <td>Land Acquisition — ABC-XHZ</td><td>— → Draft</td><td>New record created</td>
+              </tr>
+              <tr>
+                <td>01 Jul 2026, 02:10 pm</td><td>Anita Sharma</td><td>Dy.CE/C — Land</td>
+                <td><span class="dotact" style="--c:#1d4ed8">● Submitted</span></td>
+                <td>Land Acquisition — Village Waghoda</td><td>Draft → Submitted</td><td>Sent for verification</td>
+              </tr>
+              <tr>
+                <td>30 Jun 2026, 05:40 pm</td><td>R. Iyer</td><td>CE/C (in-charge)</td>
+                <td><span class="dotact" style="--c:#166534">● Authenticated</span></td>
+                <td>Land Acquisition — Village Sakri</td><td>Verified → Authenticated</td><td>Approved with award ref. 214/2</td>
+              </tr>
+              <tr>
+                <td>30 Jun 2026, 11:05 am</td><td>R. Iyer</td><td>CE/C (in-charge)</td>
+                <td><span class="dotact" style="--c:#d97706">● Sent back</span></td>
+                <td>Utility Shifting — MSEDCL 220kV</td><td>Submitted → Sent back</td><td>Estimate mismatch, revise chainage</td>
+              </tr>
+              <tr>
+                <td>29 Jun 2026, 04:22 pm</td><td>A. Khan</td><td>Dy.CE/C — Utility</td>
+                <td><span class="dotact" style="--c:#6b21a8">● Activity added</span></td>
+                <td>Utility Shifting</td><td>—</td><td>Scope: Km 0–45</td>
+              </tr>
+              <tr>
+                <td>28 Jun 2026, 09:15 am</td><td>EDGS (RB)</td><td>EDGS — Railway Board</td>
+                <td><span class="dotact" style="--c:#0d3b8c">● Project activated</span></td>
+                <td>Bhusawal – Khandwa 3rd Line</td><td>Draft → Active</td><td>Sanctioned in Pink Book</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---- demo data: all six activities ----
+  const ACT = [
+    {id:'la', icon:'📍', name:'Land Acquisition', records:[
+      {name:'Village Sakri — Survey 214/2', meta:'2.4 ha · Sec 3A', state:'auth'},
+      {name:'Village Waghoda — Survey 88', meta:'1.1 ha · Sec 3D', state:'sub'},
+      {name:'Village Nimbhora — Survey 305', meta:'0.8 ha · draft', state:'draft'},
+    ]},
+    {id:'util', icon:'🔧', name:'Utility Shifting', records:[
+      {name:'MSEDCL 220kV line — km 12.3', meta:'Estimate awaited', state:'sub'},
+      {name:'Water main (MJP) — km 4.0', meta:'draft', state:'draft'},
+    ]},
+    {id:'forest', icon:'🌳', name:'Forest Clearance', records:[
+      {name:'Yawal RF — 3.2 ha', meta:'Stage-I', state:'sub'},
+    ]},
+    {id:'draw', icon:'📐', name:'Drawing Approval', records:[
+      {name:'GAD Minor Bridge — km 22', meta:'Under review', state:'sub'},
+      {name:'ESP Km 132–145', meta:'Authenticated', state:'auth'},
+    ]},
+    {id:'tender', icon:'🧾', name:'Tender Packaging', records:[
+      {name:'Package P-1 (Earthwork)', meta:'draft', state:'draft'},
+    ]},
+    {id:'office', icon:'🏢', name:'Office Space', records:[]},
+  ];
+  const STLABEL={draft:'Draft',sub:'Submitted',auth:'Authenticated'};
+  let curId='la', selIdx=null;
+
+  function cur(){return ACT.find(a=>a.id===curId);}
+
+  function renderTabs(){
+    const el=document.getElementById('tabbar');
+    el.innerHTML = ACT.map(a=>`<div class="tab ${a.id===curId?'active':''}" onclick="switchTab('${a.id}')">
+        <span>${a.icon}</span>${a.name}<span class="cnt">${a.records.length}</span></div>`).join('');
+  }
+  function renderKpis(){
+    const r=cur().records;
+    document.getElementById('kTotal').textContent=r.length;
+    document.getElementById('kDraft').textContent=r.filter(x=>x.state==='draft').length;
+    document.getElementById('kSub').textContent=r.filter(x=>x.state==='sub').length;
+    document.getElementById('kAuth').textContent=r.filter(x=>x.state==='auth').length;
+    document.getElementById('paneTitle').textContent=cur().name;
+    document.getElementById('scopeAct').textContent=cur().name;
+  }
+  function renderList(){
+    const el=document.getElementById('list');
+    const r=cur().records;
+    if(!r.length){el.innerHTML='<div style="color:var(--muted);font-size:13px;padding:16px">No records yet.</div>';return;}
+    const q=(document.getElementById('fSearch')?.value||'').toLowerCase();
+    const st=document.getElementById('fStatus')?.value||'all';
+    const rows=r.map((x,i)=>{
+      if(q && !x.name.toLowerCase().includes(q)) return '';
+      if(st!=='all' && x.state!==st) return '';
+      return `<div class="rec ${i===selIdx?'sel':''}" onclick="selectRec(${i})">
+        <div class="ricon">📄</div>
+        <div style="flex:1"><div class="nm">${x.name}</div><div class="mt">${x.meta}</div></div>
+        <span class="pill ${x.state}">${STLABEL[x.state]}</span></div>`;
+    }).join('');
+    el.innerHTML = rows || '<div style="color:var(--muted);font-size:13px;padding:16px">No records match the filters.</div>';
+    return;
+  }
+  function selectRec(i){
+    selIdx=i; renderList();
+    const x=cur().records[i];
+    document.getElementById('detail').innerHTML=`
+      <div class="dhead"><h4>${x.name}</h4><span class="pill ${x.state}">${STLABEL[x.state]}</span></div>
+      <div class="dbody"><div class="readgrid">
+        <div class="g"><label>Record</label><div>${x.name}</div></div>
+        <div class="g"><label>Details</label><div>${x.meta}</div></div>
+        <div class="g"><label>State</label><div>${STLABEL[x.state]}</div></div>
+        <div class="g"><label>Updated</label><div>recently</div></div>
+      </div></div>
+      <div class="dacts"><button class="btn ghost">Edit</button><button class="btn primary">Open full form</button></div>`;
+  }
+  function addRecord(){
+    selIdx=null; renderList();
+    document.getElementById('detail').innerHTML=`
+      <div class="dhead"><h4>New ${cur().name} record</h4><span class="pill draft">Draft</span></div>
+      <div class="dbody"><div class="form">
+        <div class="fld"><label>Record name</label><input id="nr_name" placeholder="e.g. Sakri Village"></div>
+        <div class="fld"><label>Reference / survey no.</label><input placeholder="214/2"></div>
+        <div class="fld"><label>Area / extent</label><input placeholder="2.4 ha"></div>
+        <div class="fld"><label>Stage</label><select><option>Sec 3A</option><option>Sec 3D</option></select></div>
+        <div class="fld full"><label>Remarks</label><textarea rows="3"></textarea></div>
+      </div></div>
+      <div class="dacts">
+        <button class="btn ghost" onclick="selIdx=null;renderList();clearDetail()">Cancel</button>
+        <button class="btn primary" onclick="saveDraft()">Save draft</button>
+      </div>`;
+  }
+  function saveDraft(){
+    const nm=(document.getElementById('nr_name').value||'Untitled record').trim();
+    cur().records.unshift({name:nm, meta:'draft · just now', state:'draft'});  // added to TOP
+    renderTabs(); renderKpis(); selectRec(0);   // new draft selected & shown in detail
+  }
+  function clearDetail(){document.getElementById('detail').innerHTML=
+    '<div class="dempty"><div style="font-size:30px">🗂️</div><div>Select a record, or click <b>＋ Add Record</b>.</div></div>';}
+  function switchTab(id){curId=id;selIdx=null;renderTabs();renderKpis();renderList();clearDetail();
+    document.getElementById('scopecard').classList.remove('open');}
+  function toggleScope(){document.getElementById('scopecard').classList.toggle('open');}
+  function nav(view,el){
+    document.querySelectorAll('.side a').forEach(a=>a.classList.remove('active'));
+    if(el) el.classList.add('active');
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    document.getElementById('v-'+view).classList.add('active');
+  }
+  // init
+  renderTabs();renderKpis();renderList();
+</script>
+</body>
+</html>

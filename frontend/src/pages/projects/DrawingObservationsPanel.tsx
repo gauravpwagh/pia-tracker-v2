@@ -17,6 +17,7 @@ import {
   Button,
   DatePicker,
   Descriptions,
+  Divider,
   Form,
   Input,
   Modal,
@@ -150,7 +151,23 @@ export function DrawingObservationsPanel({ recordId, observations, canEdit }: Pr
   if (approversQuery.isLoading) return <Skeleton active paragraph={{ rows: 1 }} />;
 
   return (
-    <div style={{ marginTop: 8 }}>
+    <div>
+      {/* Section heading + Add button on one full-width row (the button sits
+          beside the title, not below the list). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+        <Divider
+          orientation="left"
+          orientationMargin={0}
+          style={{ flex: '1 1 auto', minWidth: 0, margin: '0 0 8px', fontSize: 11, fontWeight: 600, color: 'var(--ant-color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}
+        >
+          Queries from Approving Authority
+        </Divider>
+        {canEdit && (
+          <Button size="small" icon={<PlusOutlined />} onClick={openAdd} style={{ flexShrink: 0 }}>
+            Add
+          </Button>
+        )}
+      </div>
       {observations.length === 0 ? (
         <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
           No observations recorded yet.
@@ -227,17 +244,6 @@ export function DrawingObservationsPanel({ recordId, observations, canEdit }: Pr
             );
           })}
         </Space>
-      )}
-
-      {canEdit && (
-        <Button
-          size="small"
-          icon={<PlusOutlined />}
-          style={{ marginTop: 10 }}
-          onClick={openAdd}
-        >
-          Add Observation
-        </Button>
       )}
 
       <Modal
