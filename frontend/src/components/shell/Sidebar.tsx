@@ -10,6 +10,9 @@ import {
   IconReportAnalytics,
   IconShieldCog,
 } from '@tabler/icons-react';
+// Opened in a new tab (Grafana is a separate app with its own login) rather
+// than through client-side routing — see the onClick special-case below.
+const GRAFANA_URL = '/grafana/';
 import { useAuthStore } from '@stores/authStore';
 import { fetchInbox } from '@api/inbox';
 
@@ -52,6 +55,10 @@ export function Sidebar() {
       ) ?? false,
     [currentUser],
   );
+  const canViewLogs = useMemo(
+    () => currentUser?.permissions.includes('SYSTEM_LOG.READ') ?? false,
+    [currentUser],
+  );
 
   const selectedKey = location.pathname.split('/')[1] || 'projects';
 
@@ -84,13 +91,14 @@ export function Sidebar() {
             { key: 'admin/users', label: t('sidebar.adminUsers') },
             { key: 'admin/forms', label: t('sidebar.adminForms') },
             { key: 'admin/feature-flags', label: t('sidebar.adminFeatureFlags') },
+            ...(canViewLogs ? [{ key: 'admin/logs', label: t('sidebar.adminLogs') }] : []),
           ],
         } as never,
       );
     }
 
     return base;
-  }, [awaitingCount, isAdmin, t]);
+  }, [awaitingCount, isAdmin, canViewLogs, t]);
 
   return (
     <Menu
@@ -98,7 +106,13 @@ export function Sidebar() {
       theme="dark"
       selectedKeys={[selectedKey]}
       style={{ height: '100%', borderRight: 0, background: '#1047ae' }}
-      onClick={({ key }) => navigate(`/${key}`)}
+      onClick={({ key }) => {
+        if (key === 'admin/logs') {
+          window.open(GRAFANA_URL, '_blank', 'noopener,noreferrer');
+          return;
+        }
+        navigate(`/${key}`);
+      }}
       items={items}
     />
   );

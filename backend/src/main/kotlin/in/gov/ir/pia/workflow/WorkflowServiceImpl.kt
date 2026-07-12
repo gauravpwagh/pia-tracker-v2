@@ -249,11 +249,15 @@ class WorkflowServiceImpl(
      * Computes an aggregate [record_state] from all section-level workflow
      * instances for [recordId] and writes it to [activity_records].
      *
-     * Priority (highest-watermark approach):
-     *   1. All sections AUTHENTICATED → "AUTHENTICATED"
+     * Priority (highest-watermark approach — the record reflects its most-advanced section):
+     *   1. Any section AUTHENTICATED → "AUTHENTICATED"
      *   2. Any section VERIFIED or SENT_BACK_TO_NODAL → "VERIFIED"
      *   3. Any section SUBMITTED_FOR_VERIFICATION or SENT_BACK_TO_DYCE → "SUBMITTED_FOR_VERIFICATION"
      *   4. Otherwise → "DRAFT"
+     *
+     * Note: AUTHENTICATED uses "any" (not "all"), consistent with VERIFIED/SUBMITTED. Without
+     * this, authenticating a section while a sibling is still DRAFT dropped the record's cached
+     * state to DRAFT (and made it look editable again) even though history shows it authenticated.
      *
      * **Must flush the EntityManager first** so that the most recent
      * `instanceRepo.save()` is visible to the JdbcTemplate native query.
@@ -267,7 +271,7 @@ class WorkflowServiceImpl(
             jdbc.queryForObject(
                 """
                 SELECT CASE
-                    WHEN count(*) FILTER (WHERE ws.code != 'AUTHENTICATED') = 0
+                    WHEN count(*) FILTER (WHERE ws.code = 'AUTHENTICATED') > 0
                         THEN 'AUTHENTICATED'
                     WHEN count(*) FILTER (WHERE ws.code IN ('VERIFIED', 'SENT_BACK_TO_NODAL')) > 0
                         THEN 'VERIFIED'

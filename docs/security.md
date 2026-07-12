@@ -65,6 +65,28 @@ A pragmatic STRIDE pass over the application surfaces.
 - Idle timeout: 15 min. Absolute timeout: 8 hours.
 - Logout invalidates the session server-side (a Redis blocklist for revoked JWTs in Phase 3).
 
+### Cross-site SSO handoff (ABCDE partner)
+
+- A second, parallel login path: the ABCDE partner system mints a short-lived HS256 JWT
+  (shared secret, claims `sub`/`name`/`iat`/`exp`, 10-minute validity) and redirects the
+  user to `GET /api/v1/sso/callback?token=...`. PIA verifies signature + expiry + replay,
+  maps `sub` to `users.employee_id`, and starts its own session — it never trusts ABCDE's
+  cookies. Full contract: `sso-poc/INTEGRATION_SPEC.md`; implementation:
+  `backend/src/main/kotlin/in/gov/ir/pia/security/SsoTokenVerifier.kt` and
+  `api/SsoCallbackController.kt`.
+- Deny-by-default: users must already be provisioned via `scripts/import_users_abcde.py`
+  (a CSV bulk import, same convention as `import_users.py`). No auto-provisioning from
+  the token. These users get a real `password_hash` (BCrypt of their Login ID, same as
+  HRMS-imported users) so the fallback password-login path also works for them.
+- Replay protection: the partner's tokens carry no `jti`, so PIA hashes each verified
+  token (SHA-256) and records it in `sso_used_token`; a repeat hash is rejected. A
+  scheduled job (`SsoUsedTokenCleanupJob`) prunes expired rows hourly.
+- Every verification failure is logged with a reason code (`SIGNATURE_INVALID`,
+  `EXPIRED`, `REPLAY`, `USER_NOT_FOUND`, etc.) — never the raw token or the shared
+  secret — so a rejected login can be diagnosed from the app logs alone.
+- Gated `@Profile("dev","beta")` for now; production needs this enabled under whatever
+  profile actually serves it, once the real ABCDE endpoint/secret are live.
+
 ### Authorization
 
 - Centralized `PermissionEvaluator` with the scope-implication rules in `permissions.md` § 4.

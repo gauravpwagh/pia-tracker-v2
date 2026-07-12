@@ -9,7 +9,8 @@
     "adminForms": "Form Definitions",
     "adminDashboards": "Dashboard Definitions",
     "adminFeatureFlags": "Feature Flags",
-    "adminAuditLog": "Audit Log"
+    "adminAuditLog": "Audit Log",
+    "adminLogs": "Logs"
   },
   "inbox": {
     "tabs": {

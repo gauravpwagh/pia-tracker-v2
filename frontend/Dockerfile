@@ -12,6 +12,15 @@ RUN npm ci --no-audit --no-fund
 COPY tsconfig.json tsconfig.node.json vite.config.ts index.html ./
 COPY public public
 COPY src src
+
+# TEMPORARY WAF workaround (see HANDOVER.md): both default off; the VM release pipeline
+# (infra/deploy/pc/build_waf_od.ps1) passes --build-arg to turn them on. Remove once the
+# network team's WAF allows PATCH/PUT/DELETE/OPTIONS through to the VM directly.
+ARG VITE_WAF_METHOD_OVERRIDE=false
+ENV VITE_WAF_METHOD_OVERRIDE=$VITE_WAF_METHOD_OVERRIDE
+ARG VITE_WAF_PROXY_UPLOAD=false
+ENV VITE_WAF_PROXY_UPLOAD=$VITE_WAF_PROXY_UPLOAD
+
 RUN npm run build
 
 # ─── Runtime stage ───────────────────────────────────────────────────────────

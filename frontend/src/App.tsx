@@ -10,11 +10,12 @@ import { HomePage } from '@pages/Home';
 
 const LoginPage    = lazy(() => import('@pages/login/LoginPage'));
 const LoginSearchPage = lazy(() => import('@pages/login/LoginSearchPage'));
+const LandingPage  = lazy(() => import('@pages/home/LandingPage'));
 const ProjectsPage = lazy(() => import('@pages/projects/ProjectsPage'));
 const ProjectWorkspace = lazy(() => import('@pages/projects/ProjectWorkspace'));
-const RecordEditPage = lazy(() => import('@pages/records/RecordEditPage'));
 const InboxPage    = lazy(() => import('@pages/inbox/InboxPage'));
 const DashboardPage = lazy(() => import('@pages/dashboard/DashboardPage'));
+const ProfilePage  = lazy(() => import('@pages/profile/ProfilePage'));
 
 const { Sider, Content, Header } = Layout;
 
@@ -48,7 +49,7 @@ function AppShell() {
       </Header>
       <Layout style={{ height: 'calc(100vh - 56px)', overflow: 'hidden' }}>
         <Sider
-          width={240}
+          width={208}
           collapsible
           breakpoint="lg"
           collapsedWidth={64}
@@ -60,9 +61,9 @@ function AppShell() {
           <Routes>
             <Route path="/" element={<Navigate to="/projects" replace />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
-            <Route path="/records/:recordId/edit" element={<RecordEditPage />} />
             <Route path="/inbox" element={<ScrollPage><InboxPage /></ScrollPage>} />
             <Route path="/dashboard" element={<ScrollPage><DashboardPage /></ScrollPage>} />
+            <Route path="/profile" element={<ScrollPage><ProfilePage /></ScrollPage>} />
             <Route path="/admin/*" element={<HomePage />} />
             <Route path="*" element={<HomePage />} />
           </Routes>
@@ -94,6 +95,14 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/login/search" element={<LoginSearchPage />} />
+        <Route
+          path="/home"
+          element={
+            <RequireAuth>
+              <LandingPage />
+            </RequireAuth>
+          }
+        />
         <Route
           path="/workspace/:projectCode"
           element={

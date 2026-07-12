@@ -9,12 +9,15 @@ import `in`.gov.ir.pia.service.project.DesignatePrimaryCeRequest
 import `in`.gov.ir.pia.service.project.ProjectAssignmentItem
 import `in`.gov.ir.pia.service.project.ProjectDetailResponse
 import `in`.gov.ir.pia.service.project.ProjectHistoryEntry
+import `in`.gov.ir.pia.service.project.ProjectKmzFile
 import `in`.gov.ir.pia.service.project.ProjectService
 import `in`.gov.ir.pia.service.project.RemoveProjectRequest
+import `in`.gov.ir.pia.service.project.UpdateProjectDetailsRequest
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -38,6 +41,7 @@ data class ProjectSummaryResponse(
     val chainageToKm: java.math.BigDecimal?,
     val lengthKm: java.math.BigDecimal?,
     val ipaDate: java.time.LocalDate?,
+    val stationNames: String?,
     val targetCompletionYear: Int?,
     val createdAt: java.time.Instant,
 )
@@ -96,6 +100,7 @@ class ProjectController(
                     chainageToKm = p.chainageToKm,
                     lengthKm = p.lengthKm,
                     ipaDate = p.ipaDate,
+                    stationNames = p.stationNames,
                     targetCompletionYear = p.targetCompletionYear,
                     createdAt = p.createdAt,
                 )
@@ -129,6 +134,7 @@ class ProjectController(
             chainageToKm = p.chainageToKm,
             lengthKm = p.lengthKm,
             ipaDate = p.ipaDate,
+            stationNames = p.stationNames,
             recommendedByBoardOn = p.recommendedByBoardOn,
             targetCompletionYear = p.targetCompletionYear,
             lifecycleState = p.lifecycleState,
@@ -164,6 +170,18 @@ class ProjectController(
     ): List<ProjectHistoryEntry> = projectService.history(id, principal)
 
     /**
+     * KMZ files uploaded to this project's Land-Acquisition checklist, for the
+     * workspace Map view. Returns metadata only; the client fetches each file's
+     * bytes via the normal attachment-download route and parses it in-browser.
+     */
+    @GetMapping("/{id}/map/kmz-files")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY_RECORD.READ.OWN')")
+    fun kmzFiles(
+        @PathVariable id: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): List<ProjectKmzFile> = projectService.listKmzFiles(id, principal)
+
+    /**
      * Returns the next serial number for a Project ID prefix (see
      * [ProjectService.nextSerial]). Used by the create-project wizard to
      * auto-fill the last segment of the Project ID as the user picks
@@ -190,6 +208,19 @@ class ProjectController(
         @RequestBody request: CreateProjectRequest,
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): ProjectDetailResponse = projectService.create(request, principal)
+
+    /**
+     * Updates the editable "Project Details" fields (#8): Length (km) and Station
+     * names. Available to the project's own CE/C, Dy CE/C, and Nodal Dy CE/C (via
+     * PROJECT.UPDATE.OWN), in addition to EDGS/CI and super admin.
+     */
+    @PatchMapping("/{id}")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'PROJECT.UPDATE.OWN')")
+    fun updateDetails(
+        @PathVariable id: UUID,
+        @RequestBody request: UpdateProjectDetailsRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): ProjectDetailResponse = projectService.updateDetails(id, request, principal)
 
     /**
      * CAO/C allocates the project to a CE/C user.

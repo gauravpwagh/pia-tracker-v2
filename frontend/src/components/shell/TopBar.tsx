@@ -28,6 +28,8 @@ import {
   type NotificationDto,
 } from '@api/notifications';
 import { fetchZones } from '@api/projects';
+import { logout as apiLogout } from '@api/auth';
+import { IRPSM_LOGOFF_URL } from '@lib/externalLinks';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
@@ -75,7 +77,7 @@ export function TopBar() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { currentUser, users, logout } = useAuthStore();
+  const { currentUser, users } = useAuthStore();
 
   useEffect(() => {
     // users list is needed only to resolve the zone name label
@@ -196,12 +198,10 @@ export function TopBar() {
         overflow: 'hidden',
       }}
     >
-      {/* Brand block — IR logo + stacked wordmark, vertically centred in 56 px bar */}
+      {/* Brand block — IR logo + stacked wordmark, vertically centred in 56 px bar.
+          Not clickable: it must NOT route to the project list (use the Home button for that). */}
       <div
-        style={{ display: 'flex', alignItems: 'center', gap: 12, height: 56, cursor: 'pointer', minWidth: 0, flex: 1 }}
-        onClick={() => navigate('/')}
-        role="link"
-        aria-label="IRPSM home"
+        style={{ display: 'flex', alignItems: 'center', gap: 12, height: 56, minWidth: 0, flex: 1 }}
       >
         <img src={irLogo} alt="Indian Railways" height={42} style={{ display: 'block', flexShrink: 0 }} />
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1, minWidth: 0 }}>
@@ -287,7 +287,10 @@ export function TopBar() {
                   icon: <LogoutOutlined />,
                   label: 'Logout',
                   danger: true,
-                  onClick: () => void logout().then(() => navigate('/login')),
+                  // End the PIA session server-side, then hand back to IRPSM's logoff. Uses the raw
+                  // API logout (not the store's) so currentUser isn't nulled — that would re-render
+                  // RequireAuth and flash the PIA /login page before the full-page redirect commits.
+                  onClick: () => void apiLogout().finally(() => { window.location.href = IRPSM_LOGOFF_URL; }),
                 },
               ],
             }}

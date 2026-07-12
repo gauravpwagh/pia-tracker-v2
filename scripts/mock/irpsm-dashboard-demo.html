@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IRPSM — Dashboard (Mock)</title>
+<style>
+  /* ---- IRPSM look-and-feel mock. Static/dummy data only. ---- */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #d9d9d9;
+    font-family: Verdana, Geneva, Tahoma, sans-serif; font-size: 12px; color: #222;
+  }
+  a { color: #0645ad; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .page { max-width: 1000px; margin: 0 auto; background: #fff; border: 1px solid #7fae7f; }
+
+  /* ---------- Header ---------- */
+  header { padding: 8px 14px 4px; position: relative; }
+  .brand h1 { margin: 0; color: #2e7d32; font-size: 26px; font-weight: bold; letter-spacing: .5px; }
+  .brand .sub { color: #333; font-size: 13px; font-style: italic; }
+  .welcome { position: absolute; top: 8px; right: 70px; color: #7a1f1f; font-size: 12px; }
+  .emblem { position: absolute; top: 6px; right: 12px; width: 58px; height: 58px; }
+  .emblem img { width: 100%; height: 100%; object-fit: contain; }
+  .toolbar { position: absolute; top: 34px; right: 84px; display: flex; gap: 12px; align-items: flex-end; }
+  .toolbar img { height: 34px; width: auto; cursor: pointer; }
+  .helpline { text-align: center; color: #c0392b; font-size: 11px; margin: 26px 0 6px; }
+
+  /* ---------- Nav bar ---------- */
+  nav { background: linear-gradient(#8a8a8a, #6f6f6f); border-top: 1px solid #999; }
+  nav > ul { list-style: none; margin: 0; padding: 0; display: flex; }
+  nav > ul > li { position: relative; }
+  nav > ul > li > a {
+    display: block; color: #fff; font-weight: bold; font-size: 12px;
+    padding: 8px 16px; cursor: pointer;
+  }
+  nav > ul > li:hover > a { background: #7a1f1f; }
+
+  /* dropdown */
+  .menu { display: none; position: absolute; top: 100%; left: 0; min-width: 250px; z-index: 30;
+    background: #7a1f1f; border: 1px solid #4d1010; box-shadow: 2px 4px 10px rgba(0,0,0,.4); }
+  nav > ul > li:hover > .menu { display: block; }
+  .menu a { display: block; color: #fff; font-weight: normal; padding: 6px 14px; white-space: nowrap; position: relative; }
+  .menu a img.mi { height: 15px; width: 15px; object-fit: contain; vertical-align: middle; margin-right: 7px; }
+  .menu a:hover { background: #9c2a2a; text-decoration: none; }
+  .menu li { list-style: none; position: relative; }
+  .menu li + li a { border-top: 1px solid #6a1a1a; }
+
+  /* submenu (Status of Work) */
+  .submenu { display: none; position: absolute; top: 0; left: 100%; min-width: 220px;
+    background: #7a1f1f; border: 1px solid #4d1010; box-shadow: 2px 4px 10px rgba(0,0,0,.4); }
+  .has-sub:hover > .submenu { display: block; }
+  .has-sub > a::after { content: "\25B6"; position: absolute; right: 10px; font-size: 9px; opacity: .85; }
+
+  /* small icon strip under nav */
+  .iconstrip { display: flex; gap: 8px; padding: 4px 8px; background: #fff; align-items: center; }
+  .iconstrip img { height: 20px; width: auto; cursor: pointer; }
+  .quicklinks { float: right; padding: 3px 10px; }
+  .quicklinks a { margin-left: 8px; font-weight: bold; }
+
+  .note { clear: both; color: #1a4bd6; font-weight: bold; padding: 8px 12px; font-size: 12px; border-bottom: 1px solid #cfe0cf; }
+
+  /* ---------- Orange dashboard bar ---------- */
+  .dashbar { background: #f5821f; color: #fff; display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-weight: bold; }
+  .dashbar .home, .dashbar .pageicon, .dashbar .ext { background: rgba(255,255,255,.25); border-radius: 4px; padding: 4px 7px; cursor: pointer; }
+  .dashbar .pd { background: #17a2b8; border-radius: 4px; padding: 4px 9px; font-size: 12px; }
+  .dashbar .title { flex: 1; text-align: center; font-size: 16px; }
+  .dashbar .beta { background: #17a2b8; border-radius: 3px; padding: 1px 6px; font-size: 11px; margin-left: 6px; }
+
+  /* ---------- Body layout ---------- */
+  .body { display: flex; gap: 10px; padding: 10px; }
+  .left { width: 250px; flex: 0 0 250px; }
+  .right { flex: 1; }
+
+  .radiorow { display: flex; gap: 18px; background: #ffe3c9; border: 1px solid #f0b880; border-radius: 4px; padding: 6px 10px; }
+  .breadcrumb { margin-top: 8px; background: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 6px 8px; display: flex; align-items: center; gap: 6px; }
+  .breadcrumb .ir { background: #eee; border: 1px solid #bbb; border-radius: 3px; padding: 1px 6px; font-weight: bold; }
+  .breadcrumb .search { margin-left: auto; }
+  .searchbox { margin-top: 6px; width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px; }
+  .tree { margin-top: 6px; background: #fff; border: 1px solid #ccc; border-radius: 4px; padding: 8px; }
+  .tree .zone { font-weight: bold; }
+  .tree .child { margin: 4px 0 0 16px; color: #333; }
+  .flagged { margin-top: 12px; background: #fff; border: 1px solid #d9c2ec; border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(120,80,160,.25); padding: 18px; text-align: center; font-weight: bold; font-size: 14px;
+    display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; }
+  .flagged .arrow { color: #2f66b5; font-size: 16px; }
+  .pia-btn { display: flex; align-items: center; justify-content: center; gap: 8px;
+    margin-top: 10px; background: linear-gradient(#2f8fe0, #1c6fc4); border: 2px solid #1559a8;
+    border-radius: 8px; box-shadow: 0 3px 10px rgba(30,90,170,.45); padding: 18px;
+    text-align: center; font-weight: bold; font-size: 15px; color: #fff; cursor: pointer;
+    text-shadow: 0 1px 1px rgba(0,0,0,.25); }
+  .pia-btn:hover { background: linear-gradient(#38a0f0, #1f7cd6); text-decoration: none; }
+  .pia-btn .linkico { color: #eaf4ff; font-size: 16px; }
+
+  /* filter box */
+  .filter { border: 1px solid #f0b880; border-radius: 4px; padding: 10px; }
+  .filter legend { color: #c0392b; font-weight: bold; padding: 0 6px; }
+  .planheads { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 8px; align-items: center; }
+  .ph { border: none; border-radius: 3px; padding: 4px 10px; font-size: 11px; font-weight: bold; color: #fff; cursor: pointer; }
+  .ph.on { background: #2f66b5; }
+  .ph.off { background: #9e9e9e; }
+  .ph.deselect { background: #2e9e4f; }
+  .filternote { color: #c0392b; font-size: 11px; margin: 4px 0 10px; }
+  .filterrow { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+  .filterrow select { padding: 3px 6px; }
+  .sancbefore a { margin: 0 6px; font-weight: bold; }
+  .sancbefore a.active { color: #c0392b; text-decoration: underline; }
+
+  /* KPI cards */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+  .kpi { border-radius: 6px; padding: 10px; position: relative; min-height: 92px; }
+  .kpi .lbl { font-weight: bold; font-size: 12px; }
+  .kpi .sub { font-size: 10px; color: #555; }
+  .kpi .num { font-size: 20px; font-weight: bold; }
+  .kpi .nos { font-size: 11px; color: #444; }
+  .kpi .amt { position: absolute; bottom: 8px; left: 10px; font-weight: bold; }
+  .kpi.blue { background: #dce9fb; border: 1px solid #9bbef0; }
+  .kpi.green { background: #dbf3e2; border: 1px solid #91d3a6; }
+  .kpi.yellow { background: #fdf3d0; border: 1px solid #e6cf78; }
+  .kpi.red { background: #fbdcde; border: 1px solid #efa1a7; }
+  .link { position: absolute; top: 8px; right: 8px; color: #2e9e4f; }
+
+  .ongoing { margin-top: 12px; background: #e6fbf1; border: 1px solid #9fe0c2; border-radius: 6px; padding: 10px; }
+  .ongoing h3 { margin: 0 0 8px; font-size: 14px; }
+  .ongoing .grid { display: grid; grid-template-columns: 130px 1fr 1fr 1fr; gap: 10px; align-items: start; }
+  .bignum { background: #17a2b8; color: #fff; font-size: 22px; font-weight: bold; border-radius: 4px;
+    padding: 10px; text-align: center; }
+  .money { color: #d35400; font-weight: bold; }
+  .muted { color: #666; font-size: 10px; }
+
+  .threecards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+  .card { background: #fdeeee; border: 1px solid #f0c9c9; border-radius: 6px; padding: 10px; position: relative; min-height: 150px; }
+  .card .ttl { font-weight: bold; font-size: 12px; min-height: 48px; }
+  .card .big { background: #17a2b8; color: #fff; display: inline-block; font-size: 18px; font-weight: bold;
+    border-radius: 4px; padding: 6px 12px; margin-top: 8px; }
+  .card .amt { position: absolute; bottom: 10px; left: 10px; font-weight: bold; }
+  .card .go { position: absolute; bottom: 46px; right: 12px; background: #2f66b5; color: #fff;
+    width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+
+  .prog { margin-top: 12px; background: #fbfde6; border: 1px solid #dfe08f; border-radius: 6px; padding: 10px; }
+  .prog h3 { margin: 0 0 8px; font-size: 14px; }
+  .prog .grid { display: grid; grid-template-columns: 130px 1fr 1fr 1fr; gap: 10px; align-items: start; }
+  .footnote { color: #1a4bd6; font-size: 11px; margin-top: 10px; }
+
+  .disclaimer { background: #fff8e1; border-top: 1px solid #e6cf78; color: #7a5c00; font-size: 11px; padding: 6px 12px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ HEADER ============ -->
+  <header>
+    <div class="brand">
+      <h1>IRPSM</h1>
+      <div class="sub">Indian Railways Projects Sanctions &amp; Management</div>
+    </div>
+    <div class="welcome">Welcome CAOC (CAO/C/ECR)</div>
+    <div class="emblem" title="Indian Railways"><img src="../../frontend/images/rail-icon-in.png" alt="Indian Railways" /></div>
+    <div class="toolbar">
+      <img src="../../frontend/images/home-icon.png" alt="Home" />
+      <img src="../../frontend/images/IRMap.png" alt="IR Map" />
+      <img src="../../frontend/images/helpsm-icon.png" alt="Help" />
+      <img src="../../frontend/images/edit-user.png" alt="Edit User" />
+      <img src="../../frontend/images/add-user.png" alt="Add user" />
+      <img src="../../frontend/images/newpassword.png" alt="My profile" />
+      <img src="../../frontend/images/themes.png" alt="Themes" />
+      <img src="../../frontend/images/logout.png" alt="Log out" />
+    </div>
+    <div class="helpline">
+      For any query/issue, please write to <a href="#">irpsm@cris.org.in</a> or call.
+      For going to old Home screen please click on &#127968; icon.
+    </div>
+  </header>
+
+  <!-- ============ NAV ============ -->
+  <nav>
+    <ul>
+      <li>
+        <a>Proposal Bank</a>
+        <ul class="menu">
+          <li><a href="#"><img class="mi" src="../../frontend/images/my-report2.png" alt="">Summary</a></li>
+          <li><a href="#"><img class="mi" src="../../frontend/images/outbox.png" alt="">Outbox</a></li>
+        </ul>
+      </li>
+      <li>
+        <a>Sanctioned Works</a>
+        <ul class="menu">
+          <li><a href="#"><img class="mi" src="../../frontend/images/executing-agency.png" alt="">Allotment of Executing Agency</a></li>
+          <li class="has-sub">
+            <a href="#"><img class="mi" src="../../frontend/images/status-work.png" alt="">Status of Work</a>
+            <ul class="submenu">
+              <li><a href="#">Physical Progress</a></li>
+              <li><a href="#">Financial Progress</a></li>
+              <li><a href="#">Monthly Progress Entry</a></li>
+            </ul>
+          </li>
+          <li><a href="#"><img class="mi" src="../../frontend/images/status-work.png" alt="">Status of Umbrella &amp; Other Work</a></li>
+          <li><a href="#"><img class="mi" src="../../frontend/images/dashboard1.png" alt="">Data entry for Project Dashboard</a></li>
+          <li><a href="#">NIP Project Data entry</a></li>
+          <li><a href="#">Uploading of (.dwg) drawing file of L-section</a></li>
+          <li><a href="#">Works Authorized from Other Railways</a></li>
+          <li><a href="#">Authorize Works to Other Railways</a></li>
+          <li><a href="#">Surveys Completed (Since last 10 years)</a></li>
+          <li><a href="#">Surveys Sanctioned (Not Completed)</a></li>
+          <li><a href="#">IR-Geo Video Portal</a></li>
+        </ul>
+      </li>
+      <li>
+        <a>Report</a>
+        <ul class="menu">
+          <li><a href="#">Zone-wise Report</a></li>
+          <li><a href="#">Plan Head Report</a></li>
+          <li><a href="#">Outlay vs Expenditure</a></li>
+        </ul>
+      </li>
+      <li>
+        <a>Administration</a>
+        <ul class="menu">
+          <li><a href="#">Manage Users</a></li>
+          <li><a href="#">Map HRMS ID</a></li>
+          <li><a href="#">Masters</a></li>
+        </ul>
+      </li>
+      <li>
+        <a>Corridor Works</a>
+        <ul class="menu">
+          <li><a href="#">Corridor Summary</a></li>
+          <li><a href="#">Corridor Progress</a></li>
+        </ul>
+      </li>
+    </ul>
+  </nav>
+
+  <!-- icon strip + quick links -->
+  <div class="iconstrip">
+    <img src="../../frontend/images/proposal_bank.png" alt="" title="Proposal Bank" />
+    <img src="../../frontend/images/status-work.png" alt="" title="Status of Work" />
+    <img src="../../frontend/images/executing-agency.png" alt="" title="Allotment of Executing Agency" />
+    <img src="../../frontend/images/my-report2.png" alt="" title="Report" />
+    <img src="../../frontend/images/outbox.png" alt="" title="Outbox" />
+    <img src="../../frontend/images/dashboard1.png" alt="" title="Project Dashboard" />
+    <span class="quicklinks">
+      | <a href="#">Map HRMS ID</a> | <a href="#">feedback</a> | <a href="#">Get Mobile App</a>
+    </span>
+  </div>
+
+  <div class="note">
+    Note: Please fill the proforma for "Stages of Land Acquisition" through menu
+    "Sanctioned Works-&gt; Data entry for Project Dashboard" in "Land &amp; Forest Clearance" tab.
+  </div>
+
+  <!-- ============ ORANGE DASHBOARD BAR ============ -->
+  <div class="dashbar">
+    <span class="home" title="Home">
+      <svg width="18" height="18" viewBox="0 0 24 24" style="vertical-align:middle;">
+        <path fill="#ffffff" d="M12 3 2 12h3v8h5v-6h4v6h5v-8h3L12 3z"/>
+      </svg>
+    </span>
+    <span class="pd">Project Dashboard</span>
+    <span class="pageicon">&#128441;</span>
+    <span class="title">IRPSM-Dashboard <span class="beta">Beta</span></span>
+    <span class="ext">&#8599;</span>
+  </div>
+
+  <!-- ============ BODY ============ -->
+  <div class="body">
+
+    <!-- LEFT PANEL -->
+    <aside class="left">
+      <div class="radiorow">
+        <label><input type="radio" name="scope" checked> Zone Wise</label>
+        <label><input type="radio" name="scope"> State Wise</label>
+      </div>
+      <div class="breadcrumb">
+        <span class="ir">IR</span> &raquo; <b>ECR</b>
+        <span class="search">&#128269;</span>
+      </div>
+      <input class="searchbox" placeholder="Search Exec. Agency" />
+      <div class="tree" style="position:relative; min-height:120px;">
+        <div class="zone">ECR</div>
+        <div class="child">&#8735; CAO(CON)/ECR</div>
+        <img src="../../frontend/images/IRLOGO_new.png" alt=""
+             style="position:absolute; right:8px; bottom:8px; width:96px; height:96px; opacity:.55;
+                    filter:brightness(0) invert(.55);" />
+      </div>
+      <div class="flagged">Flagged Projects <span class="arrow">&#10140;</span></div>
+      <a class="pia-btn" href="#" title="Open Pre-Investment Activity">
+        Pre Investment Activity <span class="linkico">&#128279;</span>
+      </a>
+    </aside>
+
+    <!-- RIGHT PANEL -->
+    <section class="right">
+
+      <!-- FILTER -->
+      <fieldset class="filter">
+        <legend>Filter Criteria</legend>
+        <div style="display:flex; gap:8px; align-items:flex-start;">
+          <div style="font-weight:bold; white-space:nowrap; padding-top:4px;">Plan Head :</div>
+          <div class="planheads">
+            <span class="ph on">NL</span><span class="ph on">GC</span><span class="ph on">DL</span>
+            <span class="ph on">TRF</span><span class="ph off">17</span><span class="ph off">18</span>
+            <span class="ph on">LC</span><span class="ph on">ROB/RUB</span><span class="ph off">31</span>
+            <span class="ph on">BW</span><span class="ph off">33</span><span class="ph off">35</span>
+            <span class="ph off">36</span><span class="ph on">W&amp;PU</span><span class="ph on">SW</span>
+            <span class="ph on">PA</span><span class="ph on">OSW</span><span class="ph off">65</span>
+            <span class="ph off">81</span><span class="ph deselect">De-Select All</span>
+          </div>
+        </div>
+        <div class="filternote">
+          Note:- Plan Heads in blue have been selected. For individual selection/deselection
+          press 'De-Select All' and choose as required.
+        </div>
+        <div class="filterrow">
+          <b>Work Category :</b>
+          <select><option>ALL</option><option>New Line</option><option>Doubling</option></select>
+          <b style="margin-left:20px;">Work Orignal Cost :</b>
+          <select><option>ALL</option><option>&lt; 100 cr</option><option>&gt; 100 cr</option></select>
+        </div>
+        <div class="filterrow sancbefore">
+          <b>Sanctioned Before :</b>
+          <a href="#" class="active">ALL</a> | <a href="#">&gt; 2 Year</a> |
+          <a href="#">&gt; 5 Year</a> | <a href="#">&gt; 10 Year</a>
+        </div>
+      </fieldset>
+
+      <!-- KPI CARDS -->
+      <div class="kpis">
+        <div class="kpi blue">
+          <a class="link" href="#">&#128279;</a>
+          <div class="lbl">Total Rly. Works</div>
+          <div class="num">294 <span class="nos">Nos.</span></div>
+          <div class="sub">(Excluding Deposit Works)</div>
+          <div class="amt">&#8377; 98,405 cr</div>
+        </div>
+        <div class="kpi green">
+          <a class="link" href="#">&#128279;</a>
+          <div class="lbl">Phy. Completed</div>
+          <div class="num">80 <span class="nos">Nos.</span></div>
+          <div class="amt">&#8377; 33,891 cr</div>
+        </div>
+        <div class="kpi yellow">
+          <a class="link" href="#">&#128279;</a>
+          <div class="lbl">Unsanctioned (#)</div>
+          <div class="num">1 <span class="nos">Nos.</span></div>
+          <div class="amt">&#8377; 300 cr</div>
+        </div>
+        <div class="kpi red">
+          <a class="link" href="#">&#128279;</a>
+          <div class="lbl">Frozen</div>
+          <div class="num">11 <span class="nos">Nos.</span></div>
+          <div class="amt">&#8377; 6,121 cr</div>
+        </div>
+      </div>
+
+      <!-- ON GOING WORKS -->
+      <div class="ongoing">
+        <h3>On Going Works</h3>
+        <div class="grid">
+          <div>
+            <div class="bignum">202 <div style="font-size:11px;font-weight:normal;">Nos.</div></div>
+            <div class="money" style="margin-top:8px;">&#8377; 58,093 cr</div>
+          </div>
+          <div>
+            <div><b>Expenditure</b></div>
+            <div class="muted">Upto Last Fin. Year</div>
+            <div class="money">&#8377; 16,250 cr</div>
+            <div class="muted" style="margin-top:6px;">Current Fin. Year</div>
+            <div class="money">&#8377; 2,083 cr</div>
+          </div>
+          <div>
+            <div><b>Outlay</b> <span class="muted">(Current Fin. Yr)</span></div>
+            <div class="muted">Original:</div>
+            <div class="money">&#8377; 4,730 cr</div>
+            <div class="muted" style="margin-top:6px;">Revised:</div>
+            <div class="money">&#8377; 4,464 cr</div>
+          </div>
+          <div>
+            <div><b>Throw Forward</b></div>
+            <div class="money">&#8377; 37,379 cr</div>
+            <div class="muted">(On 1st April of next Financial Year)</div>
+          </div>
+        </div>
+        <div class="footnote">* Current Financial Year is 2026-2027 in IRPSM.</div>
+      </div>
+
+      <!-- THREE CARDS -->
+      <div class="threecards">
+        <div class="card">
+          <div class="ttl">(On Going + Phy. Completed) Works - Detailed Estimate yet to be Sanctioned</div>
+          <div class="big">63 <span style="font-size:11px;">Nos.</span></div>
+          <div class="go">&#10140;</div>
+          <div class="amt">&#8377; 9,614 cr</div>
+        </div>
+        <div class="card">
+          <div class="ttl">(On Going + Phy. Completed) Works - Revised Estimate yet to be Sanctioned</div>
+          <div class="big">74 <span style="font-size:11px;">Nos.</span></div>
+          <div class="go">&#10140;</div>
+          <div class="amt">&#8377; 38,379 cr</div>
+        </div>
+        <div class="card">
+          <div class="ttl">(On Going + Phy. Completed) Works - Estimate Status not recorded in Monthly Progress</div>
+          <div class="big">24 <span style="font-size:11px;">Nos.</span></div>
+          <div class="amt">&#8377; 3,804 cr</div>
+        </div>
+      </div>
+
+      <!-- PHYSICAL PROGRESS 75%+ -->
+      <div class="prog">
+        <h3>On Going Works - Physical Progress 75% and above</h3>
+        <div class="grid">
+          <div class="bignum">25 <div style="font-size:11px;font-weight:normal;">Nos.</div></div>
+          <div>
+            <div><b>Expenditure</b></div>
+            <div class="muted">Upto Last Fin. Year</div>
+            <div class="money">&#8377; 10,601 cr</div>
+            <div class="muted" style="margin-top:6px;">Current Fin. Year</div>
+            <div class="money">&#8377; 673 cr</div>
+          </div>
+          <div>
+            <div><b>Outlay</b> <span class="muted">(Current Fin. Yr)</span></div>
+            <div class="muted">Original:</div>
+            <div class="money">&#8377; 929 cr</div>
+            <div class="muted" style="margin-top:6px;">Revised:</div>
+            <div class="money">&#8377; 662 cr</div>
+          </div>
+          <div>
+            <div><b>Throw Forward</b></div>
+            <div class="money">&#8377; 2,080 cr</div>
+            <div class="muted">(On 1st April of next Financial Year)</div>
+          </div>
+        </div>
+        <div class="footnote">* Current Financial Year is 2026-2027 in IRPSM.</div>
+      </div>
+
+    </section>
+  </div>
+
+  <div class="disclaimer">
+    Mock / dummy page — visual replica of the IRPSM dashboard for demo purposes only.
+    All figures are placeholder data and not from any live system.
+  </div>
+
+</div>
+</body>
+</html>

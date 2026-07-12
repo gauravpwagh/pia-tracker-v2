@@ -1,0 +1,14 @@
+[Unit]
+Description=PIA Tracker (rootful Podman compose, current release)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/pia/scripts/start.sh
+ExecStop=/bin/sh -c 'cd /opt/pia/current && (podman-compose -f docker-compose.production.yml down || podman compose -f docker-compose.production.yml down)'
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

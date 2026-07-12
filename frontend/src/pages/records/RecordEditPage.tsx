@@ -3,9 +3,12 @@
 // derived from validated API responses, not user input — no injection risk here.
 
 /**
- * RecordEditPage — Archetype 3 (docs/ui.md § 3).
+ * RecordEditor — Archetype 3 (docs/ui.md § 3).
  *
- * Path: `/records/:recordId/edit`
+ * The shared record-editing form. Embedded inline inside the project workspace
+ * record pane (ProjectWorkspace → ActivityPane). The old standalone
+ * `/records/:recordId/edit` full-page route was removed once the workspace UI
+ * fully replaced it.
  *
  * ## Layout
  *
@@ -41,7 +44,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
@@ -424,11 +426,9 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
             cancelText="Cancel"
             onConfirm={() => onAction('submit')}
           >
-            <Tooltip title={t('record.actions.submitTooltip')}>
-              <Button type="primary" loading={loading}>
-                {t('record.actions.submitSection')}
-              </Button>
-            </Tooltip>
+            <Button type="primary" loading={loading}>
+              {t('record.actions.submitSection')}
+            </Button>
           </Popconfirm>
         )}
         {canResubmit && (
@@ -444,11 +444,9 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
             cancelText="Cancel"
             onConfirm={() => onAction('verify')}
           >
-            <Tooltip title={t('record.actions.verifyTooltip')}>
-              <Button type="primary" loading={loading}>
-                {t('record.actions.verify')}
-              </Button>
-            </Tooltip>
+            <Button type="primary" loading={loading}>
+              {t('record.actions.verify')}
+            </Button>
           </Popconfirm>
         )}
         {canReVerify && (
@@ -494,12 +492,36 @@ function WorkflowActions({ sectionState, sectionLabel, onAction, loading }: Work
   );
 }
 
+// ── Record name / subtype lock ──────────────────────────────────────────────────
+// The record name is fixed at creation ("Add Record") and can only be changed via
+// the explicit "Rename" action — so the name field is read-only inside the edit
+// form. Handles the flat (record_name / package_name) and nested
+// (acquisition_details.record_name, drawing_details.record_name) shapes.
+//
+// The record subtype is likewise fixed at creation: Utility Shifting's `utility_type`
+// (flat) and Drawing Approval's `drawing_details.drawing_type` are the record's subtype
+// and must not be edited afterwards — lock them too.
+
+function lockNameFields(ui: UiSchema | undefined): UiSchema {
+  const lock = (node: UiSchema | undefined, key: string): UiSchema => ({
+    ...(node ?? {}),
+    [key]: { ...((node?.[key] as UiSchema) ?? {}), 'ui:readonly': true },
+  });
+  let out = lock(ui, 'record_name');
+  out = lock(out, 'package_name');
+  out = lock(out, 'utility_type');
+  out.acquisition_details = lock(out.acquisition_details as UiSchema, 'record_name');
+  out.drawing_details = lock(out.drawing_details as UiSchema, 'record_name');
+  out.drawing_details = lock(out.drawing_details as UiSchema, 'drawing_type');
+  return out;
+}
+
 // ── Utility Shifting: dynamic schema filter ───────────────────────────────────
 // Narrows the flat RJSF schema to only the fields relevant to the current
 // utility_type + executing_agency combination.
 
 const US_COMMON = [
-  'record_name', 'block_section',
+  'record_name', 'block_section_from', 'block_section_to',
   'utility_type', 'owner_agency',
   'chainage_from', 'chainage_to', 'length_affected_km',
   'executing_agency',
@@ -535,25 +557,7 @@ function filterUsSchema(
   return { ...rest, properties: filteredProps, required };
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
-
-/**
- * Thin routed wrapper — reads the URL params and renders the shared editor in
- * full-page layout.  All editor logic lives in <RecordEditor/> so it can also
- * be embedded inline (e.g. inside the project workspace record pane).
- */
-export default function RecordEditPage() {
-  const { recordId } = useParams<{ recordId: string }>();
-  const navigate = useNavigate();
-  const { state: routeState } = useLocation();
-  const returnPath: string = (routeState as { returnPath?: string } | null)?.returnPath ?? '/projects';
-  if (!recordId) return null;
-  // key={recordId} forces a full remount when navigating from one record straight
-  // to another (e.g. clicking a different Inbox item) — otherwise React Router
-  // keeps the same RecordEditor instance alive and its internal state (formData,
-  // active section, etc.) doesn't reset, so the page keeps showing the old record.
-  return <RecordEditor key={recordId} recordId={recordId} layout="page" onBack={() => navigate(returnPath)} />;
-}
+// ── Editor ────────────────────────────────────────────────────────────────────
 
 export interface RecordEditorProps {
   recordId: string;
@@ -679,7 +683,7 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
         const laName = record.name || (data.village_name as string | undefined);
         const seeded: Record<string, unknown> = { ...ad };
         if (seeded.record_name === undefined && laName) seeded.record_name = laName;
-        const metaFields = ['block_section','chainage_from','chainage_to','district','sub_division_taluka',
+        const metaFields = ['block_section_from','block_section_to','chainage_from','chainage_to','district','sub_division_taluka',
           'area_hectares_total','area_hectares_private','area_hectares_govt',
           'area_hectares_forest','est_villages'] as const;
         for (const f of metaFields) {
@@ -710,7 +714,13 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
           ? ((formDataRef.current.acquisition_details as Record<string, unknown> | undefined)?.record_name as string | undefined)
           : (formDataRef.current.record_name as string | undefined);
       await patchRecord(recordId, formDataRef.current, recordName || undefined);
-    }, [recordId, formDef?.activityTypeCode]),
+      // Keep any other open view of this record (detail panel, records list — incl.
+      // the record's name) in sync without requiring a page reload.
+      void queryClient.invalidateQueries({ queryKey: ['record', recordId] });
+      if (record?.projectActivityId) {
+        void queryClient.invalidateQueries({ queryKey: ['records', record.projectActivityId] });
+      }
+    }, [recordId, formDef?.activityTypeCode, queryClient, record?.projectActivityId]),
   });
 
   // ── RJSF onChange ─────────────────────────────────────────────────────────
@@ -784,11 +794,14 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
       : (formDef.schemaJson as RJSFSchema)
     : undefined;
 
-  const sectionUiSchema: UiSchema | undefined = formDef
+  const rawSectionUiSchema: UiSchema | undefined = formDef
     ? activeSectionResolved
       ? ((formDef.uiSchemaJson as UiSchema)?.[activeSectionResolved] as UiSchema | undefined)
       : (formDef.uiSchemaJson as UiSchema | undefined)
     : undefined;
+  // Record name is fixed at creation — lock it in the form (rename via the
+  // explicit "Rename" action instead).
+  const sectionUiSchema = useMemo(() => lockNameFields(rawSectionUiSchema), [rawSectionUiSchema]);
 
   // ── Utility Shifting: narrow schema to fields relevant to the selected type
   // utility_type is pre-populated in dataJson at record creation so it's
@@ -861,6 +874,14 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
   // ── Bottom bar height (used for scroll padding) ──────────────────────────
   const BOTTOM_BAR_H = 56;
 
+  // Once a section is submitted for verification it is out of the owner's hands —
+  // lock the fields. Editing is only permitted in DRAFT or the sent-back states
+  // (where the owner is expected to make corrections). Note the backend still
+  // permits PATCH in SUBMITTED_FOR_VERIFICATION — it only blocks VERIFIED/AUTHENTICATED —
+  // so this UI lock is the guard for the submitted state until that gap is closed.
+  const LOCKED_EDIT_STATES = ['SUBMITTED_FOR_VERIFICATION', 'VERIFIED', 'AUTHENTICATED'];
+  const stateLocked = LOCKED_EDIT_STATES.includes(activeSectionState?.currentStateCode ?? '');
+
   // Centre content — the RJSF form (or the drawing custom panels). Shared by both layouts.
   const centreContent =
     activeSectionResolved === 'approvals' ? (
@@ -891,7 +912,7 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
         }
         onChange={handleFormChange}
         formContext={{ entityType: 'ACTIVITY_RECORD', entityId: recordId }}
-        disabled={readOnly || autosaveStatus === 'conflict' || activeSectionState?.isTerminal === true}
+        disabled={readOnly || autosaveStatus === 'conflict' || stateLocked}
       />
     );
 
@@ -1040,8 +1061,9 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
           </Button>
         )}
 
-        {/* Save draft — hidden in read-only (view data) mode */}
-        {!readOnly && (
+        {/* Save draft — hidden in read-only (view data) mode and once the section is
+            locked (submitted for verification onward). */}
+        {!readOnly && !stateLocked && (
           <Button
             onClick={() => void saveNow()}
             disabled={autosaveStatus === 'saving' || autosaveStatus === 'conflict'}

@@ -9,6 +9,7 @@
  */
 
 import { API_BASE } from '@lib/apiBase';
+import { wafSafeFetch } from '@lib/wafSafeFetch';
 const BASE = API_BASE;
 
 // ── Comment types ─────────────────────────────────────────────────────────────
@@ -86,7 +87,7 @@ export async function postComment(request: CreateCommentRequest): Promise<Commen
 }
 
 export async function deleteComment(commentId: string): Promise<void> {
-  const res = await fetch(`${BASE}/comments/${commentId}`, {
+  const res = await wafSafeFetch(`${BASE}/comments/${commentId}`, {
     method: 'DELETE',
     credentials: 'include',
   });

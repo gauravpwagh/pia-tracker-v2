@@ -1,0 +1,9 @@
+# PC-side build/transfer artifacts — never committed.
+staging/
+out/
+.ship-state/
+
+# real env files (contain secrets) — never commit; .env.production.example is the template
+.env
+.env.prod.local
+*.env.local

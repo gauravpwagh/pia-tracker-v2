@@ -17,6 +17,10 @@ logging:
 pia:
   auth:
     mode: ${PIA_AUTH_MODE:dummy}   # default dummy, can flip to real for SSO testing
+  sso:
+    secret: ${PIA_SSO_SECRET:dev-only-shared-secret-CHANGE-ME}
+    clock-skew-seconds: 60
+    max-token-lifetime-seconds: 600   # doc specifies 10-minute validity
   seed:
     demo-data: false               # beta starts empty
   banner:

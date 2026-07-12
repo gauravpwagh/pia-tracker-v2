@@ -5,8 +5,9 @@
  * If-Match dispatch automatically so callers never need to touch HTTP headers.
  */
 
-import { captureETag, getETag } from '@lib/etag';
+import { getETag, setETagFromVersion } from '@lib/etag';
 import { API_BASE } from '@lib/apiBase';
+import { wafSafeFetch } from '@lib/wafSafeFetch';
 
 const BASE = API_BASE;
 
@@ -76,8 +77,10 @@ export async function fetchRecord(recordId: string): Promise<ActivityRecordDetai
   const res = await fetch(`${BASE}/activity-records/${recordId}`, {
     credentials: 'include',
   });
-  captureETag(recordId, res);
-  return handleResponse<ActivityRecordDetail>(res);
+  const record = await handleResponse<ActivityRecordDetail>(res);
+  // Derive the ETag from the body's version, not the header (nginx gzip can strip it).
+  setETagFromVersion(record.id, record.version);
+  return record;
 }
 
 /**
@@ -101,7 +104,7 @@ export async function createRecord(
     body,
   });
   const record = await handleResponse<ActivityRecordDetail>(res);
-  captureETag(record.id, res);
+  setETagFromVersion(record.id, record.version);
   return record;
 }
 
@@ -130,7 +133,7 @@ export async function patchRecord(
   const payload: Record<string, unknown> = { dataJson };
   if (name !== undefined) payload.name = name || null;
 
-  const res = await fetch(`${BASE}/activity-records/${recordId}`, {
+  const res = await wafSafeFetch(`${BASE}/activity-records/${recordId}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: {
@@ -141,7 +144,7 @@ export async function patchRecord(
   });
 
   const updated = await handleResponse<ActivityRecordDetail>(res);
-  captureETag(recordId, res);
+  setETagFromVersion(recordId, updated.version);
   return updated;
 }
 
@@ -162,7 +165,7 @@ export async function listRecords(activityId: string): Promise<ActivityRecordDet
  * Returns 409 if the record is AUTHENTICATED.
  */
 export async function deleteRecord(recordId: string): Promise<void> {
-  const res = await fetch(`${BASE}/activity-records/${recordId}`, {
+  const res = await wafSafeFetch(`${BASE}/activity-records/${recordId}`, {
     method: 'DELETE',
     credentials: 'include',
   });
@@ -203,7 +206,7 @@ export async function updateDrawingApproval(
   approvedOn: string | null,
   remarks: string | null,
 ): Promise<DrawingApproverDto> {
-  const res = await fetch(`${BASE}/activity-records/${recordId}/drawing-approvers/${approverId}`, {
+  const res = await wafSafeFetch(`${BASE}/activity-records/${recordId}/drawing-approvers/${approverId}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -227,7 +230,7 @@ export async function addDrawingApprover(
 }
 
 export async function removeDrawingApprover(recordId: string, approverId: string): Promise<void> {
-  const res = await fetch(`${BASE}/activity-records/${recordId}/drawing-approvers/${approverId}`, {
+  const res = await wafSafeFetch(`${BASE}/activity-records/${recordId}/drawing-approvers/${approverId}`, {
     method: 'DELETE',
     credentials: 'include',
   });

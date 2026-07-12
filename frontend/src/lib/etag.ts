@@ -23,6 +23,19 @@ export function setETag(id: string, etag: RawETag): void {
   store.set(id, etag);
 }
 
+/**
+ * Persist an ETag synthesized from a record's numeric version.
+ *
+ * The version in the response *body* is the source of truth for the ETag
+ * (`ETag: "{version}"`). The ETag response *header* can be stripped or weakened
+ * by intermediaries — nginx gzip drops/weakens it when it compresses the JSON —
+ * which left `getETag` empty and produced spurious "No ETag cached" errors on
+ * the create→patch path. Deriving it from the body makes it deterministic.
+ */
+export function setETagFromVersion(id: string, version: number): void {
+  store.set(id, `"${version}"`);
+}
+
 /** Retrieve the stored ETag for an id, or undefined if unknown. */
 export function getETag(id: string): RawETag | undefined {
   return store.get(id);

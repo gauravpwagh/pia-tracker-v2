@@ -8,6 +8,7 @@ import `in`.gov.ir.pia.attachment.InitiateMultipartResponse
 import `in`.gov.ir.pia.attachment.InitiateUploadRequest
 import `in`.gov.ir.pia.attachment.InitiateUploadResponse
 import `in`.gov.ir.pia.security.PiaPrincipal
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.security.core.annotation.AuthenticationPrincipal
@@ -38,6 +39,10 @@ import java.util.UUID
  *   GET    /api/v1/attachments?entityType=X&entityId=Y  — list
  *   GET    /api/v1/attachments/{id}/download            — presigned GET URL
  *   DELETE /api/v1/attachments/{id}                     — soft-delete
+ *
+ * TEMPORARY WAF workaround (see HANDOVER.md / AttachmentService doc comment):
+ *   POST /api/v1/attachments/{id}/upload-proxy               — single-part, in place of a direct PUT
+ *   POST /api/v1/attachments/{id}/upload-proxy-part?partNumber=N — multipart, in place of a direct PUT
  */
 @RestController
 class AttachmentController(
@@ -86,6 +91,31 @@ class AttachmentController(
         @RequestBody request: CompleteMultipartRequest,
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): AttachmentDto = attachmentService.completeMultipart(id, request, principal)
+
+    // ── TEMPORARY WAF workaround: proxy upload (see AttachmentService doc) ─────
+
+    @PostMapping("/api/v1/attachments/{id}/upload-proxy")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ATTACHMENT.UPLOAD.OWN_RECORDS')")
+    fun uploadProxy(
+        @PathVariable id: UUID,
+        request: HttpServletRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ) {
+        attachmentService.uploadProxy(id, principal, request)
+    }
+
+    @PostMapping("/api/v1/attachments/{id}/upload-proxy-part")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ATTACHMENT.UPLOAD.OWN_RECORDS')")
+    fun uploadProxyPart(
+        @PathVariable id: UUID,
+        @RequestParam partNumber: Int,
+        request: HttpServletRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): Map<String, String> {
+        val etag = attachmentService.uploadProxyPart(id, principal, partNumber, request)
+        return mapOf("etag" to etag)
+    }
 
     // ── Download / Delete ─────────────────────────────────────────────────────
 

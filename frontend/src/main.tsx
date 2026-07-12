@@ -9,9 +9,13 @@ import App from './App';
 import { i18n } from './i18n/i18n';
 import { tokens } from './theme/tokens';
 import { useThemeStore } from './stores/themeStore';
+import { installAuthInterceptor } from './lib/authInterceptor';
 
 import './theme/global.css';
 import './theme/print.css';
+
+// Redirect to /login on any 401 (session timeout) from the API.
+installAuthInterceptor();
 
 const queryClient = new QueryClient({
   defaultOptions: {

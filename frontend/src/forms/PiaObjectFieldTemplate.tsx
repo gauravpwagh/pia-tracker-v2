@@ -13,6 +13,17 @@ import type { ObjectFieldTemplateProps } from '@rjsf/utils';
 
 const { Text } = Typography;
 
+// Explicit field groups that should render together on their own row instead
+// of falling wherever the auto-fit grid happens to wrap them. A group only
+// applies when every one of its fields is present on the object (so this is
+// a no-op for objects that don't have that exact combination).
+const FIELD_ROW_GROUPS: string[][] = [
+  // TOS, US root; LA/FC's acquisition_details
+  ['record_name', 'block_section_from', 'block_section_to'],
+  // Temporary Office Space
+  ['office_spaces_required', 'location', 'structure_type'],
+];
+
 export function PiaObjectFieldTemplate({
   title,
   description,
@@ -33,6 +44,10 @@ export function PiaObjectFieldTemplate({
     (p) => p?.type === 'object' || typeof p?.$ref === 'string',
   );
   const gridColumns = hasNestedObject ? '1fr' : 'repeat(auto-fit, minmax(260px, 1fr))';
+
+  const activeGroups = FIELD_ROW_GROUPS.filter((group) => group.every((name) => name in props));
+  const groupedNames = new Set(activeGroups.flat());
+  const restProps = properties.filter((p) => !groupedNames.has(p.name));
 
   return (
     <div>
@@ -64,12 +79,27 @@ export function PiaObjectFieldTemplate({
           {description}
         </p>
       )}
+      {activeGroups.map((group) => {
+        const groupProps = group
+          .map((name) => properties.find((p) => p.name === name))
+          .filter((p): p is (typeof properties)[number] => p !== undefined);
+        return (
+          <div
+            key={group.join('+')}
+            style={{ display: 'grid', gridTemplateColumns: `repeat(${groupProps.length}, minmax(160px, 1fr))`, columnGap: 20 }}
+          >
+            {groupProps.map((prop) => (
+              <div key={prop.name}>{prop.content}</div>
+            ))}
+          </div>
+        );
+      })}
       {/* Two (or more, space permitting) fields per row instead of RJSF's default
           one-per-row — cuts vertical scrolling substantially on long forms.
           auto-fit/minmax lets a field that needs more room (e.g. a textarea)
           still wrap to its own row via the browser's natural grid flow. */}
       <div style={{ display: 'grid', gridTemplateColumns: gridColumns, columnGap: 20, rowGap: 0 }}>
-        {properties.map((prop) => (
+        {restProps.map((prop) => (
           <div key={prop.name}>{prop.content}</div>
         ))}
       </div>

@@ -81,6 +81,9 @@ dependencies {
     // OpenAPI
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
 
+    // JWT — cross-site SSO handoff verification (see sso-poc/INTEGRATION_SPEC.md)
+    implementation("com.nimbusds:nimbus-jose-jwt:9.40")
+
     // Rate limiting
     implementation("com.bucket4j:bucket4j-core:$bucket4jVersion")
 

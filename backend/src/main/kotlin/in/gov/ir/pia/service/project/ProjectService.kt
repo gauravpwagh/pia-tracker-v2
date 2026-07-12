@@ -70,6 +70,16 @@ data class ProjectHistoryEntry(
     val details: String?,
 )
 
+/** One KMZ file uploaded to a project's Land-Acquisition checklist (map view). */
+data class ProjectKmzFile(
+    val attachmentId: UUID,
+    val filename: String,
+    val sizeBytes: Long,
+    val recordId: UUID,
+    val recordName: String?,
+    val createdAt: Instant,
+)
+
 data class ProjectAssignmentItem(
     val id: UUID,
     val userId: UUID,
@@ -89,6 +99,7 @@ data class ProjectDetailResponse(
     val chainageToKm: BigDecimal?,
     val lengthKm: BigDecimal?,
     val ipaDate: LocalDate?,
+    val stationNames: String?,
     val recommendedByBoardOn: LocalDate?,
     val targetCompletionYear: Int?,
     val lifecycleState: String,
@@ -97,6 +108,16 @@ data class ProjectDetailResponse(
     val createdAt: Instant,
     val updatedAt: Instant,
     val version: Int,
+)
+
+/**
+ * Editable "Project Details" fields on the Overview panel (#8). Deliberately narrow —
+ * Length and Station names only. Everything else (name, code, type, zone, lifecycle)
+ * is set at project creation or via the dedicated lifecycle/assignment actions.
+ */
+data class UpdateProjectDetailsRequest(
+    val lengthKm: BigDecimal? = null,
+    val stationNames: String? = null,
 )
 
 // ── Service ────────────────────────────────────────────────────────────────────
@@ -120,6 +141,7 @@ class ProjectService(
     private val workflowService: WorkflowService,
     private val auditLogWriter: AuditLogWriter,
     private val jdbc: JdbcTemplate,
+    private val entityManager: jakarta.persistence.EntityManager,
 ) {
     // ── Read ──────────────────────────────────────────────────────────────────
 
@@ -248,6 +270,46 @@ class ProjectService(
             },
             projectId,
             projectId,
+            projectId,
+        )
+    }
+
+    /**
+     * All KMZ files uploaded to this project's Land-Acquisition scope Checklist
+     * ("KMZ File" field). Field-scoped attachments live under
+     * `entity_type = 'PROJECT_ACTIVITY__kmz_file'` with `entity_id = activity id`
+     * (the checklist moved from the per-record view to the Activity Scope). Only
+     * clean (virus-scanned), non-deleted files are returned; the map view downloads
+     * each via the normal attachment-download route and parses it (KMZ → GeoJSON)
+     * client-side. `recordId`/`recordName` carry the owning activity's id/name.
+     */
+    fun listKmzFiles(
+        projectId: UUID,
+        principal: PiaPrincipal,
+    ): List<ProjectKmzFile> {
+        getForPrincipal(projectId, principal) // zone-check; throws 404 if inaccessible
+        return jdbc.query(
+            """
+            SELECT a.id, a.original_filename, a.file_size_bytes,
+                   a.entity_id AS record_id, pa.name AS record_name, a.created_at
+              FROM attachments a
+              JOIN project_activities pa ON pa.id = a.entity_id
+             WHERE a.entity_type = 'PROJECT_ACTIVITY__kmz_file'
+               AND a.is_deleted = false
+               AND a.scan_status = 'CLEAN'
+               AND pa.project_id = ?
+             ORDER BY a.created_at DESC
+            """.trimIndent(),
+            { rs, _ ->
+                ProjectKmzFile(
+                    attachmentId = rs.getObject("id", UUID::class.java),
+                    filename = rs.getString("original_filename"),
+                    sizeBytes = rs.getLong("file_size_bytes"),
+                    recordId = rs.getObject("record_id", UUID::class.java),
+                    recordName = rs.getString("record_name"),
+                    createdAt = rs.getTimestamp("created_at").toInstant(),
+                )
+            },
             projectId,
         )
     }
@@ -599,6 +661,60 @@ class ProjectService(
     }
 
     /**
+     * Updates the editable "Project Details" fields on the Overview panel (#8):
+     * Length (km) and Station names. Everything else about a project is set at
+     * creation or via the dedicated lifecycle/assignment actions — this endpoint
+     * deliberately does not touch name, code, type, zone, or lifecycle state.
+     *
+     * Access: [getForPrincipal] proves the caller can see the project (their own
+     * assignment, zone, or ALL scope); `@PreAuthorize PROJECT.UPDATE.OWN` on the
+     * controller method further restricts *who* may call this at all (CE/C, Dy
+     * CE/C, Nodal Dy CE/C, EDGS/CI, super admin).
+     */
+    @Transactional
+    fun updateDetails(
+        projectId: UUID,
+        request: UpdateProjectDetailsRequest,
+        principal: PiaPrincipal,
+    ): ProjectDetailResponse {
+        val project = getForPrincipal(projectId, principal)
+
+        jdbc.update(
+            """
+            UPDATE projects
+               SET length_km          = ?,
+                   station_names      = ?,
+                   updated_by_user_id = ?,
+                   updated_at         = now(),
+                   version            = version + 1
+             WHERE id = ? AND is_deleted = false
+            """.trimIndent(),
+            request.lengthKm,
+            request.stationNames,
+            principal.userId,
+            projectId,
+        )
+
+        auditLogWriter.write(
+            actorUserId = principal.userId,
+            action = "PROJECT.UPDATE_DETAILS",
+            entityType = "PROJECT",
+            entityId = project.id,
+        )
+
+        // getForPrincipal above loaded this Project via JPA — clear the L1 cache so the
+        // re-fetch below sees the jdbc UPDATE just written, not a stale cached instance.
+        entityManager.clear()
+        val updated =
+            projectRepository.findByIdAndIsDeletedFalse(projectId)
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val currentLifecycle =
+            workflowService.currentState("PROJECT", projectId)?.code
+                ?: updated.lifecycleState
+        return updated.toDetailResponse(lifecycleState = currentLifecycle)
+    }
+
+    /**
      * Super-admin removes a project. Transitions the workflow to REMOVED state.
      * Removed projects are hidden from all non-super-admin users.
      */
@@ -718,6 +834,7 @@ class ProjectService(
             chainageToKm = chainageToKm,
             lengthKm = lengthKm,
             ipaDate = ipaDate,
+            stationNames = stationNames,
             recommendedByBoardOn = recommendedByBoardOn,
             targetCompletionYear = targetCompletionYear,
             lifecycleState = lifecycleState,

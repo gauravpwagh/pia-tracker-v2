@@ -26,7 +26,7 @@ export function HomePage() {
           <Text code>{location.pathname}</Text>
         </Space>
         <Paragraph type="secondary" style={{ fontSize: 13, marginTop: 16 }}>
-          See <Text code>CLAUDE.md</Text> for project orientation, then <Text code>docs/</Text> for
+          See <Text code>cris</Text> for project orientation, then <Text code>docs/</Text> for
           architecture, database, workflow, permissions, forms, dashboards, UI, API, security,
           testing, deployment, and phasing.
         </Paragraph>

@@ -69,6 +69,35 @@ export async function selectUser(userId: string): Promise<PrincipalInfo> {
   return handleResponse<PrincipalInfo>(res);
 }
 
+/**
+ * Fallback username+password login. Username is the HRMS id or email; the initial
+ * password is the HRMS id. Returns the resolved principal, or throws on bad credentials.
+ */
+export async function login(username: string, password: string): Promise<PrincipalInfo> {
+  const res = await fetch(`${BASE}/auth/login`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  return handleResponse<PrincipalInfo>(res);
+}
+
+/** Changes the current user's password. Throws with the server's message on failure. */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const res = await fetch(`${BASE}/auth/change-password`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  if (!res.ok) {
+    // Backend returns RFC-7807 problem+json with a human-readable `detail`.
+    const problem = await res.json().catch(() => null);
+    throw new Error(problem?.detail ?? `HTTP ${res.status}`);
+  }
+}
+
 /** Logs out by invalidating the current session. */
 export async function logout(): Promise<void> {
   await fetch(`${BASE}/auth/logout`, {

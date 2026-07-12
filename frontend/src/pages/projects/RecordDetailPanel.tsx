@@ -17,7 +17,6 @@
  */
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import {
@@ -408,9 +407,9 @@ function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
 
   const adEntries = flattenSection(
     (dataJson.acquisition_details as Record<string, unknown> | undefined) ?? {},
-    ['record_name','block_section','chainage_from','chainage_to','district','sub_division_taluka',
+    ['record_name','block_section_from','block_section_to','chainage_from','chainage_to','district','sub_division_taluka',
      'area_hectares_total','area_hectares_private','area_hectares_govt','area_hectares_forest','est_villages'],
-    { record_name:'Record Name', block_section:'Block Section', chainage_from:'Chainage From',
+    { record_name:'Record Name', block_section_from:'From Station', block_section_to:'To Station', chainage_from:'Chainage From',
       chainage_to:'Chainage To', district:'District', sub_division_taluka:'Sub-Division / Taluka',
       area_hectares_total:'Total Area (ha)', area_hectares_private:'Private Land (ha)',
       area_hectares_govt:'Govt. Land (ha)', area_hectares_forest:'Forest Land (ha)',
@@ -467,13 +466,6 @@ function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
       arbitration_notes:'Arbitration Notes' },
   );
 
-  const LA_CHECKLIST_FIELDS = [
-    { key: 'kmz_file',         label: 'KMZ File' },
-    { key: 'drone_footage',    label: "Drone Footage of L' Section" },
-    { key: 'srp_notification', label: 'Notification of SRP' },
-    { key: 'cala_nomination',  label: 'CALA Nomination' },
-  ];
-
   const dl = (id: string) => downloadMutation.mutate(id);
 
   return (
@@ -487,7 +479,7 @@ function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
       <LaSectionBlock title="Section 20E" entries={s20eEntries} attachFiles={attachFor('section_20e')} downloadFn={dl} />
       <LaSectionBlock title="Section 20F-G" entries={s20fgEntries} downloadFn={dl} />
       <LaSectionBlock title="Section 20H-I" entries={s20hiEntries} attachFiles={attachFor('section_20h_i')} downloadFn={dl} />
-      <FcAttachmentSectionPanel recordId={recordId} fields={LA_CHECKLIST_FIELDS} title="Checklist" />
+      {/* #16 — the LA document checklist (KMZ/Drone/SRP/CALA) moved to the Activity Scope. */}
       <LaSectionBlock title="Mutation" entries={mutationEntries} attachFiles={attachFor('mutation')} downloadFn={dl} />
     </>
   );
@@ -579,8 +571,8 @@ function FcDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
 
   const adEntries = fcFlatten(
     (dataJson.acquisition_details as Record<string, unknown> | undefined) ?? {},
-    ['record_name','block_section','chainage_from','chainage_to','forest_division','forest_area'],
-    { record_name:'Record Name', block_section:'Block Section', chainage_from:'Chainage From',
+    ['record_name','block_section_from','block_section_to','chainage_from','chainage_to','forest_division','forest_area'],
+    { record_name:'Record Name', block_section_from:'From Station', block_section_to:'To Station', chainage_from:'Chainage From',
       chainage_to:'Chainage To', forest_division:'Forest Division', forest_area:'Forest Area (ha)' },
   );
   const stageIEntries = fcFlatten(
@@ -634,7 +626,6 @@ export function RecordDetailPanel({
   onViewData,
 }: RecordDetailPanelProps) {
   const { t } = useTranslation('forms');
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const currentUser = useAuthStore((s) => s.currentUser);
 
@@ -709,6 +700,9 @@ export function RecordDetailPanel({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['record', recordId] });
       void queryClient.invalidateQueries({ queryKey: ['activity', record?.projectActivityId] });
+      // The record list (activity pane, left) reads from this cache — invalidate it
+      // so a renamed record shows the new name immediately, not only after a refresh.
+      void queryClient.invalidateQueries({ queryKey: ['records', record?.projectActivityId] });
       setEditing(false);
     },
   });
@@ -839,11 +833,7 @@ export function RecordDetailPanel({
               size="small"
               type="primary"
               icon={<EditOutlined />}
-              onClick={() => {
-                if (onViewData) onViewData();
-                else if (onEdit) onEdit();
-                else navigate(`/records/${recordId}/edit`, { state: { returnPath: window.location.pathname } });
-              }}
+              onClick={() => { if (onViewData) onViewData(); else onEdit?.(); }}
             >
               View Data
             </Button>
@@ -857,10 +847,7 @@ export function RecordDetailPanel({
               size="small"
               type="primary"
               icon={<EditOutlined />}
-              onClick={() => {
-                if (onEdit) onEdit();
-                else navigate(`/records/${recordId}/edit`, { state: { returnPath: window.location.pathname } });
-              }}
+              onClick={() => onEdit?.()}
             >
               Edit Data
             </Button>
@@ -984,7 +971,7 @@ export function RecordDetailPanel({
                       CONSTRUCTION: 'Construction Organisation',
                     };
                     const US_ORDER = [
-                      'record_name', 'block_section',
+                      'record_name', 'block_section_from', 'block_section_to',
                       'utility_type', 'owner_agency',
                       'chainage_from', 'chainage_to', 'length_affected_km',
                       'executing_agency',
@@ -995,7 +982,8 @@ export function RecordDetailPanel({
                     ];
                     const US_LABELS: Record<string, string> = {
                       record_name:              'Record Name',
-                      block_section:            'Block / Section',
+                      block_section_from:       'From Station',
+                      block_section_to:         'To Station',
                       utility_type:             'Infringement / Utility Type',
                       owner_agency:             'Owner Agency',
                       chainage_from:            'Chainage From',
@@ -1072,9 +1060,14 @@ export function RecordDetailPanel({
                             {String(data.office_spaces_required)}
                           </Descriptions.Item>
                         )}
-                        {data.block_section !== undefined && data.block_section !== '' && (
-                          <Descriptions.Item label="Block / Section">
-                            {String(data.block_section)}
+                        {data.block_section_from !== undefined && data.block_section_from !== '' && (
+                          <Descriptions.Item label="From Station">
+                            {String(data.block_section_from)}
+                          </Descriptions.Item>
+                        )}
+                        {data.block_section_to !== undefined && data.block_section_to !== '' && (
+                          <Descriptions.Item label="To Station">
+                            {String(data.block_section_to)}
                           </Descriptions.Item>
                         )}
                         {data.location !== undefined && data.location !== '' && (
@@ -1125,9 +1118,14 @@ export function RecordDetailPanel({
                             {String(data.packages_required)}
                           </Descriptions.Item>
                         )}
-                        {data.block_section !== undefined && data.block_section !== '' && (
-                          <Descriptions.Item label="Block / Section">
-                            {String(data.block_section)}
+                        {data.block_section_from !== undefined && data.block_section_from !== '' && (
+                          <Descriptions.Item label="From Station">
+                            {String(data.block_section_from)}
+                          </Descriptions.Item>
+                        )}
+                        {data.block_section_to !== undefined && data.block_section_to !== '' && (
+                          <Descriptions.Item label="To Station">
+                            {String(data.block_section_to)}
                           </Descriptions.Item>
                         )}
                         {data.epc_document_prepared !== undefined && (

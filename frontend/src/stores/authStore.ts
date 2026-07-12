@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   fetchMe,
   fetchUsers,
+  login as apiLogin,
   logout as apiLogout,
   selectUser as apiSelectUser,
 } from '@api/auth';
@@ -14,6 +15,8 @@ interface AuthState {
   loadUsers: () => Promise<void>;
   /** Select a user by id — updates session and resolves the full principal. */
   selectUser: (userId: string) => Promise<void>;
+  /** Fallback username+password login. Throws on bad credentials. */
+  login: (username: string, password: string) => Promise<void>;
   /** Logs out and clears the current user from the store. */
   logout: () => Promise<void>;
   /** Checks the server for an existing session and populates currentUser. */
@@ -38,6 +41,14 @@ export const useAuthStore = create<AuthState>()((set) => ({
     // DummyAuthFilter hasn't run yet for that request. Call /me immediately
     // after to get the fully resolved principal (roles + permissions).
     await apiSelectUser(userId);
+    const resolved = await fetchMe();
+    set({ currentUser: resolved });
+  },
+
+  login: async (username: string, password: string) => {
+    // login sets the session but returns permissions: [] (the auth filter hasn't
+    // run yet for that request). Call /me immediately after for the full principal.
+    await apiLogin(username, password);
     const resolved = await fetchMe();
     set({ currentUser: resolved });
   },

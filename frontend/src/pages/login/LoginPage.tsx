@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   AutoComplete,
   Button,
@@ -33,8 +34,10 @@ const { Text } = Typography;
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { users, loadUsers, selectUser, currentUser } = useAuthStore();
+  const queryClient = useQueryClient();
+  const { users, loadUsers, login, currentUser } = useAuthStore();
   const [usernameInput, setUsernameInput] = useState('');
+  const [password, setPassword] = useState('');
   const [selectedUser, setSelectedUser] = useState<UserSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +52,7 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    if (currentUser) navigate('/', { replace: true });
+    if (currentUser) navigate('/home', { replace: true });
   }, [currentUser, navigate]);
 
   // Coming back from /login/search with a picked officer — pre-fill the username field.
@@ -100,20 +103,26 @@ export default function LoginPage() {
     if (u) setUsernameInput(u.name);
   };
 
+  // Username sent to the backend: the picked officer's email, or whatever the user
+  // typed (their HRMS id or email). The initial password is the HRMS id.
+  const username = selectedUser ? selectedUser.email : usernameInput.trim();
+  const canSignIn = !!username && !!password;
+
   const handleSignIn = async () => {
-    if (!selectedUser) {
-      setError('Enter a valid username, or use Search officers to find one.');
+    if (!canSignIn) {
+      setError('Enter your username (HRMS ID or email) and password.');
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      // Password is a dummy field — not sent anywhere, not checked against
-      // anything. Only the resolved username (an existing officer) matters.
-      await selectUser(selectedUser.id);
-      navigate('/', { replace: true });
+      await login(username, password);
+      // Wipe any cached data from a previous session (e.g. the prior user's project
+      // list) so the new user doesn't see stale rows until a manual refresh.
+      queryClient.clear();
+      navigate('/home', { replace: true });
     } catch {
-      setError('Sign in failed. Please try again.');
+      setError('Invalid username or password.');
     } finally {
       setLoading(false);
     }
@@ -298,18 +307,24 @@ export default function LoginPage() {
                 placeholder="Password"
                 size="large"
                 style={{ borderColor: '#8c8c8c' }}
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(null); }}
+                onPressEnter={() => void handleSignIn()}
               />
               <Button
                 type="primary"
                 block
                 size="large"
-                disabled={!selectedUser}
+                disabled={!canSignIn}
                 loading={loading}
                 onClick={() => void handleSignIn()}
                 style={{ marginTop: 4 }}
               >
                 Sign in
               </Button>
+              <Text type="secondary" style={{ fontSize: 11, textAlign: 'center', display: 'block' }}>
+                First-time sign-in: your password is your HRMS ID or IRPSM login ID.
+              </Text>
             </Space>
 
             {error && (
@@ -334,7 +349,7 @@ export default function LoginPage() {
 
         <div style={{ textAlign: 'center', marginTop: 16 }}>
           <Text type="secondary" style={{ fontSize: 13 }}>
-            Indian Railways · PIA Tracker · Development environment
+            Indian Railways · PIA Tracker · Production environment
           </Text>
         </div>
           </div>

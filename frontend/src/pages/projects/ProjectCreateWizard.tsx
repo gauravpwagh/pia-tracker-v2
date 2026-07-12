@@ -15,7 +15,7 @@
 
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, DatePicker, Form, Input, Modal, Select, Space, Typography } from 'antd';
 import { CheckOutlined } from '@ant-design/icons';
@@ -130,9 +130,16 @@ export default function ProjectCreateWizard({
 
   // ── Mutation ───────────────────────────────────────────────────────────────
 
+  const queryClient = useQueryClient();
+
   const mutation = useMutation({
     mutationFn: createProject,
     onSuccess: (project) => {
+      // The just-created project consumed a serial, so every cached next-serial
+      // value is now stale. Invalidate the whole family so the next open (or a
+      // second create for the same zone+type) fetches .002 instead of showing
+      // the cached .001 until a full page refresh.
+      void queryClient.invalidateQueries({ queryKey: ['next-serial'] });
       onCreated?.(project);
       handleReset();
       if (project.projectCode) {

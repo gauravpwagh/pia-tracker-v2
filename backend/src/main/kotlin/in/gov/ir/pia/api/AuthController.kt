@@ -5,6 +5,7 @@ import `in`.gov.ir.pia.repository.UserRepository
 import `in`.gov.ir.pia.repository.ZoneRepository
 import `in`.gov.ir.pia.security.DummyAuthFilter.Companion.SESSION_USER_ID_KEY
 import `in`.gov.ir.pia.security.PiaPrincipal
+import `in`.gov.ir.pia.service.auth.PasswordAuthService
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpSession
 import org.springframework.context.annotation.Profile
@@ -41,6 +42,17 @@ data class SelectUserRequest(
     val userId: UUID,
 )
 
+data class LoginRequest(
+    /** HRMS id (employee_id) or email. */
+    val username: String,
+    val password: String,
+)
+
+data class ChangePasswordRequest(
+    val currentPassword: String,
+    val newPassword: String,
+)
+
 data class PrincipalResponse(
     val userId: UUID,
     val name: String,
@@ -75,6 +87,7 @@ class AuthController(
     private val designationRepository: DesignationRepository,
     private val zoneRepository: ZoneRepository,
     private val jdbc: JdbcTemplate,
+    private val passwordAuthService: PasswordAuthService,
 ) {
     /**
      * Returns active, non-deleted users for the role-picker dropdown.
@@ -188,6 +201,45 @@ class AuthController(
             permissions = emptySet(),
             isSuperAdmin = user.designationCode == "SUPER_ADMIN",
         )
+    }
+
+    /**
+     * Fallback username+password login. Username is the HRMS id (or email); the initial
+     * password is the HRMS id (see [PasswordAuthService]). On success, sets the session
+     * user so [DummyAuthFilter] builds the principal on the next request — same mechanism
+     * as [selectUser].
+     */
+    @PostMapping("/login")
+    fun login(
+        @RequestBody body: LoginRequest,
+        request: HttpServletRequest,
+    ): PrincipalResponse {
+        val user = passwordAuthService.login(body.username, body.password)
+
+        val session: HttpSession = request.getSession(true)
+        session.setAttribute(SESSION_USER_ID_KEY, user.id.toString())
+
+        return PrincipalResponse(
+            userId = user.id,
+            name = user.name,
+            email = user.email,
+            designationCode = user.designationCode,
+            primaryZoneId = user.primaryZoneId,
+            accessibleZoneIds = setOfNotNull(user.primaryZoneId),
+            permissions = emptySet(),
+            isSuperAdmin = user.designationCode == "SUPER_ADMIN",
+        )
+    }
+
+    /** Self-service password change for the currently authenticated user. */
+    @PostMapping("/change-password")
+    fun changePassword(
+        @RequestBody body: ChangePasswordRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal?,
+    ): ResponseEntity<Void> {
+        principal ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "No active session")
+        passwordAuthService.changePassword(principal.userId, body.currentPassword, body.newPassword)
+        return ResponseEntity.noContent().build()
     }
 
     /** Invalidates the current session. */

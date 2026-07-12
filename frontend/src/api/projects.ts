@@ -11,6 +11,7 @@
  */
 
 import { API_BASE } from '@lib/apiBase';
+import { wafSafeFetch } from '@lib/wafSafeFetch';
 const BASE = API_BASE;
 
 // ── Zone ─────────────────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ export interface ProjectSummaryResponse {
   chainageToKm: number | null;
   lengthKm: number | null;
   ipaDate: string | null;
+  stationNames: string | null;
   targetCompletionYear: number | null;
   createdAt: string;
 }
@@ -61,6 +63,7 @@ export interface ProjectDetailResponse {
   chainageToKm: number | null;
   lengthKm: number | null;
   ipaDate: string | null;
+  stationNames: string | null;
   recommendedByBoardOn: string | null;
   targetCompletionYear: number | null;
   lifecycleState: string;
@@ -141,6 +144,25 @@ export async function fetchProjectDetail(id: string): Promise<ProjectDetailRespo
   return handleResponse<ProjectDetailResponse>(res);
 }
 
+/** Editable "Project Details" fields (#8) — Length and Station names only. */
+export interface UpdateProjectDetailsRequest {
+  lengthKm?: number;
+  stationNames?: string;
+}
+
+export async function updateProjectDetails(
+  id: string,
+  request: UpdateProjectDetailsRequest,
+): Promise<ProjectDetailResponse> {
+  const res = await wafSafeFetch(`${BASE}/projects/${id}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  return handleResponse<ProjectDetailResponse>(res);
+}
+
 export async function createProject(
   request: CreateProjectRequest,
 ): Promise<ProjectDetailResponse> {
@@ -198,6 +220,21 @@ export async function fetchProjectHistory(projectId: string): Promise<ProjectHis
   return handleResponse<ProjectHistoryEntry[]>(res);
 }
 
+export interface ProjectKmzFile {
+  attachmentId: string;
+  filename: string;
+  sizeBytes: number;
+  recordId: string;
+  recordName: string | null;
+  createdAt: string;
+}
+
+/** KMZ files uploaded to a project's Land-Acquisition checklist (for the Map view). */
+export async function fetchProjectKmzFiles(projectId: string): Promise<ProjectKmzFile[]> {
+  const res = await fetch(`${BASE}/projects/${projectId}/map/kmz-files`, { credentials: 'include' });
+  return handleResponse<ProjectKmzFile[]>(res);
+}
+
 // ── Activities ────────────────────────────────────────────────────────────────
 
 export async function fetchActivities(projectId: string): Promise<ActivityDetailResponse[]> {
@@ -229,7 +266,7 @@ export async function updateActivity(
   activityId: string,
   request: UpdateActivityRequest,
 ): Promise<ActivityDetailResponse> {
-  const res = await fetch(`${BASE}/activities/${activityId}`, {
+  const res = await wafSafeFetch(`${BASE}/activities/${activityId}`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },

@@ -20,6 +20,7 @@
  */
 
 import { API_BASE } from '@lib/apiBase';
+import { wafSafeFetch } from '@lib/wafSafeFetch';
 const BASE = API_BASE;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -136,7 +137,7 @@ export async function getAttachmentDownloadUrl(id: string): Promise<AttachmentDo
 }
 
 export async function deleteAttachment(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/attachments/${id}`, {
+  const res = await wafSafeFetch(`${BASE}/attachments/${id}`, {
     method: 'DELETE',
     credentials: 'include',
   });

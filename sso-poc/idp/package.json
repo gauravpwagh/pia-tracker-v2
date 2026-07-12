@@ -1,0 +1,14 @@
+{
+  "name": "pia-sso-poc-idp",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Throwaway mock IdP for the PIA cross-site SSO POC. Mints HS256 JWTs and redirects to PIA. Not for production.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

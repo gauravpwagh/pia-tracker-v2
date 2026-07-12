@@ -29,6 +29,10 @@ const DefaultFieldTemplate = AntdTemplates.FieldTemplate!;
 const LONG_TEXT_NAME_PATTERN =
   /status|comment|remark|reason|note|description|execution|summary|objection/i;
 const FULL_WIDTH_WIDGETS = new Set(['attachment', 'gazette_reference', 'textarea']);
+// Widgets that render their own bold title internally. RJSF's field label would
+// duplicate it (e.g. the Checklist showed "KMZ File" twice), so we suppress the
+// RJSF-rendered label for these via displayLabel:false.
+const SELF_TITLED_WIDGETS = new Set(['attachment', 'gazette_reference']);
 
 export function PiaFieldTemplate(props: FieldTemplateProps) {
   const { uiSchema, schema, id } = props;
@@ -39,9 +43,12 @@ export function PiaFieldTemplate(props: FieldTemplateProps) {
   const isLongTextField = LONG_TEXT_NAME_PATTERN.test(id ?? '');
   const spanFullWidth = isObjectOrArray || isFullWidthWidget || isLongTextField;
 
+  const rendersOwnTitle = widget !== undefined && SELF_TITLED_WIDGETS.has(widget);
+  const fieldProps = rendersOwnTitle ? { ...props, displayLabel: false } : props;
+
   return (
     <div style={spanFullWidth ? { gridColumn: '1 / -1' } : undefined}>
-      <DefaultFieldTemplate {...props} />
+      <DefaultFieldTemplate {...fieldProps} />
     </div>
   );
 }

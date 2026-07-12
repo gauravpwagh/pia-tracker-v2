@@ -28,7 +28,6 @@ import {
   Row,
   Space,
   Spin,
-  Statistic,
   Table,
   Tag,
   Typography,
@@ -55,13 +54,6 @@ import {
   type ZoneProjectDto,
   type ZoneSummaryDto,
 } from '@api/dashboard';
-import { LandAcquisitionDashboard } from '@pages/projects/dashboards/LandAcquisitionDashboard';
-import { UtilityShiftingDashboard } from '@pages/projects/dashboards/UtilityShiftingDashboard';
-import { ForestClearanceDashboard } from '@pages/projects/dashboards/ForestClearanceDashboard';
-import { DrawingApprovalDashboard } from '@pages/projects/dashboards/DrawingApprovalDashboard';
-import { TemporaryOfficeSpaceDashboard } from '@pages/projects/dashboards/TemporaryOfficeSpaceDashboard';
-import { TenderPackagingDashboard } from '@pages/projects/dashboards/TenderPackagingDashboard';
-
 const { Title, Text } = Typography;
 
 // ── Checkbox dropdown (Select-all + per-item checkboxes) ──────────────────────
@@ -437,40 +429,15 @@ const ACTIVITIES: ActivityDef[] = [
   },
 ];
 
-// ── Per-activity detail dashboard (shown when a single project is selected) ───
-
-interface ActivityDetailProps {
-  activityTypeCode: string;
-  projectId: string;
-}
-
-function ActivityDetailDashboard({ activityTypeCode, projectId }: ActivityDetailProps) {
-  if (activityTypeCode === 'LAND_ACQUISITION')
-    return <LandAcquisitionDashboard projectId={projectId} />;
-  if (activityTypeCode === 'UTILITY_SHIFTING')
-    return <UtilityShiftingDashboard projectId={projectId} />;
-  if (activityTypeCode === 'FOREST_CLEARANCE')
-    return <ForestClearanceDashboard projectId={projectId} />;
-  if (activityTypeCode === 'DRAWING_APPROVAL')
-    return <DrawingApprovalDashboard projectId={projectId} />;
-  if (activityTypeCode === 'TENDER_PACKAGING')
-    return <TenderPackagingDashboard projectId={projectId} />;
-  if (activityTypeCode === 'TEMPORARY_OFFICE_SPACE')
-    return <TemporaryOfficeSpaceDashboard projectId={projectId} />;
-  return null;
-}
-
-// ── KPI card for one activity ─────────────────────────────────────────────────
+// ── Compact KPI card for one activity (grid tile) ─────────────────────────────
 
 interface ActivityKpiCardProps {
   def: ActivityDef;
   summary: CumulativeActivitySummaryDto | undefined;
   loading: boolean;
-  /** Set when exactly one project is selected — enables the detail drill-down. */
-  singleProjectId: string | null;
 }
 
-function ActivityKpiCard({ def, summary, loading, singleProjectId }: ActivityKpiCardProps) {
+function ActivityKpiCard({ def, summary, loading }: ActivityKpiCardProps) {
   const total = summary?.totalRecords ?? 0;
   const slaBreaches = summary?.slaBreachCount ?? 0;
 
@@ -478,20 +445,17 @@ function ActivityKpiCard({ def, summary, loading, singleProjectId }: ActivityKpi
   const denominator = summary ? def.progressDenominator(summary) : 0;
   const pct = denominator > 0 ? Math.round((numerator / denominator) * 100) : 0;
 
-  // Columns span: 5 KPIs → xs:12 sm:{ flex: '20%' }; 4 KPIs → xs:12 sm:6
-  const colSpan = def.kpis.length === 5 ? undefined : 6;
-  const colFlex = def.kpis.length === 5 ? '20%' : undefined;
-
   return (
     <Card
       size="small"
-      style={{ borderLeft: `4px solid ${def.accentColor}`, marginBottom: 16 }}
+      style={{ borderLeft: `4px solid ${def.accentColor}`, height: '100%' }}
+      styles={{ body: { padding: '10px 14px' }, header: { minHeight: 38, padding: '0 14px' } }}
       title={
-        <Space>
-          <span style={{ color: def.accentColor, fontWeight: 700 }}>{def.label}</span>
+        <Space size={6}>
+          <span style={{ color: def.accentColor, fontWeight: 700, fontSize: 13 }}>{def.label}</span>
           {slaBreaches > 0 && (
-            <Tag color="red" icon={<ExclamationCircleOutlined />}>
-              {slaBreaches} SLA breach{slaBreaches !== 1 ? 'es' : ''}
+            <Tag color="red" style={{ fontSize: 11, margin: 0, lineHeight: '16px' }}>
+              {slaBreaches} SLA
             </Tag>
           )}
         </Space>
@@ -499,12 +463,19 @@ function ActivityKpiCard({ def, summary, loading, singleProjectId }: ActivityKpi
     >
       <Spin spinning={loading}>
         {total === 0 && !loading ? (
-          <Text type="secondary" style={{ fontSize: 13 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
             No records yet.
           </Text>
         ) : (
           <>
-            <Row gutter={[24, 16]} style={{ marginBottom: 12 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '6px 14px',
+                marginBottom: 10,
+              }}
+            >
               {def.kpis.map((kpi) => {
                 const val = summary ? kpi.getValue(summary) : 0;
                 const pctVal =
@@ -513,58 +484,37 @@ function ActivityKpiCard({ def, summary, loading, singleProjectId }: ActivityKpi
                       ? Math.round((val / kpi.totalGetter(summary)) * 100)
                       : 0
                     : null;
+                // Suppress the alert colour when the count is zero (nothing wrong).
                 const effectiveColor =
-                  kpi.color === '#ff4d4f' && val === 0
+                  (kpi.color === '#ff4d4f' || kpi.color === '#fa8c16') && val === 0
                     ? undefined
-                    : kpi.color === '#fa8c16' && val === 0
-                      ? undefined
-                      : kpi.color;
+                    : kpi.color;
 
                 return (
-                  <Col key={kpi.label} xs={12} sm={colSpan} flex={colFlex}>
-                    <Statistic
-                      title={
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {kpi.label}
-                        </Text>
-                      }
-                      value={val}
-                      prefix={
-                        <span style={{ color: effectiveColor ?? 'var(--ant-color-text-secondary)' }}>
-                          {kpi.icon}
+                  <div key={kpi.label}>
+                    <div style={{ fontSize: 11, color: 'var(--ant-color-text-secondary)', lineHeight: 1.3 }}>
+                      {kpi.label}
+                    </div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: effectiveColor, lineHeight: 1.25 }}>
+                      {val}
+                      {pctVal !== null && (
+                        <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--ant-color-text-secondary)' }}>
+                          {' '}({pctVal}%)
                         </span>
-                      }
-                      suffix={
-                        pctVal !== null ? (
-                          <Text type="secondary" style={{ fontSize: 13 }}>
-                            {' '}({pctVal}%)
-                          </Text>
-                        ) : undefined
-                      }
-                      valueStyle={{
-                        fontSize: 22,
-                        fontWeight: 700,
-                        color: effectiveColor,
-                      }}
-                    />
-                  </Col>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
-            </Row>
+            </div>
 
             {denominator > 0 && (
               <div>
-                <div
-                  style={{
-                    marginBottom: 4,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <Text style={{ fontSize: 12 }} type="secondary">
+                <div style={{ marginBottom: 2, display: 'flex', justifyContent: 'space-between' }}>
+                  <Text style={{ fontSize: 11 }} type="secondary">
                     {def.progressLabel}
                   </Text>
-                  <Text style={{ fontSize: 12 }}>{pct}%</Text>
+                  <Text style={{ fontSize: 11 }}>{pct}%</Text>
                 </div>
                 <Progress
                   percent={pct}
@@ -574,31 +524,6 @@ function ActivityKpiCard({ def, summary, loading, singleProjectId }: ActivityKpi
                   style={{ marginBottom: 0 }}
                 />
               </div>
-            )}
-
-            {/* Detail drill-down — only when a single project is in scope */}
-            {singleProjectId ? (
-              <Collapse
-                ghost
-                size="small"
-                style={{ marginTop: 12 }}
-                items={[{
-                  key: 'detail',
-                  label: <Text type="secondary" style={{ fontSize: 12 }}>Details</Text>,
-                  children: (
-                    <ActivityDetailDashboard
-                      activityTypeCode={def.code}
-                      projectId={singleProjectId}
-                    />
-                  ),
-                }]}
-              />
-            ) : (
-              total > 0 && (
-                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 10 }}>
-                  Select a single project to see detailed breakdown.
-                </Text>
-              )
             )}
           </>
         )}
@@ -929,21 +854,6 @@ export default function DashboardPage() {
     return map;
   }, [cumulative]);
 
-  // When the filter resolves to exactly one project, pass it to cards for detail drill-down.
-  const singleProjectId = useMemo((): string | null => {
-    if (!scope || !filtersInitialized) return null;
-    // Determine the effective project set (mirrors queryProjectIds logic but returns ids, not empty=[all])
-    const zoneSet = new Set(
-      selectedZoneIds.length > 0 ? selectedZoneIds : scope.zones.map((z) => z.id),
-    );
-    const visibleProjects = scope.projects.filter((p) => zoneSet.has(p.zoneId));
-    const effectiveIds =
-      selectedProjectIds.length === visibleProjects.length
-        ? visibleProjects.map((p) => p.id)
-        : selectedProjectIds;
-    return effectiveIds.length === 1 ? effectiveIds[0] : null;
-  }, [scope, filtersInitialized, selectedZoneIds, selectedProjectIds]);
-
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (!currentUser) {
@@ -1004,15 +914,19 @@ export default function DashboardPage() {
         />
       )}
 
-      {ACTIVITIES.map((def) => (
-        <ActivityKpiCard
-          key={def.code}
-          def={def}
-          summary={summaryByActivity[def.code]}
-          loading={cumulativeLoading}
-          singleProjectId={singleProjectId}
-        />
-      ))}
+      <Row gutter={[16, 16]} align="stretch">
+        {ACTIVITIES.map((def) => (
+          <Col key={def.code} xs={24} sm={12} lg={8} style={{ display: 'flex' }}>
+            <div style={{ width: '100%' }}>
+              <ActivityKpiCard
+                def={def}
+                summary={summaryByActivity[def.code]}
+                loading={cumulativeLoading}
+              />
+            </div>
+          </Col>
+        ))}
+      </Row>
 
       <ZoneSection currentUser={currentUser} />
     </div>

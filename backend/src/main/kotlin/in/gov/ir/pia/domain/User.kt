@@ -33,7 +33,16 @@ class User(
     @Column(name = "is_system_user")
     val isSystemUser: Boolean = false,
     @Column(name = "last_login_at")
-    val lastLoginAt: Instant? = null,
+    var lastLoginAt: Instant? = null,
+    /**
+     * BCrypt hash for the fallback username+password login. NULL until the user first
+     * logs in with their HRMS id (the initial password) or sets a password. See
+     * [in.gov.ir.pia.service.auth.PasswordAuthService].
+     */
+    @Column(name = "password_hash")
+    var passwordHash: String? = null,
+    @Column(name = "password_updated_at")
+    var passwordUpdatedAt: Instant? = null,
     @Column(name = "created_at", updatable = false)
     val createdAt: Instant = Instant.now(),
     @Column(name = "created_by_user_id")

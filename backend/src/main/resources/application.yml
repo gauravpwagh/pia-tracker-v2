@@ -50,6 +50,13 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+    hiddenmethod:
+      filter:
+        # TEMPORARY WAF workaround (see docs/deployment.md and HANDOVER.md): lets a client send
+        # POST + ?_method=PATCH|DELETE and have it routed as the real verb. No-op unless a
+        # client actually sends `_method`, so safe to leave enabled. Remove once the network
+        # team's WAF allows PATCH/PUT/DELETE/OPTIONS through to the VM directly.
+        enabled: true
 
 server:
   port: 8080

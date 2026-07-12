@@ -10,6 +10,7 @@ import io.minio.PiaMinioClient
 import io.minio.RemoveObjectArgs
 import io.minio.http.Method
 import io.minio.messages.Part
+import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
@@ -19,7 +20,9 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.io.IOException
 import java.io.InputStream
+import java.net.HttpURLConnection
 import java.net.Socket
+import java.net.URI
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.time.Instant
@@ -99,6 +102,14 @@ data class CompletedPart(
  *  Scan (async, never blocks the HTTP response):
  *   - REQUIRED (< 2 GB, non-video): 8 MB streamed chunks through ClamAV → CLEAN / INFECTED.
  *   - EXEMPT   (≥ 2 GB or video):   SHA-256 stored for integrity, status set to EXEMPT.
+ *
+ *  TEMPORARY WAF workaround — [uploadProxy] / [uploadProxyPart] (see HANDOVER.md):
+ *  the VM's WAF blocks PUT, so the browser can't reach MinIO's presigned PUT URL
+ *  directly there. These two methods let the browser instead POST the bytes to us
+ *  (POST passes the WAF); we relay them to MinIO ourselves over the internal network,
+ *  which never crosses the WAF. Everything downstream (confirm/completeMultipart/scan)
+ *  is unchanged — the object lands in the same bucket/key either way. Only used when
+ *  the frontend build has `VITE_WAF_PROXY_UPLOAD=true`; remove once the WAF is fixed.
  */
 @Service
 @Transactional
@@ -122,6 +133,8 @@ class AttachmentService(
         private const val SECONDS_PER_MINUTE = 60L
         private const val BYTES_PER_MB = 1_048_576L
         private const val DOWNLOAD_PRESIGN_MINUTES = 15
+        private const val RELAY_BUFFER_BYTES = 1 * 1024 * 1024
+        private const val RELAY_TIMEOUT_MS = 30 * 60 * 1000 // 30 min — single-part relays can carry up to 4 GB
     }
 
     // ── Single-part ───────────────────────────────────────────────────────────
@@ -188,7 +201,12 @@ class AttachmentService(
 
         val uploadId =
             runCatching { minioClient.piaCreateMultipartUpload(minioProps.bucketAttachments, objectKey) }
-                .getOrElse { throw ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to initiate multipart upload") }
+                .getOrElse { e ->
+                    throw ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "Failed to initiate multipart upload: ${e.message}",
+                    )
+                }
         val partCount = ((request.sizeBytes + partSizeBytes - 1) / partSizeBytes).toInt()
         val parts =
             (1..partCount).map { n ->
@@ -250,6 +268,98 @@ class AttachmentService(
         attachmentRepo.save(attachment)
         if (isExempt(attachment)) scanExemptAsync(id) else scanAsync(id)
         return attachment.toDto()
+    }
+
+    // ── TEMPORARY WAF workaround: proxy upload (see class doc comment) ────────
+
+    fun uploadProxy(
+        id: UUID,
+        actor: Principal,
+        request: HttpServletRequest,
+    ) {
+        val attachment = findOrThrow(id)
+        requireOwnerAndPending(attachment, actor)
+        val presignedUrl =
+            minioClient.getPresignedObjectUrl(
+                GetPresignedObjectUrlArgs
+                    .builder()
+                    .method(Method.PUT)
+                    .bucket(minioProps.bucketAttachments)
+                    .`object`(attachment.objectKey)
+                    .expiry(presignExpiryMinutes.toInt(), TimeUnit.MINUTES)
+                    .build(),
+            )
+        relayPutToMinio(presignedUrl, request, attachment.fileSizeBytes)
+    }
+
+    fun uploadProxyPart(
+        id: UUID,
+        actor: Principal,
+        partNumber: Int,
+        request: HttpServletRequest,
+    ): String {
+        val attachment = findOrThrow(id)
+        requireOwnerAndPending(attachment, actor)
+        val uploadId = requireMultipartId(attachment)
+        val presignedUrl =
+            minioClient.getPresignedObjectUrl(
+                GetPresignedObjectUrlArgs
+                    .builder()
+                    .method(Method.PUT)
+                    .bucket(minioProps.bucketAttachments)
+                    .`object`(attachment.objectKey)
+                    .expiry(presignExpiryMinutes.toInt(), TimeUnit.MINUTES)
+                    .extraQueryParams(mapOf("partNumber" to partNumber.toString(), "uploadId" to uploadId))
+                    .build(),
+            )
+        return relayPutToMinio(presignedUrl, request, partSizeBytes)
+    }
+
+    /**
+     * Streams `request`'s raw body to `url` (a MinIO presigned PUT URL) without
+     * buffering it in memory, and returns the ETag MinIO responds with (needed to
+     * assemble multipart parts). `maxAllowedBytes` is checked against the client's
+     * declared Content-Length before any bytes are relayed.
+     */
+    private fun relayPutToMinio(
+        url: String,
+        request: HttpServletRequest,
+        maxAllowedBytes: Long,
+    ): String {
+        val contentLength = request.contentLengthLong
+        if (contentLength <= 0) {
+            throw ResponseStatusException(HttpStatus.LENGTH_REQUIRED, "Content-Length header is required")
+        }
+        if (contentLength > maxAllowedBytes) {
+            throw ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Upload chunk exceeds the allowed size")
+        }
+
+        val connection = URI(url).toURL().openConnection() as HttpURLConnection
+        connection.requestMethod = "PUT"
+        connection.doOutput = true
+        connection.setFixedLengthStreamingMode(contentLength)
+        connection.setRequestProperty("Content-Type", request.contentType ?: "application/octet-stream")
+        connection.connectTimeout = RELAY_TIMEOUT_MS
+        connection.readTimeout = RELAY_TIMEOUT_MS
+
+        try {
+            request.inputStream.use { input ->
+                connection.outputStream.use { output ->
+                    val buf = ByteArray(RELAY_BUFFER_BYTES)
+                    var read: Int
+                    while (input.read(buf).also { read = it } != -1) output.write(buf, 0, read)
+                }
+            }
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                val errorBody = (connection.errorStream ?: connection.inputStream)?.bufferedReader()?.readText().orEmpty()
+                throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "Storage backend rejected upload (HTTP $status): $errorBody")
+            }
+            return connection.getHeaderField("ETag")?.replace("\"", "")
+                ?: throw ResponseStatusException(HttpStatus.BAD_GATEWAY, "Storage backend did not return an ETag")
+        } finally {
+            connection.disconnect()
+        }
     }
 
     // ── List / Download / Delete ──────────────────────────────────────────────

@@ -65,7 +65,7 @@ const STATUS_BUCKET: Record<string, Exclude<StatusBucket, 'ALL'>> = {
 
 const LIFECYCLE_BADGE: Record<string, { color: string; label: string }> = {
   DRAFT:                   { color: 'default', label: 'Draft' },
-  AWAITING_CAO_ALLOCATION: { color: 'orange',  label: 'Awaiting Allocation' },
+  AWAITING_CAO_ALLOCATION: { color: 'orange',  label: 'Awaiting Assignment' },
   AWAITING_CEC_ASSIGNMENT: { color: 'blue',    label: 'Awaiting Assignment' },
   ACTIVE:                  { color: 'green',   label: 'Active' },
   ON_HOLD:                 { color: 'orange',  label: 'On Hold' },
@@ -145,10 +145,17 @@ function useProjectColumns({
   zoneShortMap,
   onOpen,
   onRemove,
+  onAssign,
+  canAllocate,
+  canAssignDyce,
 }: {
   zoneShortMap: Record<string, string>;
   onOpen: (project: ProjectSummaryResponse) => void;
   onRemove?: (project: ProjectSummaryResponse) => void;
+  /** #19 — opens the project's workspace on Overview with the matching assign modal. */
+  onAssign: (project: ProjectSummaryResponse, kind: 'ce' | 'dy') => void;
+  canAllocate: boolean;
+  canAssignDyce: boolean;
 }): ColumnsType<ProjectSummaryResponse> {
   return [
     {
@@ -202,15 +209,43 @@ function useProjectColumns({
       title: 'Status',
       dataIndex: 'lifecycleState',
       key: 'lifecycleState',
+      width: 150,
       render: (state: string) => {
         const badge = LIFECYCLE_BADGE[state] ?? { color: 'default', label: state };
         return <Tag color={badge.color} style={{ margin: 0, borderRadius: 20, fontWeight: 600 }}>{badge.label}</Tag>;
+      },
+    },
+    // #19 — per-row assign action. CAO sees "Assign CE/C" while awaiting allocation;
+    // CE sees "Assign Dy CE/C" while awaiting CE/C assignment. Disappears once the
+    // project moves past that lifecycle state (i.e. once actually assigned).
+    {
+      title: 'Action',
+      key: 'action',
+      width: 150,
+      fixed: 'right' as const,
+      render: (_: unknown, row: ProjectSummaryResponse) => {
+        const kind: 'ce' | 'dy' | null =
+          row.lifecycleState === 'AWAITING_CAO_ALLOCATION' && canAllocate ? 'ce'
+          : row.lifecycleState === 'AWAITING_CEC_ASSIGNMENT' && canAssignDyce ? 'dy'
+          : null;
+        if (!kind) return null;
+        return (
+          <Button
+            size="small"
+            type="primary"
+            style={{ background: '#1565c0', borderColor: '#1565c0' }}
+            onClick={(e) => { e.stopPropagation(); onAssign(row, kind); }}
+          >
+            {kind === 'ce' ? 'Assign CE/C' : 'Assign Dy CE/C'}
+          </Button>
+        );
       },
     },
     ...(onRemove ? [{
       title: '',
       key: 'actions',
       width: 48,
+      fixed: 'right' as const,
       render: (_: unknown, row: ProjectSummaryResponse) => row.lifecycleState === 'REMOVED' ? null : (
         <span onClick={(e: React.MouseEvent) => e.stopPropagation()}>
           <Dropdown
@@ -246,6 +281,8 @@ export default function ProjectsPage() {
   // Only holders of PROJECT.CREATE (EDGS/C-I, Super Admin) may create projects.
   const canCreate = currentUser?.permissions.includes('PROJECT.CREATE') ?? false;
   const isSuperAdmin = currentUser?.isSuperAdmin ?? false;
+  const canAllocate = currentUser?.permissions.includes('PROJECT.ALLOCATE') ?? false;
+  const canAssignDyce = currentUser?.permissions.includes('PROJECT.ASSIGN_DYCE') ?? false;
 
   const projectsQuery = useQuery({
     queryKey: PROJECTS_QUERY_KEY,
@@ -284,6 +321,13 @@ export default function ProjectsPage() {
     navigate(`/workspace/${codeOrId}`);
   };
 
+  // #19 — row "Action" button: open the workspace on Overview with the matching
+  // assign-officer modal already open (ProjectWorkspace reads ?assign=ce|dy once).
+  const assignFromList = (project: ProjectSummaryResponse, kind: 'ce' | 'dy') => {
+    const codeOrId = project.projectCode ?? project.id;
+    navigate(`/workspace/${codeOrId}?view=overview&assign=${kind}`);
+  };
+
   // Distinct project types present, for the Type dropdown
   const typeOptions = [...new Set((projectsQuery.data ?? []).map((p) => p.projectType).filter(Boolean) as string[])]
     .map((tp) => ({ value: tp, label: PROJECT_TYPE_LABEL[tp] ?? tp }));
@@ -307,6 +351,9 @@ export default function ProjectsPage() {
     zoneShortMap,
     onOpen: openProject,
     onRemove: isSuperAdmin ? handleRemoveProject : undefined,
+    onAssign: assignFromList,
+    canAllocate,
+    canAssignDyce,
   });
 
   if (!currentUser) {
@@ -415,6 +462,7 @@ export default function ProjectsPage() {
             dataSource={filteredProjects}
             loading={projectsQuery.isLoading}
             size="small"
+            scroll={{ x: 'max-content' }}
             pagination={{ pageSize: 20 }}
             onRow={(row) => ({ onClick: () => openProject(row), style: { cursor: 'pointer' } })}
             locale={{ emptyText: t('projects.empty', 'No projects match your filters.') }}

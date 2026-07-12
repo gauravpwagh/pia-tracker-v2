@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KMZ Viewer — MapLibre</title>
+
+  <!-- MapLibre GL JS (open source) -->
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <!-- JSZip: unpack the .kmz archive -->
+  <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+  <!-- togeojson: convert KML -> GeoJSON -->
+  <script src="https://unpkg.com/@tmcw/togeojson@5.8.1/dist/togeojson.umd.js"></script>
+
+  <style>
+    :root { --panel-bg: #1e2530; --accent: #4f8cff; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: system-ui, Segoe UI, sans-serif; }
+    #map { position: absolute; inset: 0; }
+
+    #panel {
+      position: absolute; top: 12px; left: 12px; z-index: 5;
+      background: var(--panel-bg); color: #e8edf4;
+      padding: 14px 16px; border-radius: 10px; width: 300px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.35); font-size: 14px;
+    }
+    #panel h1 { font-size: 15px; margin: 0 0 10px; font-weight: 600; }
+    #drop {
+      border: 2px dashed #3a4658; border-radius: 8px; padding: 18px 10px;
+      text-align: center; color: #9fb0c6; cursor: pointer; transition: .15s;
+    }
+    #drop.drag { border-color: var(--accent); color: #fff; background: #263042; }
+    #drop b { color: var(--accent); }
+    input[type=file] { display: none; }
+    #status { margin-top: 10px; font-size: 12.5px; color: #9fb0c6; min-height: 16px; white-space: pre-wrap; }
+    #layers { margin-top: 10px; max-height: 220px; overflow: auto; }
+    .lyr { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 13px; }
+    .lyr input { accent-color: var(--accent); }
+    .swatch { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; }
+    button.clear {
+      margin-top: 10px; width: 100%; background: #2a3340; color: #cdd7e6;
+      border: 1px solid #3a4658; border-radius: 6px; padding: 7px; cursor: pointer;
+    }
+    button.clear:hover { background: #323d4d; }
+    .maplibregl-popup-content { font-size: 13px; max-height: 260px; overflow: auto; }
+    .maplibregl-popup-content table { border-collapse: collapse; }
+    .maplibregl-popup-content td { border-bottom: 1px solid #eee; padding: 2px 6px; vertical-align: top; }
+    .maplibregl-popup-content td:first-child { font-weight: 600; color: #555; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="panel">
+    <h1>🌍 KMZ Viewer</h1>
+    <label id="drop" for="file">
+      <b>Click to choose</b> a .kmz / .kml file<br />or drag &amp; drop it here
+    </label>
+    <input type="file" id="file" accept=".kmz,.kml" />
+    <div id="status">No file loaded.</div>
+    <label class="lyr" style="margin-top:10px">
+      <input type="checkbox" id="ormToggle" checked>
+      <span class="swatch" style="background:#883333"></span>
+      <span>Railway network (OpenRailwayMap)</span>
+    </label>
+    <label class="lyr">
+      <input type="checkbox" id="bhuvanToggle" checked>
+      <span class="swatch" style="background:#3a8f4f"></span>
+      <span>Bhuvan base map — india3 (NRSC/ISRO)</span>
+    </label>
+    <div id="layers"></div>
+    <button class="clear" id="clearBtn" style="display:none">Clear map</button>
+  </div>
+
+  <script>
+    // ---- Base map: a free open raster style (OSM tiles) ----
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: {
+        version: 8,
+        sources: {
+          osm: {
+            type: 'raster',
+            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            attribution: '© OpenStreetMap contributors'
+          },
+          // Bhuvan (ISRO/NRSC) base map — 'india3' via the GeoWebCache WMS endpoint.
+          // Native gridset is EPSG:4326; we request EPSG:3857 so GWC reprojects and
+          // MapLibre's {bbox-epsg-3857} token can supply the tile bbox.
+          bhuvan: {
+            type: 'raster',
+            tiles: ['https://bhuvan-vec1.nrsc.gov.in/bhuvan/gwc/service/wms' +
+              '?service=WMS&version=1.1.1&request=GetMap' +
+              '&layers=india3&styles=' +
+              '&format=image/jpeg&transparent=false' +
+              '&srs=EPSG:3857&width=256&height=256&bbox={bbox-epsg-3857}'],
+            tileSize: 256,
+            attribution: '© Bhuvan, NRSC/ISRO'
+          },
+          // OpenRailwayMap: open railway network overlay (stations, lines, yards)
+          orm: {
+            type: 'raster',
+            tiles: [
+              'https://a.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+              'https://b.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+              'https://c.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png'
+            ],
+            tileSize: 256,
+            attribution: '© OpenRailwayMap (CC-BY-SA)'
+          }
+        },
+        layers: [
+          { id: 'osm', type: 'raster', source: 'osm' },
+          { id: 'bhuvan', type: 'raster', source: 'bhuvan',
+            paint: { 'raster-opacity': 0.9 } },
+          { id: 'orm', type: 'raster', source: 'orm', paint: { 'raster-opacity': 0.9 } }
+        ]
+      },
+      center: [78.9, 22.6], // India-ish default; auto-fits to data on load
+      zoom: 3
+    });
+    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+    map.addControl(new maplibregl.ScaleControl());
+
+    // Northern boundary — always drawn on top of the basemap, independent of any KMZ
+    map.on('load', () => {
+      fetch('northern_boundary.geojson')
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(data => {
+          map.addSource('northern-boundary', { type: 'geojson', data });
+          map.addLayer({
+            id: 'northern-boundary-casing', type: 'line', source: 'northern-boundary',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#ffffff', 'line-width': 5 }
+          });
+          map.addLayer({
+            id: 'northern-boundary', type: 'line', source: 'northern-boundary',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#808080', 'line-width': 2.5 }
+          });
+        })
+        .catch(err => console.error('Could not load northern_boundary.geojson:', err));
+    });
+
+    const statusEl = document.getElementById('status');
+    const layersEl = document.getElementById('layers');
+    const clearBtn = document.getElementById('clearBtn');
+    const drop = document.getElementById('drop');
+    const fileInput = document.getElementById('file');
+
+    let addedLayerIds = [];   // maplibre layer ids we created
+    let addedSourceIds = [];  // maplibre source ids we created
+    let overlayCount = 0;
+    let dataBounds = new maplibregl.LngLatBounds(); // grows to cover EVERYTHING loaded
+
+    function setStatus(msg) { statusEl.textContent = msg; }
+
+    // ---------- File input wiring ----------
+    fileInput.addEventListener('change', e => {
+      if (e.target.files[0]) loadFile(e.target.files[0]);
+    });
+    ['dragenter', 'dragover'].forEach(t =>
+      drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('drag'); }));
+    ['dragleave', 'drop'].forEach(t =>
+      drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('drag'); }));
+    drop.addEventListener('drop', e => {
+      const f = e.dataTransfer.files[0];
+      if (f) loadFile(f);
+    });
+    clearBtn.addEventListener('click', clearMap);
+    document.getElementById('ormToggle').addEventListener('change', e => {
+      map.setLayoutProperty('orm', 'visibility', e.target.checked ? 'visible' : 'none');
+    });
+    document.getElementById('bhuvanToggle').addEventListener('change', e => {
+      map.setLayoutProperty('bhuvan', 'visibility', e.target.checked ? 'visible' : 'none');
+    });
+
+    // ---------- Main loader ----------
+    async function loadFile(file) {
+      clearMap();
+      setStatus(`Reading ${file.name} …`);
+      try {
+        const name = file.name.toLowerCase();
+        let kmlText, zip = null;
+
+        if (name.endsWith('.kmz')) {
+          const buf = await file.arrayBuffer();
+          zip = await JSZip.loadAsync(buf);
+          // find the primary .kml inside the archive (usually doc.kml)
+          const kmlEntry = Object.keys(zip.files).find(n => n.toLowerCase().endsWith('.kml'));
+          if (!kmlEntry) throw new Error('No .kml found inside the KMZ.');
+          kmlText = await zip.files[kmlEntry].async('text');
+        } else {
+          kmlText = await file.text();
+        }
+
+        const dom = new DOMParser().parseFromString(kmlText, 'text/xml');
+        if (dom.querySelector('parsererror')) throw new Error('KML is not valid XML.');
+
+        const geojson = toGeoJSON.kml(dom);
+
+        // Render any GroundOverlay images (KMZ often embeds them)
+        await renderGroundOverlays(dom, zip);
+
+        if (!geojson.features.length && overlayCount === 0) {
+          setStatus('File parsed, but it contains no features or overlays.');
+          return;
+        }
+
+        renderGeoJSON(geojson);
+        fitToData(geojson);
+        // Fit once to the combined extent of features + overlays
+        if (!dataBounds.isEmpty())
+          map.fitBounds(dataBounds, { padding: 60, maxZoom: 17, duration: 800 });
+
+        setStatus(`Loaded ${file.name}\n${geojson.features.length} feature(s)` +
+                  (overlayCount ? `, ${overlayCount} overlay(s)` : ''));
+        clearBtn.style.display = 'block';
+      } catch (err) {
+        console.error(err);
+        setStatus('Error: ' + err.message);
+      }
+    }
+
+    // ---------- Render vector features, split by geometry type ----------
+    function renderGeoJSON(geojson) {
+      const src = 'kmz-data';
+      map.addSource(src, { type: 'geojson', data: geojson });
+      addedSourceIds.push(src);
+
+      const defs = [
+        { id: 'kmz-fill', type: 'fill', filter: ['==', ['geometry-type'], 'Polygon'],
+          paint: { 'fill-color': ['coalesce', ['get', 'fill'], '#4f8cff'], 'fill-opacity': 0.35 },
+          label: 'Polygons', swatch: '#4f8cff' },
+        { id: 'kmz-outline', type: 'line', filter: ['==', ['geometry-type'], 'Polygon'],
+          paint: { 'line-color': ['coalesce', ['get', 'stroke'], '#2c62c9'], 'line-width': 3 },
+          label: null },
+        { id: 'kmz-line', type: 'line', filter: ['==', ['geometry-type'], 'LineString'],
+          paint: { 'line-color': ['coalesce', ['get', 'stroke'], '#ff7043'], 'line-width': 5 },
+          label: 'Lines', swatch: '#ff7043' },
+        { id: 'kmz-point', type: 'circle', filter: ['==', ['geometry-type'], 'Point'],
+          paint: { 'circle-radius': 5, 'circle-color': ['coalesce', ['get', 'marker-color'], '#26c281'],
+                   'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff' },
+          label: 'Points', swatch: '#26c281' }
+      ];
+
+      layersEl.innerHTML = '';
+      defs.forEach(d => {
+        map.addLayer({ id: d.id, type: d.type, source: src, filter: d.filter, paint: d.paint });
+        addedLayerIds.push(d.id);
+        if (d.label) addLayerToggle(d.id, d.label, d.swatch);
+      });
+
+      // Click popups showing feature properties
+      map.on('click', clickHandler);
+      ['kmz-point', 'kmz-line', 'kmz-fill'].forEach(id => {
+        map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer');
+        map.on('mouseleave', id, () => map.getCanvas().style.cursor = '');
+      });
+    }
+
+    function clickHandler(e) {
+      const feats = map.queryRenderedFeatures(e.point, {
+        layers: addedLayerIds.filter(id => map.getLayer(id))
+      });
+      if (!feats.length) return;
+      const p = feats[0].properties || {};
+      const rows = Object.keys(p)
+        .filter(k => p[k] !== '' && p[k] != null && !['styleUrl', 'styleHash', 'stroke-opacity', 'fill-opacity'].includes(k))
+        .map(k => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(String(p[k]))}</td></tr>`)
+        .join('');
+      const html = p.name ? `<b>${escapeHtml(p.name)}</b>` : '';
+      new maplibregl.Popup({ maxWidth: '320px' })
+        .setLngLat(e.lngLat)
+        .setHTML(html + (rows ? `<table>${rows}</table>` : '<i>No attributes</i>'))
+        .addTo(map);
+    }
+
+    // ---------- GroundOverlay (georeferenced images inside KMZ) ----------
+    async function renderGroundOverlays(dom, zip) {
+      const overlays = [...dom.getElementsByTagName('GroundOverlay')];
+      for (const ov of overlays) {
+        const box = ov.getElementsByTagName('LatLonBox')[0];
+        const href = ov.getElementsByTagName('href')[0]?.textContent?.trim();
+        if (!box || !href) continue;
+
+        const n = +box.getElementsByTagName('north')[0]?.textContent;
+        const s = +box.getElementsByTagName('south')[0]?.textContent;
+        const east = +box.getElementsByTagName('east')[0]?.textContent;
+        const w = +box.getElementsByTagName('west')[0]?.textContent;
+        if ([n, s, east, w].some(v => Number.isNaN(v))) continue;
+
+        let url = href;
+        // If the image is packed inside the KMZ, extract it to a blob URL
+        if (zip) {
+          const entry = Object.keys(zip.files).find(k => k.toLowerCase() === href.toLowerCase());
+          if (entry) {
+            const blob = await zip.files[entry].async('blob');
+            url = URL.createObjectURL(blob);
+          }
+        }
+
+        const srcId = `overlay-src-${overlayCount}`;
+        const lyrId = `overlay-lyr-${overlayCount}`;
+        map.addSource(srcId, {
+          type: 'image',
+          url,
+          coordinates: [[w, n], [east, n], [east, s], [w, s]]
+        });
+        map.addLayer({ id: lyrId, type: 'raster', source: srcId, paint: { 'raster-opacity': 0.9 } });
+        dataBounds.extend([w, s]); dataBounds.extend([east, n]); // include overlay in fit
+        addedSourceIds.push(srcId);
+        addedLayerIds.push(lyrId);
+        addLayerToggle(lyrId, 'Overlay: ' + href.split('/').pop(), '#c58bff');
+        overlayCount++;
+      }
+    }
+
+    // ---------- UI: per-layer visibility toggles ----------
+    function addLayerToggle(layerId, label, swatch) {
+      const row = document.createElement('label');
+      row.className = 'lyr';
+      row.innerHTML =
+        `<input type="checkbox" checked>
+         <span class="swatch" style="background:${swatch}"></span>
+         <span>${escapeHtml(label)}</span>`;
+      const cb = row.querySelector('input');
+      cb.addEventListener('change', () => {
+        const vis = cb.checked ? 'visible' : 'none';
+        map.setLayoutProperty(layerId, 'visibility', vis);
+        // polygon outline follows the fill toggle
+        if (layerId === 'kmz-fill' && map.getLayer('kmz-outline'))
+          map.setLayoutProperty('kmz-outline', 'visibility', vis);
+      });
+      layersEl.appendChild(row);
+    }
+
+    // ---------- Fit view to the data ----------
+    function fitToData(geojson) {
+      const walk = c => {
+        if (typeof c[0] === 'number') dataBounds.extend(c);
+        else c.forEach(walk);
+      };
+      const extendGeom = g => {
+        if (!g) return;
+        if (g.type === 'GeometryCollection') g.geometries.forEach(extendGeom); // <MultiGeometry>
+        else if (g.coordinates) walk(g.coordinates);                           // Point..MultiPolygon
+      };
+      geojson.features.forEach(f => extendGeom(f.geometry));
+    }
+
+    // ---------- Cleanup ----------
+    function clearMap() {
+      map.off('click', clickHandler);
+      addedLayerIds.forEach(id => map.getLayer(id) && map.removeLayer(id));
+      addedSourceIds.forEach(id => map.getSource(id) && map.removeSource(id));
+      addedLayerIds = []; addedSourceIds = []; overlayCount = 0;
+      dataBounds = new maplibregl.LngLatBounds();
+      layersEl.innerHTML = '';
+      clearBtn.style.display = 'none';
+      setStatus('No file loaded.');
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+  </script>
+</body>
+</html>

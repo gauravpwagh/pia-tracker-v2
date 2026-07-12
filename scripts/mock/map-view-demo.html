@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PIA Tracker — Map view (demo)</title>
+
+  <!-- MapLibre GL JS (open source) -->
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+  <style>
+    /* ── App theme tokens (approximate the Ant Design theme in the real app) ── */
+    :root {
+      --navy:#1e3a5f; --side:#1047ae; --side-sel:#2a63d6; --primary:#1565c0;
+      --bg-layout:#f4f7fb; --bg-container:#ffffff; --border:#dbe3ee;
+      --line-strong:#94a3b8; --tabbar:#eaf1fb;
+      --text:#1f2937; --text-2:#64748b; --text-3:#94a3b8;
+      --side-w:180px; --list-w:308px; --topbar-h:56px; --projbar-h:48px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin:0; height:100%; font-family: system-ui, "Segoe UI", Roboto, sans-serif; color:var(--text); }
+    #app { height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+    /* ── TopBar ── */
+    .topbar { height:var(--topbar-h); flex-shrink:0; background:var(--navy); color:#fff;
+      display:flex; align-items:center; padding:0 18px; gap:12px; }
+    .topbar .logo { width:30px; height:30px; border-radius:7px; background:#fff2;
+      display:flex; align-items:center; justify-content:center; font-size:16px; }
+    .topbar .title { font-weight:600; font-size:16px; letter-spacing:.2px; }
+    .topbar .spacer { flex:1; }
+    .topbar .user { display:flex; align-items:center; gap:9px; font-size:13px; }
+    .topbar .avatar { width:30px; height:30px; border-radius:50%; background:#2a63d6;
+      display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; }
+
+    /* ── Project bar ── */
+    .projbar { height:var(--projbar-h); flex-shrink:0; display:flex; align-items:center;
+      background:var(--bg-container); border-bottom:2px solid var(--line-strong);
+      box-shadow:0 2px 4px rgba(15,23,42,.06); }
+    .projbar .back { width:var(--side-w); height:100%; flex-shrink:0; border:none;
+      border-right:1px solid var(--border); background:#f4f7fb; cursor:pointer; font-size:12px;
+      font-weight:600; color:var(--primary); display:flex; align-items:center; justify-content:center; gap:6px; }
+    .projbar .pname { font-size:16px; font-weight:600; margin-left:16px; }
+    .projbar .pmeta { font-size:12px; color:var(--text-2); margin-left:6px; }
+    .projbar .spacer { flex:1; }
+    .tag { font-size:13px; font-weight:600; padding:2px 14px; border-radius:20px; margin-right:16px; }
+    .tag.active { background:#e6f4ea; color:#166534; }
+
+    /* ── Body: nav sider + content ── */
+    .body { flex:1; min-height:0; display:flex; }
+    .sider { width:var(--side-w); flex-shrink:0; background:var(--side); padding:10px 0; }
+    .navitem { display:flex; align-items:center; gap:10px; padding:11px 16px; font-size:13px;
+      cursor:pointer; color:rgba(255,255,255,.85); border-left:3px solid transparent; }
+    .navitem .ic { width:16px; text-align:center; }
+    .navitem:hover { background:#ffffff14; }
+    .navitem.active { color:#fff; font-weight:600; background:var(--side-sel); border-left:3px solid #fff; }
+
+    /* ── Content area (this is the ant-layout-content / css-var-r0 region) ── */
+    .content { flex:1; min-width:0; background:var(--bg-layout); display:flex; overflow:hidden; }
+
+    /* Left: KMZ layers list */
+    .layers-panel { width:var(--list-w); flex-shrink:0; background:var(--bg-container);
+      border-right:1px solid var(--border); display:flex; flex-direction:column; }
+    .lp-head { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; }
+    .lp-head h3 { margin:0; font-size:14px; font-weight:600; }
+    .lp-head .count { margin-left:auto; font-size:12px; color:var(--text-2);
+      background:#eef3fb; border-radius:12px; padding:1px 9px; }
+    .lp-list { flex:1; overflow:auto; padding:8px 8px 12px; }
+
+    /* KMZ file (collapsed by default) */
+    .kmz { margin-bottom:4px; border:1px solid transparent; border-radius:8px; }
+    .kmz.on { border-color:var(--border); background:#f9fbff; }
+    .kmz-row { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:8px; cursor:default; }
+    .kmz-row:hover { background:#f2f6fc; }
+    .arrow { width:20px; text-align:center; color:var(--text-2); cursor:pointer; font-size:18px;
+      line-height:1; user-select:none; transition:transform .12s; flex:0 0 auto; }
+    .kmz.open .arrow { transform:rotate(90deg); }
+    .kmz-row input { width:15px; height:15px; accent-color:var(--primary); cursor:pointer; flex:0 0 auto; }
+    .kmz-row .fname { font-weight:600; font-size:13px; cursor:pointer; flex:1; min-width:0;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .dl { flex:0 0 auto; width:24px; height:24px; border:none; background:transparent; cursor:pointer;
+      color:var(--text-3); font-size:15px; border-radius:5px; display:flex; align-items:center; justify-content:center; }
+    .dl:hover { background:#e6eefb; color:var(--primary); }
+
+    /* Feature-type tree (revealed on expand) */
+    .kmz-tree { display:none; padding:2px 8px 8px 30px; }
+    .kmz.open .kmz-tree { display:block; }
+    .leaf { display:flex; align-items:center; gap:8px; padding:4px 4px; font-size:12.5px; cursor:pointer; }
+    .leaf:hover { background:#f2f6fc; border-radius:6px; }
+    .leaf input { width:14px; height:14px; accent-color:var(--primary); cursor:pointer; flex:0 0 auto; }
+    .leaf .sw { width:12px; height:12px; border-radius:3px; flex:0 0 auto; }
+    .leaf .lbl { color:var(--text); }
+    .leaf .num { color:var(--text-3); }
+
+    /* Right: map fills the rest of the content area */
+    .map-wrap { flex:1; min-width:0; position:relative; }
+    #map { position:absolute; inset:0; }
+    .map-badge { position:absolute; top:12px; left:12px; z-index:2; background:#ffffffee;
+      border:1px solid var(--border); border-radius:8px; padding:6px 12px; font-size:12px; font-weight:600;
+      color:var(--navy); box-shadow:0 2px 8px rgba(15,23,42,.12); }
+    .map-msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      text-align:center; color:var(--text-2); font-size:13px; padding:24px; }
+    /* Map-side Fit button (HTML overlay — always visible when the map pane shows) */
+    .fit-map-btn { position:absolute; top:12px; left:12px; z-index:3; cursor:pointer;
+      background:var(--bg-container); border:1px solid var(--border); border-radius:8px;
+      padding:7px 12px; font-size:13px; font-weight:600; color:var(--navy);
+      box-shadow:0 2px 8px rgba(15,23,42,.16); }
+    .fit-map-btn:hover { background:#eef5ff; border-color:var(--primary); color:var(--primary); }
+
+    .maplibregl-popup-content { font-size:13px; max-height:260px; overflow:auto; border-radius:8px; }
+    .maplibregl-popup-content b { color:var(--navy); }
+    .maplibregl-popup-content table { border-collapse:collapse; margin-top:4px; }
+    .maplibregl-popup-content td { border-bottom:1px solid #eee; padding:2px 8px; vertical-align:top; }
+    .maplibregl-popup-content td:first-child { font-weight:600; color:#555; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- TopBar -->
+    <div class="topbar">
+      <div class="logo">🚆</div>
+      <div class="title">PIA Tracker</div>
+      <div class="spacer"></div>
+      <div class="user"><span>S. B.</span><div class="avatar">SB</div></div>
+    </div>
+
+    <!-- Project bar -->
+    <div class="projbar">
+      <button class="back">← Back to Project list</button>
+      <span class="pname">Jammu–Udhampur New Line</span>
+      <span class="pmeta">· NEW_LINE · 53 km</span>
+      <span class="spacer"></span>
+      <span class="tag active">Active</span>
+    </div>
+
+    <!-- Body -->
+    <div class="body">
+      <!-- Nav sider -->
+      <div class="sider">
+        <div class="navitem"><span class="ic">▤</span>Overview</div>
+        <div class="navitem"><span class="ic">📋</span>Records</div>
+        <div class="navitem"><span class="ic">🕘</span>History</div>
+        <div class="navitem active"><span class="ic">🗺️</span>Map</div>
+      </div>
+
+      <!-- Content area (ant-layout-content) -->
+      <div class="content">
+        <!-- KMZ layers list -->
+        <div class="layers-panel">
+          <div class="lp-head">
+            <h3>Map layers</h3>
+            <span class="count" id="count"></span>
+          </div>
+          <div class="lp-list" id="kmzList"></div>
+        </div>
+
+        <!-- Map -->
+        <div class="map-wrap">
+          <button class="fit-map-btn" id="fitBtn" title="Fit map to ticked layers">⤢ Fit to layers</button>
+          <div id="map"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ─────────────────────────────────────────────────────────────────────────
+       DEMO DATA — each entry stands in for a KMZ file uploaded to the project.
+       A KMZ can contain several geometry types (polygons / lines / points); each
+       type is its own toggleable "group" with its own map colour and feature
+       count. All geometry here is inline dummy data (no fetch / no network), so
+       the list renders even offline. In the real app this comes from the backend.
+       ───────────────────────────────────────────────────────────────────────── */
+    const fc = (features) => ({ type:'FeatureCollection', features });
+    const feat = (geometry, properties={}) => ({ type:'Feature', geometry, properties });
+
+    const KMZ_FILES = [
+      {
+        id:'alignment', name:'Alignment — Final.kmz',
+        groups:[
+          { geom:'line', label:'Lines', color:'#ff7043', on:true, data: fc([ feat(
+            { type:'LineString', coordinates:[[74.75,32.68],[74.85,32.62],[74.95,32.57],[75.05,32.52],[75.15,32.47]] },
+            { name:'Main alignment', chainage:'0.0–53.0 km', status:'Approved' }) ]) },
+          { geom:'point', label:'Points', color:'#8b5cf6', on:true, data: fc([
+            feat({ type:'Point', coordinates:[74.75,32.68] }, { name:'Vijaypur', type:'Halt', chainage:'0.0 km' }),
+            feat({ type:'Point', coordinates:[74.95,32.57] }, { name:'Sangraj', type:'Crossing station', chainage:'26.0 km' }),
+            feat({ type:'Point', coordinates:[75.15,32.47] }, { name:'Bari Brahmana', type:'Junction', chainage:'53.0 km' }),
+          ]) },
+        ]
+      },
+      {
+        id:'la', name:'Land Acquisition Boundary.kmz',
+        groups:[
+          { geom:'polygon', label:'Polygons', color:'#4f8cff', on:true, data: fc([
+            feat({ type:'Polygon', coordinates:[[[74.92,32.60],[74.99,32.60],[74.99,32.55],[74.92,32.55],[74.92,32.60]]] },
+              { name:'LA parcel — Sangraj', village:'Sangraj', area_ha:42.6, award:'Sec.19 issued' }),
+            feat({ type:'Polygon', coordinates:[[[74.80,32.66],[74.86,32.66],[74.86,32.62],[74.80,32.62],[74.80,32.66]]] },
+              { name:'LA parcel — Vijaypur', village:'Vijaypur', area_ha:18.3, award:'Sec.11 issued' }),
+          ]) },
+          { geom:'point', label:'Points', color:'#26a269', on:false, data: fc([
+            feat({ type:'Point', coordinates:[74.955,32.575] }, { name:'Survey marker A1', type:'Boundary pillar' }),
+            feat({ type:'Point', coordinates:[74.83,32.64] }, { name:'Survey marker A2', type:'Boundary pillar' }),
+          ]) },
+        ]
+      },
+      {
+        id:'forest', name:'Forest Clearance Area.kmz',
+        groups:[
+          { geom:'polygon', label:'Polygons', color:'#26a269', on:false, data: fc([
+            feat({ type:'Polygon', coordinates:[[[75.02,32.55],[75.10,32.55],[75.10,32.49],[75.02,32.49],[75.02,32.55]]] },
+              { name:'Reserved forest — Block C', area_ha:31.2, stage:'Stage-I in progress' }) ]) },
+          { geom:'line', label:'Lines', color:'#14b8a6', on:false, data: fc([ feat(
+            { type:'LineString', coordinates:[[75.02,32.55],[75.06,32.52],[75.10,32.49]] },
+            { name:'Diversion trace', length_km:6.4 }) ]) },
+        ]
+      },
+      {
+        id:'utility', name:'Utility Crossings.kmz',
+        groups:[
+          { geom:'point', label:'Points', color:'#0ea5e9', on:false, data: fc([
+            feat({ type:'Point', coordinates:[74.83,32.63] }, { name:'HT line crossing', utility:'HT', chainage:'8.4 km' }),
+            feat({ type:'Point', coordinates:[74.97,32.565] }, { name:'Water pipeline', utility:'Pipeline (Water)', chainage:'24.1 km' }),
+            feat({ type:'Point', coordinates:[75.08,32.51] }, { name:'OFC cable', utility:'SNT S&T Cable', chainage:'41.7 km' }),
+          ]) },
+        ]
+      },
+    ];
+
+    /* Northern boundary — the real geojson, inlined so it renders without a fetch. */
+    const NORTHERN_BOUNDARY = { type:'FeatureCollection', features:[ { type:'Feature', properties:{}, geometry:{ type:'LineString', coordinates:[
+      [75.330950556542632,32.311600742056847],[75.338,32.321],[75.323,32.343],[75.288,32.355],[75.285,32.372],[75.258,32.371],[75.256,32.389],[75.194,32.401],[75.19,32.426],[75.131,32.409],[75.101,32.478],[75.085,32.469],[75.028,32.497],[75.019,32.466],[74.951,32.447],[74.938,32.471],[74.897,32.468],[74.877,32.493],[74.819,32.498],[74.795,32.476],[74.688,32.487],[74.691,32.533],[74.663,32.544],[74.674,32.568],[74.653,32.563],[74.659,32.597],[74.639,32.615],[74.695,32.661],[74.653,32.697],[74.705,32.842],[74.641,32.819],[74.635,32.807],[74.658,32.788],[74.632,32.776],[74.634,32.749],[74.619,32.761],[74.577,32.748],[74.563,32.76],[74.512,32.745],[74.512,32.764],[74.486,32.764],[74.459,32.788],[74.415,32.785],[74.391,32.763],[74.355,32.767],[74.314,32.797],[74.303,32.83],[74.22,32.849],[74.211,32.873],[74.179,32.889],[74.069,32.91],[74.058,32.934],[74.0,32.935],[74.006,32.955],[73.972,32.967],[73.965,32.987],[73.826,33.004],[73.826,32.977],[73.79,32.967],[73.794,33.004],[73.749,33.034],[73.743,33.066],[73.685,33.087],[73.638,33.085],[73.631,33.139],[73.649,33.138],[73.665,33.161],[73.668,33.202],[73.648,33.223],[73.633,33.208],[73.638,33.23],[73.606,33.274],[73.614,33.293],[73.589,33.324],[73.598,33.337],[73.578,33.329],[73.57,33.343],[73.584,33.356],[73.565,33.366],[73.603,33.419],[73.587,33.423],[73.596,33.439],[73.632,33.448],[73.602,33.497],[73.619,33.495],[73.611,33.513],[73.642,33.529],[73.624,33.541],[73.629,33.571],[73.605,33.589],[73.612,33.604],[73.567,33.618],[73.578,33.638],[73.567,33.669],[73.603,33.715],[73.595,33.751],[73.56,33.781],[73.594,33.89],[73.548,33.937],[73.516,33.999],[73.491,34.14],[73.499,34.211],[73.473,34.252],[73.481,34.289],[73.457,34.276],[73.43,34.346],[73.396,34.372],[73.428,34.426],[73.431,34.521],[73.454,34.571],[73.532,34.571],[73.556,34.59],[73.611,34.585],[73.65,34.562],[73.654,34.6],[73.695,34.65],[73.659,34.673],[73.73,34.772],[73.772,34.796],[73.822,34.792],[73.838,34.813],[73.919,34.812],[73.93,34.832],[73.961,34.839],[73.967,34.864],[74.03,34.876],[74.037,34.919],[74.071,34.935],[74.059,34.993],[74.11,35.016],[74.067,35.046],[74.071,35.059],[74.101,35.099],[74.134,35.11],[74.106,35.126],[74.112,35.148],[74.034,35.147],[74.003,35.184],[73.957,35.168],[73.924,35.204],[73.861,35.207],[73.808,35.239],[73.77,35.236],[73.734,35.209],[73.708,35.222],[73.725,35.273],[73.695,35.318],[73.695,35.369],[73.727,35.419],[73.792,35.454],[73.778,35.523],[73.73,35.529],[73.721,35.549],[73.659,35.548],[73.628,35.569],[73.562,35.546],[73.528,35.567],[73.501,35.558],[73.477,35.572],[73.398,35.557],[73.364,35.597],[73.269,35.624],[73.133,35.711],[73.126,35.776],[73.149,35.831],[73.084,35.877],[73.029,35.847],[72.987,35.86],[72.918,35.839],[72.892,35.844],[72.891,35.874],[72.839,35.867],[72.819,35.882],[72.784,35.842],[72.761,35.832],[72.727,35.853],[72.684,35.822],[72.628,35.858],[72.585,35.859],[72.558,35.898],[72.519,35.906],[72.513,35.936],[72.535,35.951],[72.539,35.986],[72.56,35.987],[72.584,36.017],[72.569,36.045],[72.536,36.047],[72.517,36.067],[72.528,36.11],[72.562,36.14],[72.536,36.175],[72.581,36.253],[72.619,36.269],[72.685,36.244],[72.681,36.271],[72.759,36.299],[72.816,36.356],[72.854,36.366],[72.876,36.395],[72.86,36.436],[72.908,36.461],[72.979,36.457],[72.978,36.511],[73.052,36.533],[73.097,36.606],[73.074,36.629],[73.068,36.701],[73.116,36.684],[73.171,36.724],[73.201,36.696],[73.238,36.712],[73.294,36.704],[73.348,36.716],[73.352,36.735],[73.421,36.743],[73.498,36.713],[73.579,36.722],[73.593,36.693],[73.683,36.687],[73.71,36.712],[73.775,36.702],[73.796,36.719],[73.872,36.701],[73.885,36.73],[73.868,36.766],[73.837,36.795],[73.802,36.794],[73.798,36.818],[73.759,36.816],[73.706,36.838],[73.706,36.858],[73.667,36.881],[73.671,36.912],[73.729,36.898],[73.751,36.91],[73.801,36.888],[73.82,36.903],[73.859,36.897],[73.893,36.876],[73.915,36.883],[73.962,36.839],[74.046,36.811],[74.085,36.842],[74.133,36.848],[74.156,36.91],[74.249,36.894],[74.42,36.995],[74.52,36.996],[74.54,36.963],[74.564,36.958],[74.58,37.021],[74.568,37.052],[74.681,37.087],[74.707,37.087],[74.747,37.02],[74.769,37.041],[74.839,37.036],[74.838,36.998],[74.91,36.916],[75.016,36.993],[75.076,36.961],[75.107,36.963],[75.174,37.001],[75.22,37.052],[75.343,37.068],[75.36,37.039],[75.352,36.991],[75.367,36.975],[75.414,36.977],[75.406,36.908],[75.441,36.898],[75.462,36.83],[75.607,36.779],[75.731,36.623],[75.789,36.578],[75.928,36.521],[76.084,36.484],[76.178,36.398],[76.251,36.357],[76.355,36.368],[76.407,36.327],[76.436,36.322],[76.454,36.276],[76.438,36.262],[76.479,36.223],[76.555,36.198],[76.568,36.178],[76.616,36.173],[76.647,36.191],[76.711,36.135],[76.728,36.087],[76.81,36.053],[76.814,36.027],[76.731,35.96],[76.814,35.849],[76.855,35.84],[76.921,35.793],[77.002,35.776],[77.094,35.8],[77.135,35.794],[77.149,35.77],[77.173,35.765],[77.177,35.735],[77.227,35.728],[77.236,35.71],[77.284,35.72],[77.319,35.697],[77.335,35.72],[77.368,35.717],[77.403,35.662],[77.438,35.655],[77.434,35.609],[77.465,35.594],[77.462,35.548],[77.484,35.534],[77.435,35.516],[77.388,35.55],[77.321,35.534],[77.391,35.472],[77.449,35.461],[77.526,35.484],[77.626,35.466],[77.649,35.486],[77.672,35.468],[77.72,35.474],[77.737,35.524],[77.778,35.494],[77.822,35.514],[77.907,35.467],[77.929,35.495],[77.983,35.456],[77.964,35.498],[77.935,35.516],[77.971,35.566],[77.96,35.604],[77.999,35.586],[78.046,35.587],[78.085,35.553],[78.147,35.54],[78.173,35.599],[78.168,35.628],[78.197,35.625],[78.21,35.663],[78.258,35.642],[78.283,35.66],[78.278,35.716],[78.4,35.731],[78.435,35.778],[78.527,35.757],[78.647,35.818],[78.675,35.852],[78.781,35.864],[78.827,35.848],[78.968,35.884],[79.054,35.841],[79.156,35.832],[79.22,35.889],[79.203,35.925],[79.213,35.954],[79.262,35.984],[79.407,35.986],[79.435,35.893],[79.536,35.874],[79.748,35.792],[79.892,35.772],[79.951,35.819],[80.008,35.828],[80.056,35.783],[80.123,35.664],[80.237,35.632],[80.307,35.59],[80.342,35.462],[80.291,35.428],[80.292,35.359],[80.268,35.295],[80.23,35.2],[80.186,35.148],[80.187,35.012],[80.114,34.858],[80.074,34.825],[80.063,34.707],[79.949,34.666],[79.864,34.676],[79.775,34.611],[79.792,34.573],[79.765,34.562],[79.76,34.538],[79.817,34.507],[79.813,34.481],[79.788,34.466],[79.663,34.468],[79.597,34.486],[79.514,34.46],[79.53,34.406],[79.568,34.395],[79.565,34.318],[79.596,34.264],[79.569,34.206],[79.498,34.188],[79.49,34.12],[79.421,34.078],[79.414,34.047],[79.44,34.023],[79.434,34.013],[79.144,34.058],[79.134,34.018],[79.077,34.014],[79.011,34.044],[78.912,34.01],[78.891,33.974],[78.962,33.875],[79.005,33.772],[79.057,33.758],[79.028,33.749],[79.014,33.685],[79.067,33.664],[79.094,33.634],[79.087,33.617],[79.007,33.608],[78.908,33.62],[78.888,33.574],[78.914,33.562],[78.944,33.512],[78.928,33.439],[78.956,33.353],[78.981,33.328],[79.085,33.289],[79.234,33.289],[79.437,33.252],[79.427,33.186],[79.362,33.093],[79.376,33.034],[79.315,33.007],[79.433,32.925],[79.541,32.783],[79.582,32.772],[79.605,32.733],[79.478,32.589],[79.446,32.572],[79.424,32.527],[79.376,32.532],[79.369,32.568],[79.304,32.592],[79.262,32.534],[79.23,32.528],[79.185,32.479],[79.115,32.47],[79.129,32.427],[79.105,32.41],[79.097,32.376],[79.012,32.383],[78.963,32.337],[78.937,32.371],[78.838,32.439],[78.806,32.443],[78.758,32.554],[78.78,32.604],[78.74,32.656],[78.75,32.698],[78.703,32.66],[78.647,32.654],[78.604,32.6],[78.559,32.62],[78.516,32.61],[78.49,32.585],[78.454,32.585],[78.397,32.526],[78.425089522017913,32.514964830635819]
+    ] } } ] };
+
+    let map = null;
+    const clickable = []; // layer ids that carry popups
+
+    function initMap() {
+      map = new maplibregl.Map({
+        container:'map',
+        style:{
+          version:8,
+          sources:{
+            osm:{ type:'raster', tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+              tileSize:256, attribution:'© OpenStreetMap contributors' },
+            orm:{ type:'raster', tiles:[
+              'https://a.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+              'https://b.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+              'https://c.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png'],
+              tileSize:256, attribution:'© OpenRailwayMap (CC-BY-SA)' }
+          },
+          layers:[
+            { id:'osm', type:'raster', source:'osm' },
+            { id:'orm', type:'raster', source:'orm', paint:{ 'raster-opacity':0.9 } }
+          ]
+        },
+        center:[74.95,32.57], zoom:9
+      });
+      map.addControl(new maplibregl.NavigationControl(), 'top-right');
+      map.addControl(new maplibregl.ScaleControl());
+
+      map.on('load', () => {
+        addNorthernBoundary();  // permanent reference layer — always on, not in the list
+        KMZ_FILES.forEach(f => f.groups.forEach(g => addGroupLayer(f, g)));
+        fitToTicked();
+        map.on('click', clickHandler);
+      });
+    }
+
+    // Northern boundary — a fixed reference line drawn on every project map.
+    // Always visible (no toggle). Inlined (not fetched) so it renders even when
+    // the demo is opened directly from disk (file://, where fetch is blocked).
+    function addNorthernBoundary() {
+      map.addSource('northern-boundary', { type:'geojson', data:NORTHERN_BOUNDARY });
+      map.addLayer({ id:'nb-casing', type:'line', source:'northern-boundary',
+        layout:{ 'line-join':'round', 'line-cap':'round' },
+        paint:{ 'line-color':'#ffffff', 'line-width':5 } });
+      map.addLayer({ id:'nb-line', type:'line', source:'northern-boundary',
+        layout:{ 'line-join':'round', 'line-cap':'round' },
+        paint:{ 'line-color':'#9ca3af', 'line-width':2.5 } });
+    }
+
+    // Add one geometry group as its own map layer(s), coloured per group.
+    function addGroupLayer(f, g) {
+      const src = `src-${f.id}-${g.geom}`;
+      map.addSource(src, { type:'geojson', data:g.data });
+      const vis = g.on ? 'visible' : 'none';
+      g.layerIds = [];
+      const add = (def) => { map.addLayer(def); g.layerIds.push(def.id); };
+
+      if (g.geom === 'polygon') {
+        add({ id:`${f.id}-${g.geom}-fill`, type:'fill', source:src,
+          layout:{ visibility:vis }, paint:{ 'fill-color':g.color, 'fill-opacity':0.30 } });
+        add({ id:`${f.id}-${g.geom}-line`, type:'line', source:src,
+          layout:{ visibility:vis }, paint:{ 'line-color':g.color, 'line-width':2.5 } });
+        clickable.push(`${f.id}-${g.geom}-fill`);
+      } else if (g.geom === 'line') {
+        // White casing under the line so it stays visible over the basemap
+        // (matches the northern-boundary styling in the original index.html).
+        add({ id:`${f.id}-${g.geom}-casing`, type:'line', source:src,
+          layout:{ visibility:vis, 'line-join':'round', 'line-cap':'round' },
+          paint:{ 'line-color':'#ffffff', 'line-width': f.id==='boundary'?6:8 } });
+        add({ id:`${f.id}-${g.geom}-line`, type:'line', source:src,
+          layout:{ visibility:vis, 'line-join':'round', 'line-cap':'round' },
+          paint:{ 'line-color':g.color, 'line-width': f.id==='boundary'?3:5 } });
+        clickable.push(`${f.id}-${g.geom}-line`);
+      } else { // point
+        add({ id:`${f.id}-${g.geom}-pt`, type:'circle', source:src,
+          layout:{ visibility:vis },
+          paint:{ 'circle-radius':6, 'circle-color':g.color, 'circle-stroke-width':1.5, 'circle-stroke-color':'#fff' } });
+        add({ id:`${f.id}-${g.geom}-lbl`, type:'symbol', source:src,
+          layout:{ visibility:vis, 'text-field':['get','name'], 'text-size':11, 'text-offset':[0,1.2], 'text-anchor':'top' },
+          paint:{ 'text-color':'#1f2937', 'text-halo-color':'#fff', 'text-halo-width':1.4 } });
+        clickable.push(`${f.id}-${g.geom}-pt`);
+      }
+    }
+
+    // ── Left list: KMZ file → expandable feature-type tree ──
+    function buildList() {
+      const list = document.getElementById('kmzList');
+      list.innerHTML = '';
+      KMZ_FILES.forEach(f => {
+        const item = document.createElement('div');
+        item.className = 'kmz' + (anyOn(f) ? ' on' : '');
+
+        // Row: arrow · checkbox · filename (no icon, no meta)
+        const row = document.createElement('div');
+        row.className = 'kmz-row';
+        row.innerHTML =
+          `<span class="arrow">▸</span>
+           <input type="checkbox" class="kmz-cb">
+           <span class="fname">${esc(f.name)}</span>
+           <button class="dl" title="Download KMZ">
+             <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+               <line x1="12" y1="3" x2="12" y2="14"/>
+               <polyline points="7 9.5 12 14.5 17 9.5"/>
+               <polyline points="5 15 5 20 19 20 19 15"/>
+             </svg>
+           </button>`;
+        const arrow = row.querySelector('.arrow');
+        const fname = row.querySelector('.fname');
+        const cb = row.querySelector('input');
+        const toggleOpen = () => item.classList.toggle('open');
+        arrow.addEventListener('click', toggleOpen);
+        fname.addEventListener('click', toggleOpen);
+        cb.addEventListener('change', () => setFile(f, item, cb.checked));
+        row.querySelector('.dl').addEventListener('click', (e) => { e.stopPropagation(); downloadKmz(f); });
+
+        // Tree: one leaf per geometry group — swatch colour + "Label (n)"
+        const tree = document.createElement('div');
+        tree.className = 'kmz-tree';
+        f.groups.forEach(g => {
+          const leaf = document.createElement('label');
+          leaf.className = 'leaf';
+          leaf.innerHTML =
+            `<input type="checkbox" ${g.on?'checked':''}>
+             <span class="sw" style="background:${g.color}"></span>
+             <span class="lbl">${g.label} <span class="num">(${g.data.features.length})</span></span>`;
+          leaf.querySelector('input').addEventListener('change', e => {
+            g.on = e.target.checked;
+            setGroupVis(g);
+            item.classList.toggle('on', anyOn(f));
+            syncFileCheckbox(f, cb);
+            updateCount();
+          });
+          tree.appendChild(leaf);
+        });
+
+        item.appendChild(row);
+        item.appendChild(tree);
+        list.appendChild(item);
+        syncFileCheckbox(f, cb);
+      });
+      updateCount();
+    }
+
+    // File-level checkbox toggles all its groups.
+    function setFile(f, item, on) {
+      f.groups.forEach(g => { g.on = on; setGroupVis(g); });
+      item.querySelectorAll('.leaf input').forEach((el, i) => { el.checked = f.groups[i].on; el.indeterminate = false; });
+      item.classList.toggle('on', anyOn(f));
+      updateCount();
+    }
+    function setGroupVis(g) {
+      const vis = g.on ? 'visible' : 'none';
+      (g.layerIds || []).forEach(id => map && map.getLayer(id) && map.setLayoutProperty(id, 'visibility', vis));
+    }
+    // File checkbox = checked if all groups on, indeterminate if some.
+    function syncFileCheckbox(f, cb) {
+      const on = f.groups.filter(g => g.on).length;
+      cb.checked = on === f.groups.length;
+      cb.indeterminate = on > 0 && on < f.groups.length;
+    }
+    const anyOn = (f) => f.groups.some(g => g.on);
+
+    function updateCount() {
+      const shown = KMZ_FILES.filter(anyOn).length;
+      document.getElementById('count').textContent = `${shown}/${KMZ_FILES.length} shown`;
+    }
+
+    // Fit the map to every ticked group's extent.
+    function fitToTicked() {
+      if (!map) return;
+      const b = new maplibregl.LngLatBounds();
+      const walk = c => { if (typeof c[0]==='number') b.extend(c); else c.forEach(walk); };
+      KMZ_FILES.forEach(f => f.groups.forEach(g => {
+        if (g.on && g.data.features) g.data.features.forEach(ft => ft.geometry?.coordinates && walk(ft.geometry.coordinates));
+      }));
+      if (!b.isEmpty()) map.fitBounds(b, { padding:70, maxZoom:13, duration:700 });
+    }
+
+    // Popups on click.
+    function clickHandler(e) {
+      const feats = map.queryRenderedFeatures(e.point, { layers: clickable.filter(id => map.getLayer(id)) });
+      if (!feats.length) return;
+      const p = feats[0].properties || {};
+      const rows = Object.keys(p).filter(k => p[k]!=='' && p[k]!=null && k!=='name')
+        .map(k => `<tr><td>${esc(k)}</td><td>${esc(String(p[k]))}</td></tr>`).join('');
+      new maplibregl.Popup({ maxWidth:'300px' }).setLngLat(e.lngLat)
+        .setHTML((p.name?`<b>${esc(p.name)}</b>`:'') + (rows?`<table>${rows}</table>`:'')).addTo(map);
+    }
+
+    // Download the KMZ. (Demo: exports the file's features as GeoJSON; the real
+    // app streams the actual stored .kmz from the backend.)
+    function downloadKmz(f) {
+      const features = f.groups.flatMap(g => g.data.features);
+      const blob = new Blob([JSON.stringify(fc(features), null, 2)], { type:'application/geo+json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = f.name.replace(/\.kmz$/i, '') + '.geojson';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function esc(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    /* ── Boot (runs LAST, after every declaration — avoids the const TDZ error) ── */
+    buildList();
+    document.getElementById('fitBtn').addEventListener('click', fitToTicked);
+    if (typeof maplibregl !== 'undefined') {
+      initMap();
+    } else {
+      document.getElementById('map').insertAdjacentHTML('beforebegin',
+        '<div class="map-msg">Map library couldn’t load (offline?).<br>The layer list on the left still works.</div>');
+    }
+  </script>
+</body>
+</html>

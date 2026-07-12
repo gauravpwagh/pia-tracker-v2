@@ -1,0 +1,17 @@
+apiVersion: 1
+
+# Datasources for the VM Grafana. Loki is populated by the backend's loki4j
+# appender (see backend logback-spring.xml); there is no promtail on the VM.
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false

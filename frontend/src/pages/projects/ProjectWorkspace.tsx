@@ -11,11 +11,13 @@
  * Design mirrors docs/mockups/workspace-preview.html.
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Layout, Button, Input, Select, Spin, Empty, Alert, Tag, Typography, DatePicker, Modal, Form, Space } from 'antd';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
+import { Layout, Button, Input, InputNumber, Select, Spin, Empty, Alert, Tag, Tooltip, Typography, DatePicker, Modal, Form, Space } from 'antd';
 import { PlusOutlined, ArrowLeftOutlined, EditOutlined, CloseOutlined, UserAddOutlined, UsergroupAddOutlined, StarOutlined } from '@ant-design/icons';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { AttachmentPanel, ACCEPT_GEOGRAPHIC, ACCEPT_VIDEO, ACCEPT_DOCUMENTS } from '@components/attachments/AttachmentPanel';
+import { fetchAttachments } from '@api/attachments';
 import dayjs from 'dayjs';
 
 import { TopBar } from '@components/shell/TopBar';
@@ -32,6 +34,7 @@ import {
   designatePrimaryCe,
   fetchProjectHistory,
   fetchZones,
+  updateProjectDetails,
   type ActivityDetailResponse,
   type ProjectAssignmentItem,
 } from '@api/projects';
@@ -44,6 +47,9 @@ import {
 } from '@api/activityRecords';
 import { RecordDetailPanel } from './RecordDetailPanel';
 import { RecordEditor } from '@pages/records/RecordEditPage';
+
+// Lazy — MapLibre + JSZip are heavy and only needed on the Map tab.
+const MapView = lazy(() => import('./MapView').then((m) => ({ default: m.MapView })));
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -100,11 +106,53 @@ const RECORD_STATE_LABEL: Record<string, string> = {
   DRAFT: 'Draft', SUBMITTED_FOR_VERIFICATION: 'Submitted', VERIFIED: 'Verified',
   AUTHENTICATED: 'Authenticated', SENT_BACK_TO_DYCE: 'Sent Back', SENT_BACK_TO_NODAL: 'Sent Back',
 };
-type StatusFilter = 'all' | 'draft' | 'submitted' | 'auth';
+
+// ── Project History: turn raw audit action codes into readable descriptions ─────
+// Workflow transitions are logged as "WORKFLOW.<toStateCode>"; everything else is
+// a fixed verb code (see AuditLogWriter call sites).
+const WORKFLOW_ACTION_LABEL: Record<string, string> = {
+  DRAFT: 'Moved back to Draft',
+  SUBMITTED_FOR_VERIFICATION: 'Submitted for verification',
+  PENDING_NODAL_VERIFICATION: 'Submitted for verification',
+  VERIFIED: 'Verified & submitted for authentication',
+  PENDING_CE_C_AUTHENTICATION: 'Verified & submitted for authentication',
+  AUTHENTICATED: 'Authenticated',
+  SENT_BACK_TO_DYCE: 'Sent back to Dy CE/C',
+  SENT_BACK_TO_NODAL: 'Sent back to Nodal Dy CE/C',
+};
+const HISTORY_ACTION_LABEL: Record<string, string> = {
+  'PROJECT.CREATE': 'Project created',
+  'PROJECT.ALLOCATE': 'CE/C assigned',
+  'PROJECT.ASSIGN_DYCE': 'Dy CE/C assigned',
+  'PROJECT.DESIGNATE_NODAL': 'Nodal Dy CE/C designated',
+  'PROJECT.DESIGNATE_PRIMARY_CE': 'Primary CE/C designated',
+  'PROJECT.REMOVE': 'Project removed',
+  'ACTIVITY.CREATE': 'Activity created',
+  'ACTIVITY.UPDATE': 'Activity scope updated',
+  'ACTIVITY_RECORD.CREATE': 'Record created',
+  'ACTIVITY_RECORD.DELETE': 'Record deleted',
+  'DRAWING.ADD_APPROVER': 'Drawing approver added',
+  'DRAWING.REMOVE_APPROVER': 'Drawing approver removed',
+};
+function describeHistoryAction(action: string): string {
+  if (action.startsWith('WORKFLOW.')) {
+    const state = action.slice('WORKFLOW.'.length);
+    return WORKFLOW_ACTION_LABEL[state] ?? `Moved to ${state.replace(/_/g, ' ').toLowerCase()}`;
+  }
+  return HISTORY_ACTION_LABEL[action] ?? action.replace(/[._]/g, ' ');
+}
+const HISTORY_ENTITY_LABEL: Record<string, string> = {
+  PROJECT: 'Project', ACTIVITY: 'Activity', PROJECT_ACTIVITY: 'Activity', ACTIVITY_RECORD: 'Record',
+};
+type StatusFilter = 'all' | 'draft' | 'verified' | 'authenticated';
+// Coarse buckets behind the 4 record filters (All / Draft / Verified / Authenticated):
+//   draft       → DRAFT + SENT_BACK_TO_DYCE            (with the Dy CE/C, still editable)
+//   verified    → SUBMITTED_FOR_VERIFICATION + VERIFIED + SENT_BACK_TO_NODAL (in the verification pipeline)
+//   authenticated → AUTHENTICATED
 function stateBucket(s: string): Exclude<StatusFilter, 'all'> {
-  if (s === 'DRAFT') return 'draft';
-  if (s === 'AUTHENTICATED') return 'auth';
-  return 'submitted';
+  if (s === 'DRAFT' || s === 'SENT_BACK_TO_DYCE') return 'draft';
+  if (s === 'AUTHENTICATED') return 'authenticated';
+  return 'verified';
 }
 
 const RECORD_CREATABLE = new Set([
@@ -139,6 +187,19 @@ const DRAWING_TYPE_OPTIONS = [
   { value: 'TUNNEL_DESIGN', label: 'Tunnel Design' },
 ];
 
+// Land Acquisition scope Checklist — documents uploaded at the activity level
+// (entityType `PROJECT_ACTIVITY__<key>`, entityId = activity id). KMZ/SRP/CALA are
+// mandatory before records can be added; Drone footage is optional (#11).
+const LA_SCOPE_DOC_FIELDS: { key: string; label: string; mandatory: boolean; accept: string }[] = [
+  // Browsers report an empty/unknown MIME for .kmz/.kml, so the accept list must include the
+  // file extensions (the upload validator matches these against the filename).
+  { key: 'kmz_file',         label: 'KMZ File',                     mandatory: true,  accept: `${ACCEPT_GEOGRAPHIC},.kmz,.kml,.gpx` },
+  { key: 'drone_footage',    label: "Drone Footage of L' Section",  mandatory: false, accept: ACCEPT_VIDEO },
+  { key: 'srp_notification', label: 'Notification of SRP',          mandatory: true,  accept: ACCEPT_DOCUMENTS },
+  { key: 'cala_nomination',  label: 'CALA Nomination',              mandatory: true,  accept: ACCEPT_DOCUMENTS },
+];
+const LA_SCOPE_MANDATORY = LA_SCOPE_DOC_FIELDS.filter((f) => f.mandatory);
+
 const ASSIGNMENT_ROLE_LABEL: Record<string, string> = {
   CE_C: 'CE / C', PRIMARY_CE_C: 'CE / C (Primary)', DY_CE_C: 'Dy.CE / C',
   NODAL_DY_CE_C: 'Dy.CE / C (Nodal)', CAO_C: 'CAO / C',
@@ -153,31 +214,50 @@ function recordDisplayName(r: ActivityRecordDetail, i: number): string {
 
 type DetailMode = { kind: 'empty' } | { kind: 'record'; id: string } | { kind: 'add' } | { kind: 'scope' };
 
-function ActivityPane({ activity, activityType, projectId, canEdit }: {
+function ActivityPane({ activity, activityType, projectId, canEdit, initialRecordId }: {
   activity: ActivityDetailResponse | null;
   activityType: string;
   projectId: string;
   canEdit: boolean;
+  /** When set (e.g. arriving from the inbox), open this record on mount. */
+  initialRecordId?: string;
 }) {
   const queryClient = useQueryClient();
   const activityId = activity?.id;
   const typeCode = activityType;
   const isUs = typeCode === 'UTILITY_SHIFTING';
   const isDrawing = typeCode === 'DRAWING_APPROVAL';
+  const isLa = typeCode === 'LAND_ACQUISITION';
   const needsSubtype = isUs || isDrawing;
 
-  const [mode, setMode] = useState<DetailMode>({ kind: 'empty' });
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const canUploadDocs = currentUser?.permissions.includes('ATTACHMENT.UPLOAD.OWN_RECORDS') ?? false;
+
+  const [mode, setMode] = useState<DetailMode>(initialRecordId ? { kind: 'record', id: initialRecordId } : { kind: 'empty' });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingReadOnly, setEditingReadOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [statusF, setStatusF] = useState<StatusFilter>('all');
+  // Subtype filter — Utility Type (Utility Shifting) / Drawing Type (Drawing Approval).
+  const [subtypeF, setSubtypeF] = useState<string | undefined>(undefined);
   // add-record inline form
   const [newName, setNewName] = useState('');
   const [newSubtype, setNewSubtype] = useState<string | undefined>(undefined);
   // scope editor
-  const [scName, setScName] = useState(activity?.name ?? '');
   const [scNotes, setScNotes] = useState(activity?.scopeNotes ?? '');
   const [scTarget, setScTarget] = useState<dayjs.Dayjs | null>(activity?.targetCompletionDate ? dayjs(activity.targetCompletionDate) : null);
+  const [scTotal, setScTotal] = useState<number | null>((activity?.metadataJson?.total_count as number | undefined) ?? null);
+
+  // Scope values as currently persisted on the activity (drive the KPI + Add-Record gate).
+  const totalCount = (activity?.metadataJson?.total_count as number | undefined) ?? null;
+
+  // Load the current scope values into the editor fields (used by the Scope button + auto-open).
+  const openScope = () => {
+    setScNotes(activity?.scopeNotes ?? '');
+    setScTarget(activity?.targetCompletionDate ? dayjs(activity.targetCompletionDate) : null);
+    setScTotal((activity?.metadataJson?.total_count as number | undefined) ?? null);
+    setMode({ kind: 'scope' });
+  };
 
   const recordsQuery = useQuery({
     queryKey: ['records', activityId],
@@ -190,17 +270,18 @@ function ActivityPane({ activity, activityType, projectId, canEdit }: {
   );
 
   const kpi = useMemo(() => {
-    let draft = 0, submitted = 0, auth = 0;
+    let draft = 0, verified = 0, auth = 0;
     for (const r of records) {
       const b = stateBucket(r.recordState);
-      if (b === 'draft') draft++; else if (b === 'auth') auth++; else submitted++;
+      if (b === 'draft') draft++; else if (b === 'authenticated') auth++; else verified++;
     }
-    return { total: records.length, draft, submitted, auth };
+    return { total: records.length, draft, verified, auth };
   }, [records]);
 
   const filtered = records.filter((r, i) => {
     if (search && !recordDisplayName(r, i).toLowerCase().includes(search.toLowerCase())) return false;
     if (statusF !== 'all' && stateBucket(r.recordState) !== statusF) return false;
+    if (subtypeF && r.recordSubtype !== subtypeF) return false;
     return true;
   });
 
@@ -228,42 +309,96 @@ function ActivityPane({ activity, activityType, projectId, canEdit }: {
   });
 
   const scopeMutation = useMutation({
-    mutationFn: () => updateActivity(activityId!, {
-      name: scName,
-      scopeNotes: scNotes || undefined,
-      targetCompletionDate: scTarget ? scTarget.format('YYYY-MM-DD') : undefined,
-    }),
+    mutationFn: async () => {
+      // Create the activity on first Save scope (it may not exist yet — six tabs are always
+      // shown, but the DB row is created lazily). Records can't be added until this is saved.
+      const name = activity?.name ?? (ACTIVITY_TYPE_LABEL[activityType] ?? activityType.replace(/_/g, ' '));
+      const metadataJson = { ...(activity?.metadataJson ?? {}), total_count: scTotal };
+      const payload = {
+        name,
+        scopeNotes: scNotes || undefined,
+        targetCompletionDate: scTarget ? scTarget.format('YYYY-MM-DD') : undefined,
+        metadataJson,
+      };
+      if (activityId) return updateActivity(activityId, payload);
+      return createActivity(projectId, { activityTypeCode: activityType, ...payload });
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['activities'] });
-      setMode({ kind: 'empty' });
+      // Keep the scope panel open for Land Acquisition so the mandatory docs can be uploaded
+      // right after the activity is created; other activities have nothing more to fill.
+      if (!isLa) setMode({ kind: 'empty' });
     },
   });
 
-  const canAdd = RECORD_CREATABLE.has(typeCode) && canEdit;
+  const canCreateType = RECORD_CREATABLE.has(typeCode) && canEdit;
+  // Records can't be added until the activity scope is saved with the mandatory fields
+  // (total count + target completion). Land Acquisition additionally requires the mandatory
+  // checklist docs — added in `addRecordEnabled` below (#11).
+  const scopeSaved = !!activity && totalCount != null && totalCount >= 1 && !!activity.targetCompletionDate;
+
+  // Land Acquisition also requires the mandatory scope docs (KMZ, SRP, CALA) before records
+  // can be added (#11). Query the same keys AttachmentPanel uses so uploads refresh this gate.
+  const laDocQueries = useQueries({
+    queries: (isLa && activityId ? LA_SCOPE_MANDATORY : []).map((f) => ({
+      queryKey: ['attachments', `PROJECT_ACTIVITY__${f.key}`, activityId],
+      queryFn: () => fetchAttachments(`PROJECT_ACTIVITY__${f.key}`, activityId!),
+    })),
+  });
+  const laMandatoryReady =
+    !isLa ||
+    (!!activityId &&
+      laDocQueries.length === LA_SCOPE_MANDATORY.length &&
+      laDocQueries.every((q) => (q.data?.length ?? 0) > 0));
+  const addRecordEnabled = scopeSaved && laMandatoryReady;
+
+  // #12/#2 — open the Scope panel by default whenever records can't yet be added
+  // (scope incomplete → Add Record disabled). Fires once per pane mount so the user can
+  // still close it; revisiting an incomplete activity re-opens it. Suppressed when arriving
+  // from the inbox to open a specific record.
+  const scopeAutoTriedRef = useRef(false);
+  const laDocsLoading = isLa && !!activityId && laDocQueries.some((q) => q.isLoading);
+  useEffect(() => {
+    if (scopeAutoTriedRef.current) return;
+    if (!canEdit || initialRecordId) { scopeAutoTriedRef.current = true; return; }
+    if (laDocsLoading) return; // wait until LA doc presence is known before deciding
+    if (!addRecordEnabled) openScope();
+    scopeAutoTriedRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEdit, initialRecordId, addRecordEnabled, laDocsLoading]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Pane header: Activity name [Scope] | KPIs | Add Record — separator below */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '6px 20px', flexShrink: 0, borderBottom: '1px solid var(--ant-color-border)' }}>
         <h3 style={{ margin: 0, fontSize: 15 }}>{ACTIVITY_TYPE_LABEL[typeCode] ?? typeCode.replace(/_/g, ' ')}</h3>
-        {canEdit && activity && (
-          <Button size="small" icon={<EditOutlined />}
-            onClick={() => { setScName(activity.name ?? ''); setScNotes(activity.scopeNotes ?? ''); setScTarget(activity.targetCompletionDate ? dayjs(activity.targetCompletionDate) : null); setMode({ kind: 'scope' }); }}>
+        {canEdit && (
+          <Button size="small" type={mode.kind === 'scope' ? 'primary' : 'default'} icon={<EditOutlined />}
+            onClick={() => { if (mode.kind === 'scope') setMode({ kind: 'empty' }); else openScope(); }}>
             Scope
           </Button>
         )}
         <div style={{ display: 'flex', gap: 8, flex: 1, justifyContent: 'center' }}>
-          <Kpi label="Total" value={kpi.total} color="var(--ant-color-text)" />
+          <Kpi label="Records" value={`${kpi.total} / ${totalCount ?? '—'}`} color="var(--ant-color-text)" />
           <Kpi label="Draft" value={kpi.draft} color="#6b7280" />
-          <Kpi label="Submitted" value={kpi.submitted} color="#1d4ed8" />
+          <Kpi label="Verified" value={kpi.verified} color="#1d4ed8" />
           <Kpi label="Authenticated" value={kpi.auth} color="#166534" />
         </div>
-        {canAdd && (
-          <Button type="primary" icon={<PlusOutlined />}
-            style={{ background: '#1565c0', borderColor: '#1565c0' }}
-            onClick={() => { setNewName(''); setNewSubtype(undefined); setMode({ kind: 'add' }); }}>
-            Add Record
-          </Button>
+        {canCreateType && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            {!addRecordEnabled && (
+              <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>Add scope to enable</Text>
+            )}
+            <Tooltip title={addRecordEnabled ? '' : (!scopeSaved
+              ? 'Save the activity scope (total count + target completion) to add records'
+              : 'Upload the mandatory scope documents (KMZ, SRP, CALA) to add records')}>
+              <Button type="primary" icon={<PlusOutlined />} disabled={!addRecordEnabled}
+                style={addRecordEnabled ? { background: '#1565c0', borderColor: '#1565c0' } : undefined}
+                onClick={() => { setNewName(''); setNewSubtype(undefined); setMode({ kind: 'add' }); }}>
+                Add Record
+              </Button>
+            </Tooltip>
+          </span>
         )}
       </div>
 
@@ -276,22 +411,67 @@ function ActivityPane({ activity, activityType, projectId, canEdit }: {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-              <div style={{ flex: '1 1 260px' }}>
-                <Field label="Activity name"><Input value={scName} onChange={(e) => setScName(e.target.value)} /></Field>
+              <div style={{ flex: '0 1 240px' }}>
+                <Field label={`Total count of ${ACTIVITY_TYPE_LABEL[typeCode] ?? typeCode.replace(/_/g, ' ')}`}>
+                  <InputNumber style={{ width: '100%' }} min={1} value={scTotal} onChange={(v) => setScTotal(v)} placeholder="e.g. 12" />
+                </Field>
               </div>
               <div style={{ flex: '0 1 220px' }}>
                 <Field label="Target completion"><DatePicker style={{ width: '100%' }} value={scTarget} onChange={setScTarget} /></Field>
               </div>
               <div style={{ flex: '2 1 360px' }}>
-                <Field label="Scope notes"><Input.TextArea rows={1} autoSize={{ minRows: 1, maxRows: 3 }} value={scNotes} onChange={(e) => setScNotes(e.target.value)} /></Field>
+                <Field label="Scope notes (optional)"><Input.TextArea rows={1} autoSize={{ minRows: 1, maxRows: 3 }} value={scNotes} onChange={(e) => setScNotes(e.target.value)} /></Field>
               </div>
             </div>
+
+            {/* #11 — Land Acquisition scope checklist (docs on the activity). */}
+            {isLa && (
+              <div style={{ borderTop: '1px solid var(--ant-color-border)', paddingTop: 10, marginTop: 2 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>
+                  Checklist{' '}
+                  <Text type="secondary" style={{ fontWeight: 400, fontSize: 12 }}>
+                    — KMZ File, Notification of SRP and CALA Nomination are mandatory before records can be added
+                  </Text>
+                </div>
+                {!activityId ? (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Save the scope first (total count + target completion) to enable document uploads.
+                  </Text>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 28px' }}>
+                    {LA_SCOPE_DOC_FIELDS.map((f) => (
+                      <div key={f.key}>
+                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                          {f.label}{' '}
+                          {f.mandatory
+                            ? <span style={{ color: 'var(--ant-color-error)' }}>*</span>
+                            : <Text type="secondary" style={{ fontWeight: 400 }}>(optional)</Text>}
+                        </div>
+                        <AttachmentPanel
+                          entityType={`PROJECT_ACTIVITY__${f.key}`}
+                          entityId={activityId}
+                          canUpload={canUploadDocs}
+                          currentUserId={currentUser?.userId}
+                          accept={f.accept}
+                          uploadLabel="Upload"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {scopeMutation.isError && (
               <Alert type="error" showIcon message={scopeMutation.error instanceof Error ? scopeMutation.error.message : 'Failed to save scope'} />
             )}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 12, marginRight: 'auto' }}>
+                Total count and target completion are required before records can be added.
+              </Text>
               <Button onClick={() => setMode({ kind: 'empty' })}>Cancel</Button>
-              <Button type="primary" loading={scopeMutation.isPending} onClick={() => scopeMutation.mutate()}>Save scope</Button>
+              <Button type="primary" loading={scopeMutation.isPending}
+                disabled={!scTotal || scTotal < 1 || !scTarget}
+                onClick={() => scopeMutation.mutate()}>Save scope</Button>
             </div>
           </div>
         </div>
@@ -310,9 +490,22 @@ function ActivityPane({ activity, activityType, projectId, canEdit }: {
           <Select size="small" style={{ width: 200, fontSize: 12 }} value={statusF} onChange={setStatusF}
             options={[
               { value: 'all', label: 'All' }, { value: 'draft', label: 'Draft' },
-              { value: 'submitted', label: 'Submitted' }, { value: 'auth', label: 'Authenticated' },
+              { value: 'verified', label: 'Verified' }, { value: 'authenticated', label: 'Authenticated' },
             ]} />
         </div>
+        {needsSubtype && (
+          <>
+            <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--ant-color-border)', margin: '2px 0' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--ant-color-text-secondary)' }}>
+                {isUs ? 'Utility Type' : 'Drawing Type'}
+              </label>
+              <Select size="small" style={{ width: 220, fontSize: 12 }} value={subtypeF ?? ''} onChange={(v) => setSubtypeF(v || undefined)}
+                showSearch optionFilterProp="label"
+                options={[{ value: '', label: 'All' }, ...(isUs ? UTILITY_TYPE_OPTIONS : DRAWING_TYPE_OPTIONS)]} />
+            </div>
+          </>
+        )}
       </div>
 
       {/* Master-detail split */}
@@ -415,7 +608,7 @@ function ActivityPane({ activity, activityType, projectId, canEdit }: {
   );
 }
 
-function Kpi({ label, value, color }: { label: string; value: number; color: string }) {
+function Kpi({ label, value, color }: { label: string; value: React.ReactNode; color: string }) {
   return (
     <div style={{ border: '1px solid var(--ant-color-border)', borderRadius: 8, padding: '6px 12px', background: 'var(--ant-color-bg-container)', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
       <span style={{ color: 'var(--ant-color-text-secondary)' }}>{label} :</span>
@@ -678,10 +871,46 @@ function orderedOfficerRows(assignments: ProjectAssignmentItem[]): { userId: str
   return rows.sort((a, b) => a.rank - b.rank);
 }
 
-function OverviewView({ projectId, zoneId, project }: { projectId: string; zoneId: string; project: { name: string; projectCode: string | null; projectType: string | null; lengthKm: number | null; ipaDate: string | null; targetCompletionYear: number | null; lifecycleState: string } }) {
+function OverviewView({ projectId, zoneId, project, autoOpenAssign, onAutoOpenAssignConsumed }: {
+  projectId: string; zoneId: string;
+  project: { name: string; projectCode: string | null; projectType: string | null; lengthKm: number | null; stationNames: string | null; ipaDate: string | null; targetCompletionYear: number | null; lifecycleState: string };
+  /** #19/#20 — open the Assign CE/C or Assign Dy CE/C modal immediately on mount. */
+  autoOpenAssign?: 'ce' | 'dy' | null;
+  onAutoOpenAssignConsumed?: () => void;
+}) {
   const queryClient = useQueryClient();
   const currentUser = useAuthStore((s) => s.currentUser);
   const [modal, setModal] = useState<AssignModalKind>(null);
+
+  // #19/#20 — auto-open the assign-officer modal once, when arriving from the
+  // project-list "Assign" action or the project-bar "Assign officers" button.
+  useEffect(() => {
+    if (!autoOpenAssign) return;
+    setModal(autoOpenAssign === 'ce' ? 'allocate' : 'assignDyce');
+    onAutoOpenAssignConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenAssign]);
+
+  // ── Edit Details (#8) — Length + Station names, CE/C and Dy CE/C only ────────
+  const canEditDetails = currentUser?.permissions.includes('PROJECT.UPDATE.OWN') ?? false;
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [edLengthKm, setEdLengthKm] = useState<number | null>(project.lengthKm);
+  const [edStationNames, setEdStationNames] = useState(project.stationNames ?? '');
+  const startEditingDetails = () => {
+    setEdLengthKm(project.lengthKm);
+    setEdStationNames(project.stationNames ?? '');
+    setEditingDetails(true);
+  };
+  const detailsMutation = useMutation({
+    mutationFn: () => updateProjectDetails(projectId, {
+      lengthKm: edLengthKm ?? undefined,
+      stationNames: edStationNames.trim() || undefined,
+    }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      setEditingDetails(false);
+    },
+  });
   const assignmentsQuery = useQuery({ queryKey: ['assignments', projectId], queryFn: () => fetchProjectAssignments(projectId) });
   const usersQuery = useQuery({ queryKey: ['users'], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const zonesQuery = useQuery({ queryKey: ['zones'], queryFn: fetchZones, staleTime: 10 * 60_000 });
@@ -723,15 +952,50 @@ function OverviewView({ projectId, zoneId, project }: { projectId: string; zoneI
 
       {/* Row 2 — project details */}
       <div style={{ background: 'var(--ant-color-bg-container)', border: '1px solid var(--ant-color-border)', borderRadius: 10, padding: '16px 18px' }}>
-        <h4 style={{ margin: '0 0 12px' }}>Project details</h4>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px 20px' }}>
-          <Detail label="Zone" value={zoneShort} />
-          <Detail label="Project ID" value={project.projectCode ?? '—'} />
-          <Detail label="PH" value={project.projectType ? (PLAN_HEAD_BY_PROJECT_TYPE[project.projectType] ? `PH-${PLAN_HEAD_BY_PROJECT_TYPE[project.projectType]} : ${project.projectType.replace(/_/g, ' ')}` : project.projectType.replace(/_/g, ' ')) : '—'} />
-          <Detail label="Length" value={project.lengthKm !== null ? `${project.lengthKm} km` : '—'} />
-          <Detail label="IPA date" value={project.ipaDate ? dayjs(project.ipaDate).format('D MMM YYYY') : '—'} />
-          <Detail label="Status" value={badge.label} />
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+          <h4 style={{ margin: 0, flex: 1 }}>Project details</h4>
+          {canEditDetails && !editingDetails && (
+            <Button size="small" icon={<EditOutlined />} onClick={startEditingDetails}>Edit Details</Button>
+          )}
         </div>
+        {editingDetails ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <div style={{ flex: '0 1 220px' }}>
+                <Field label="Length (km)">
+                  <InputNumber style={{ width: '100%' }} min={0} step={0.1} value={edLengthKm}
+                    onChange={(v) => setEdLengthKm(v)} placeholder="e.g. 42.5" />
+                </Field>
+              </div>
+              <div style={{ flex: '1 1 320px' }}>
+                <Field label="Name of stations">
+                  <Input.TextArea rows={1} autoSize={{ minRows: 1, maxRows: 3 }} value={edStationNames}
+                    onChange={(e) => setEdStationNames(e.target.value)}
+                    placeholder="e.g. Daund, Baramati, Solapur (comma-separated)" />
+                </Field>
+              </div>
+            </div>
+            {detailsMutation.isError && (
+              <Alert type="error" showIcon message={detailsMutation.error instanceof Error ? detailsMutation.error.message : 'Failed to save'} />
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Button onClick={() => setEditingDetails(false)}>Cancel</Button>
+              <Button type="primary" loading={detailsMutation.isPending} onClick={() => detailsMutation.mutate()}>Save</Button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px 20px' }}>
+            <Detail label="Zone" value={zoneShort} />
+            <Detail label="Project ID" value={project.projectCode ?? '—'} />
+            <Detail label="PH" value={project.projectType ? (PLAN_HEAD_BY_PROJECT_TYPE[project.projectType] ? `PH-${PLAN_HEAD_BY_PROJECT_TYPE[project.projectType]} : ${project.projectType.replace(/_/g, ' ')}` : project.projectType.replace(/_/g, ' ')) : '—'} />
+            <Detail label="Length" value={project.lengthKm != null ? `${project.lengthKm} km` : '—'} />
+            <Detail label="IPA date" value={project.ipaDate ? dayjs(project.ipaDate).format('D MMM YYYY') : '—'} />
+            <Detail label="Status" value={badge.label} />
+            <div style={{ gridColumn: '1 / -1' }}>
+              <Detail label="Stations" value={project.stationNames?.trim() || '—'} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Row 3 — designated officers (left) + activity progress (right) */}
@@ -842,8 +1106,13 @@ function HistoryView({ projectId }: { projectId: string }) {
                 <tr key={i}>
                   <td style={td}>{dayjs(h.at).format('D MMM YYYY, HH:mm')}</td>
                   <td style={td}>{h.actorName ?? '—'}</td>
-                  <td style={td}>{h.entityType.replace(/_/g, ' ')}</td>
-                  <td style={{ ...td, borderRight: 'none' }}>{h.action.replace(/_/g, ' ')}</td>
+                  <td style={td}>{HISTORY_ENTITY_LABEL[h.entityType] ?? h.entityType.replace(/_/g, ' ')}</td>
+                  <td style={{ ...td, borderRight: 'none' }}>
+                    {describeHistoryAction(h.action)}
+                    {h.details && (
+                      <div style={{ fontSize: 11, color: 'var(--ant-color-text-tertiary)', marginTop: 2 }}>{h.details}</div>
+                    )}
+                  </td>
                 </tr>
               ))
             )}
@@ -856,15 +1125,58 @@ function HistoryView({ projectId }: { projectId: string }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type NavView = 'overview' | 'records' | 'history';
+type NavView = 'overview' | 'records' | 'history' | 'map';
 
 export default function ProjectWorkspace() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { projectCode = '' } = useParams();
   const currentUser = useAuthStore((s) => s.currentUser);
 
-  const [view, setView] = useState<NavView>('records');
-  const [activeType, setActiveType] = useState<string>(ACTIVITY_TYPE_ORDER[0]);
+  // When navigated from the inbox: { activityTypeCode, recordId } to auto-open.
+  const autoOpen = useRef<{ activityTypeCode: string; recordId: string } | null>(
+    (location.state as { openRecord?: { activityTypeCode: string; recordId: string } } | null)?.openRecord ?? null,
+  ).current;
+
+  // View + active activity tab are persisted in the URL (?view=&type=) so a page refresh
+  // restores where the user was instead of resetting to Records → Land Acquisition (#6).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlView = searchParams.get('view');
+  const urlType = searchParams.get('type');
+  const urlAssign = searchParams.get('assign');
+  const validView = (['overview', 'records', 'history', 'map'] as NavView[]).includes(urlView as NavView);
+  const validUrlAssign = urlAssign === 'ce' || urlAssign === 'dy' ? urlAssign : null;
+
+  const [view, setView] = useState<NavView>(
+    autoOpen ? 'records' : validUrlAssign ? 'overview' : validView ? (urlView as NavView) : 'records',
+  );
+  const [activeType, setActiveType] = useState<string>(
+    autoOpen?.activityTypeCode ??
+      (urlType && ACTIVITY_TYPE_ORDER.includes(urlType) ? urlType : ACTIVITY_TYPE_ORDER[0]),
+  );
+  // One-shot: cleared on the first manual tab switch so revisiting a tab doesn't reopen.
+  const [autoOpenId, setAutoOpenId] = useState<string | null>(autoOpen?.recordId ?? null);
+  // #19/#20 — auto-open the Assign CE/C or Assign Dy CE/C modal once: either seeded from
+  // the URL (the project-list row action navigates here with ?assign=ce|dy) or set directly
+  // by the "Assign officers" button below (same tab, no navigation).
+  const [autoOpenAssign, setAutoOpenAssign] = useState<'ce' | 'dy' | null>(validUrlAssign);
+  const clearAutoOpenAssign = () => {
+    setAutoOpenAssign(null);
+    setSearchParams((prev) => { const p = new URLSearchParams(prev); p.delete('assign'); return p; }, { replace: true });
+  };
+
+  // Mirror the current view + tab back into the URL (replace, no history spam).
+  useEffect(() => {
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('view', view);
+        p.set('type', activeType);
+        return p;
+      },
+      { replace: true },
+    );
+  }, [view, activeType, setSearchParams]);
 
   const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: fetchProjects, enabled: currentUser !== null });
   const project = projectsQuery.data?.find((p) => p.projectCode === projectCode || p.id === projectCode);
@@ -896,9 +1208,18 @@ export default function ProjectWorkspace() {
 
   const canEdit = currentUser?.permissions.includes('ACTIVITY_RECORD.UPDATE.OWN') ?? false;
   // Assignment: CAO (PROJECT.ALLOCATE → assign CE) / CE (PROJECT.ASSIGN_DYCE → assign Dy).
-  const canAssign =
-    (currentUser?.permissions.includes('PROJECT.ALLOCATE') ?? false) ||
-    (currentUser?.permissions.includes('PROJECT.ASSIGN_DYCE') ?? false);
+  const canAllocateProject = currentUser?.permissions.includes('PROJECT.ALLOCATE') ?? false;
+  const canAssignDyceProject = currentUser?.permissions.includes('PROJECT.ASSIGN_DYCE') ?? false;
+  const canAssign = canAllocateProject || canAssignDyceProject;
+  // Which modal "Assign officers" should open: match the project's current lifecycle state
+  // first (AWAITING_CAO_ALLOCATION → assign CE, AWAITING_CEC_ASSIGNMENT → assign Dy); fall
+  // back to whichever action the user actually holds permission for.
+  const assignOfficersKind: 'ce' | 'dy' | null =
+    project?.lifecycleState === 'AWAITING_CAO_ALLOCATION' && canAllocateProject ? 'ce'
+    : project?.lifecycleState === 'AWAITING_CEC_ASSIGNMENT' && canAssignDyceProject ? 'dy'
+    : canAllocateProject ? 'ce'
+    : canAssignDyceProject ? 'dy'
+    : null;
 
   const badge = project ? (LIFECYCLE_BADGE[project.lifecycleState] ?? { color: 'default', label: project.lifecycleState }) : null;
 
@@ -922,7 +1243,7 @@ export default function ProjectWorkspace() {
         <Text strong style={{ fontSize: 16, marginLeft: 16 }}>{project?.name ?? projectCode}</Text>
         {project && (
           <Text type="secondary" style={{ fontSize: 12 }}>
-            &nbsp;·&nbsp;{project.projectType ?? ''}{project.lengthKm !== null ? ` · ${project.lengthKm} km` : ''}
+            &nbsp;·&nbsp;{project.projectType ?? ''}{project.lengthKm != null ? ` · ${project.lengthKm} km` : ''}
           </Text>
         )}
         <div style={{ flex: 1 }} />
@@ -931,7 +1252,7 @@ export default function ProjectWorkspace() {
             type="primary"
             size="small"
             style={{ marginRight: 12, background: '#1565c0', borderColor: '#1565c0' }}
-            onClick={() => setView('overview')}
+            onClick={() => { setView('overview'); if (assignOfficersKind) setAutoOpenAssign(assignOfficersKind); }}
           >
             Assign officers
           </Button>
@@ -946,11 +1267,7 @@ export default function ProjectWorkspace() {
               const active = view === n.key;
               return (
                 <div key={n.key}
-                  onClick={() => {
-                    // Placeholder external link until an in-app map view exists.
-                    if (n.key === 'map') { window.open('https://indianrailways.gov.in/index/index.html', '_blank', 'noopener,noreferrer'); return; }
-                    setView(n.key as NavView);
-                  }}
+                  onClick={() => setView(n.key as NavView)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', fontSize: 13, cursor: 'pointer',
                     color: active ? '#fff' : 'rgba(255,255,255,.85)', fontWeight: active ? 600 : 400,
@@ -969,9 +1286,18 @@ export default function ProjectWorkspace() {
           ) : !project ? (
             <Alert style={{ margin: 24 }} type="error" showIcon message="Project not found" />
           ) : view === 'overview' ? (
-            <div style={{ flex: 1, overflowY: 'auto' }}><OverviewView projectId={project.id} zoneId={project.zoneId} project={project} /></div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <OverviewView projectId={project.id} zoneId={project.zoneId} project={project}
+                autoOpenAssign={autoOpenAssign} onAutoOpenAssignConsumed={clearAutoOpenAssign} />
+            </div>
           ) : view === 'history' ? (
             <div style={{ flex: 1, overflowY: 'auto' }}><HistoryView projectId={project.id} /></div>
+          ) : view === 'map' ? (
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <Suspense fallback={<Spin style={{ display: 'block', margin: '48px auto' }} />}>
+                <MapView projectId={project.id} />
+              </Suspense>
+            </div>
           ) : (
             <>
               {/* activity tab bar — the six fixed activity types */}
@@ -981,7 +1307,7 @@ export default function ProjectWorkspace() {
                   const act = activityByType[type];
                   const count = act ? (countByActivityId[act.id] ?? 0) : 0;
                   return (
-                    <div key={type} onClick={() => setActiveType(type)}
+                    <div key={type} onClick={() => { setActiveType(type); setAutoOpenId(null); }}
                       style={{
                         padding: '11px 15px', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
                         display: 'flex', alignItems: 'center', gap: 7,
@@ -1010,6 +1336,7 @@ export default function ProjectWorkspace() {
                     activity={activeActivity}
                     projectId={project.id}
                     canEdit={canEdit}
+                    initialRecordId={autoOpen && activeType === autoOpen.activityTypeCode ? (autoOpenId ?? undefined) : undefined}
                   />
                 )}
               </div>

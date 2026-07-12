@@ -1,0 +1,232 @@
+# PIA Tracker — self-contained production stack for an air-gapped RHEL VM (rootful Podman).
+#
+# SELF-CONTAINED by design: PIA runs its OWN nginx and publishes its OWN host ports.
+# It never touches the `crs` app (separate 10.89.x network, separate ports).
+#
+# Hard rules baked in (see runbook / the deployment gotchas):
+#  - Single file. No overlays. No `build:` keys (podman-compose crashes on them).
+#  - Every image fully-qualified. App images are retagged to localhost/... after `podman load`.
+#  - `pull_policy: never` everywhere — nothing is fetched on an air-gapped host.
+#  - Own network `pia` with an explicit subnet, isolated from crs.
+#  - Postgres receives the app+migrator role passwords (roles are created on first
+#    init from those env vars — .env MUST be correct before the first deploy).
+#  - Host ports come from .env; containers still listen on 80/443 internally.
+#  - The minio bucket-init one-shot is NOT here (it hangs podman-compose) — start.sh
+#    creates buckets via `podman exec`.
+#
+# Bind-mounted config paths are relative to the compose file, i.e. /opt/pia/current/*.
+# Named volumes hold data and persist across releases and rollbacks.
+# Certs and the env file live under /opt/pia/shared (absolute) and are never overwritten.
+#
+# Network: 10.90.0.0/24, gateway 10.90.0.1  (crs uses 10.89.x — no overlap)
+#   .2 postgres  .3 backend  .4 minio  .5 clamav  .6 prometheus  .7 grafana  .8 loki  .10 nginx
+
+name: pia
+
+services:
+
+  nginx:
+    image: docker.io/library/nginx:1.27-alpine
+    pull_policy: never
+    container_name: ${PIA_PREFIX:-pia}-nginx
+    restart: unless-stopped
+    networks:
+      pia:
+        ipv4_address: 10.90.0.10
+    # Host-side ports from .env (crs owns 80/443). Container still listens on 80/443.
+    ports:
+      - "${PIA_HTTP_PORT:-8453}:80"
+      - "${PIA_HTTPS_PORT:-8090}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro,z
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro,z
+      - ./frontend/dist:/usr/share/nginx/html:ro,z
+      - ${PIA_SHARED:-/opt/pia/shared}/certs:/etc/nginx/certs:ro,z
+    depends_on:
+      - backend
+
+  backend:
+    image: localhost/pia/backend:${PIA_IMAGE_TAG:-prod}
+    pull_policy: never
+    container_name: ${PIA_PREFIX:-pia}-backend
+    restart: unless-stopped
+    networks:
+      pia:
+        ipv4_address: 10.90.0.3
+    environment:
+      # NOTE: the auth stack (dummy/password/SSO) is gated to the dev/beta profiles.
+      # Keep PIA_PROFILE=beta until the real prod auth provider is built, or logins fail.
+      PIA_PROFILE: ${PIA_PROFILE:-beta}
+      PIA_AUTH_MODE: ${PIA_AUTH_MODE:-dummy}
+      # Shared HS256 secret for the ABCDE SSO handoff (see security/SsoProperties.kt).
+      # MUST be set to the real value exchanged with the partner before go-live — the
+      # fallback here is a dev-only placeholder, never a real secret.
+      PIA_SSO_SECRET: ${PIA_SSO_SECRET:-dev-only-shared-secret-CHANGE-ME}
+      # Max accepted JWT lifetime (exp - iat), seconds. Binds to pia.sso.max-token-lifetime-seconds.
+      # Default 600 (10 min); ABCDE mints 60-min tokens, so set PIA_SSO_MAXTOKENLIFETIMESECONDS=3600.
+      PIA_SSO_MAXTOKENLIFETIMESECONDS: ${PIA_SSO_MAXTOKENLIFETIMESECONDS:-600}
+      POSTGRES_HOST: 10.90.0.2
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-pia}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-pia_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+      POSTGRES_MIGRATOR_USER: ${POSTGRES_MIGRATOR_USER:-pia_migrator}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD}
+      # Container DNS name, NOT the static IP — MUST match the Host nginx forwards to
+      # MinIO in pia.locations.inc's /minio/ block (presigned-URL signatures include
+      # Host; a mismatch between the signing host and the proxied host is a 403
+      # SignatureDoesNotMatch on every upload/download through the public URL).
+      MINIO_ENDPOINT: http://${PIA_PREFIX:-pia}-minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_ATTACHMENTS: ${MINIO_BUCKET_ATTACHMENTS:-pia-attachments}
+      MINIO_BUCKET_QUARANTINE: ${MINIO_BUCKET_QUARANTINE:-pia-quarantine}
+      CLAMAV_HOST: 10.90.0.5
+      CLAMAV_PORT: 3310
+      TZ: Asia/Kolkata
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    pull_policy: never
+    container_name: ${PIA_PREFIX:-pia}-postgres
+    restart: unless-stopped
+    networks:
+      pia:
+        ipv4_address: 10.90.0.2
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pia}
+      POSTGRES_USER: ${POSTGRES_USER:-pia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # gotcha #3 — the init script creates the app + migrator roles from THESE vars.
+      # Without them here, roles get default passwords and the backend fails auth.
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-pia_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+      POSTGRES_MIGRATOR_USER: ${POSTGRES_MIGRATOR_USER:-pia_migrator}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD}
+      TZ: Asia/Kolkata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:z
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-pia}", "-d", "${POSTGRES_DB:-pia}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: quay.io/minio/minio:latest
+    pull_policy: never
+    container_name: ${PIA_PREFIX:-pia}-minio
+    restart: unless-stopped
+    networks:
+      pia:
+        ipv4_address: 10.90.0.4
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  clamav:
+    image: docker.io/clamav/clamav:1.4
+    pull_policy: never
+    container_name: ${PIA_PREFIX:-pia}-clamav
+    restart: unless-stopped
+    networks:
+      pia:
+        ipv4_address: 10.90.0.5
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "echo PING | nc -w 5 localhost 3310 | grep -q PONG"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  prometheus:
+    image: docker.io/prom/prometheus:latest
+    pull_policy: never
+    container_name: ${PIA_PREFIX:-pia}-prometheus
+    restart: unless-stopped
+    networks:
+      pia:
+        ipv4_address: 10.90.0.6
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:z
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+
+  grafana:
+    image: docker.io/grafana/grafana-oss:latest
+    pull_policy: never
+    container_name: ${PIA_PREFIX:-pia}-grafana
+    restart: unless-stopped
+    networks:
+      pia:
+        ipv4_address: 10.90.0.7
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SERVER_ROOT_URL: ${PIA_PUBLIC_BASE_URL}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:z
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:z
+    depends_on: [prometheus, loki]
+
+  loki:
+    image: docker.io/grafana/loki:latest
+    pull_policy: never
+    container_name: ${PIA_PREFIX:-pia}-loki
+    restart: unless-stopped
+    networks:
+      pia:
+        ipv4_address: 10.90.0.8
+    volumes:
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+
+volumes:
+  postgres_data:
+  minio_data:
+  clamav_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+
+# One network, named exactly `pia` (NOT external). Two things make this collision-proof:
+#   1. `name: pia` — pins the real network name so podman-compose targets `pia` and never
+#      derives a project-scoped `pia_pia` (the missing `name:` was the whole original bug:
+#      podman-compose tried to create `pia_pia` on 10.90.0.0/24 → "subnet already used").
+#   2. an explicit ipam subnet/gateway — REQUIRED because every service pins a static
+#      ipv4_address; without a declared subnet those assignments are invalid.
+# setup.sh / start.sh pre-create `pia` with this same subnet before compose runs (for the
+# firewalld bridge + deterministic addressing). podman-compose then finds `pia` already
+# present, reuses it, and only ever falls back to creating it — correctly, as `pia` — if
+# it is somehow missing. Either path yields exactly one `pia` network. crs (10.89.x) is
+# never referenced.
+networks:
+  pia:
+    name: pia
+    ipam:
+      config:
+        - subnet: 10.90.0.0/24
+          gateway: 10.90.0.1

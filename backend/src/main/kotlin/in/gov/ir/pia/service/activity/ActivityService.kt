@@ -229,25 +229,13 @@ class ActivityService(
         projectId: UUID,
         principal: PiaPrincipal,
     ): List<ProjectActivity> {
+        // Access is enforced by requireProjectAccess: ALL/ZONE roles, or a user with an
+        // active assignment on the project. Anyone who passes sees ALL activities (and
+        // therefore all records) in the project — an assigned Dy CE/C, the Nodal, and the
+        // CE/C all get full project visibility, so a record verified by one Dy is visible
+        // to the CE for authentication and to peers on the same project.
         requireProjectAccess(projectId, principal)
-
-        val allActivities =
-            principal.isSuperAdmin ||
-                principal.permissions.contains("ACTIVITY.READ.ALL") ||
-                principal.permissions.contains("ACTIVITY.READ.ZONE") ||
-                principal.designationCode == "CE_C" ||
-                principal.designationCode == "NODAL_DY_CE_C"
-
-        return if (allActivities) {
-            activityRepository.findAllByProjectIdAndIsDeletedFalseOrderByCreatedAtAsc(projectId)
-        } else {
-            // DY_CE_C: only activities they are personally assigned to
-            activityRepository
-                .findAllByProjectIdAndPrimaryDyceUserIdAndIsDeletedFalseOrderByCreatedAtAsc(
-                    projectId,
-                    principal.userId,
-                )
-        }
+        return activityRepository.findAllByProjectIdAndIsDeletedFalseOrderByCreatedAtAsc(projectId)
     }
 
     /**
@@ -954,6 +942,7 @@ class ActivityService(
                 "LAND_ACQUISITION" ->
                     "land_acquisition_details" to
                         listOf(
+                            "total_count",
                             "district",
                             "sub_division_taluka",
                             "area_hectares_total",
@@ -964,7 +953,7 @@ class ActivityService(
                         )
                 "FOREST_CLEARANCE" ->
                     "forest_clearance_details" to
-                        listOf("forest_division_name", "forest_area_hectares", "project_chainage_from", "project_chainage_to")
+                        listOf("total_count", "forest_division_name", "forest_area_hectares", "project_chainage_from", "project_chainage_to")
                 "UTILITY_SHIFTING" ->
                     "utility_shifting_details" to
                         listOf(
@@ -1100,11 +1089,12 @@ class ActivityService(
                 jdbc.update(
                     """
                     INSERT INTO land_acquisition_details
-                        (activity_id, district, sub_division_taluka,
+                        (activity_id, total_count, district, sub_division_taluka,
                          area_hectares_total, area_hectares_private, area_hectares_govt, area_hectares_forest,
                          villages_estimated_count)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (activity_id) DO UPDATE SET
+                        total_count              = EXCLUDED.total_count,
                         district                 = EXCLUDED.district,
                         sub_division_taluka      = EXCLUDED.sub_division_taluka,
                         area_hectares_total      = EXCLUDED.area_hectares_total,
@@ -1114,6 +1104,7 @@ class ActivityService(
                         villages_estimated_count = EXCLUDED.villages_estimated_count
                     """.trimIndent(),
                     activityId,
+                    int("total_count"),
                     str("district"),
                     str("sub_division_taluka"),
                     dec("area_hectares_total"),
@@ -1126,15 +1117,17 @@ class ActivityService(
                 jdbc.update(
                     """
                     INSERT INTO forest_clearance_details
-                        (activity_id, forest_division_name, forest_area_hectares, project_chainage_from, project_chainage_to)
-                    VALUES (?, ?, ?, ?, ?)
+                        (activity_id, total_count, forest_division_name, forest_area_hectares, project_chainage_from, project_chainage_to)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT (activity_id) DO UPDATE SET
+                        total_count            = EXCLUDED.total_count,
                         forest_division_name  = EXCLUDED.forest_division_name,
                         forest_area_hectares  = EXCLUDED.forest_area_hectares,
                         project_chainage_from = EXCLUDED.project_chainage_from,
                         project_chainage_to   = EXCLUDED.project_chainage_to
                     """.trimIndent(),
                     activityId,
+                    int("total_count"),
                     str("forest_division_name"),
                     dec("forest_area_hectares"),
                     str("project_chainage_from"),

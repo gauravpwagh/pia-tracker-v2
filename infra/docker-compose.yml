@@ -205,6 +205,10 @@ services:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # Reachable at https://pia.local/grafana/ via the nginx proxy below —
+      # not exposed directly (only nginx binds host ports, per infra/CLAUDE.md).
+      GF_SERVER_ROOT_URL: https://pia.local/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
