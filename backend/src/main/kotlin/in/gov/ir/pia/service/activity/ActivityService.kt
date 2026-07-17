@@ -3,15 +3,18 @@ package `in`.gov.ir.pia.service.activity
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
+import `in`.gov.ir.pia.attachment.AttachmentService
 import `in`.gov.ir.pia.audit.AuditLogWriter
 import `in`.gov.ir.pia.dashboard.ActivityRecordCreatedEvent
 import `in`.gov.ir.pia.domain.activity.ActivityRecord
 import `in`.gov.ir.pia.domain.activity.ProjectActivity
+import `in`.gov.ir.pia.domain.activity.TalukaDetail
 import `in`.gov.ir.pia.repository.ActivityRecordRepository
 import `in`.gov.ir.pia.repository.FormDefinitionRepository
 import `in`.gov.ir.pia.repository.ProjectActivityRepository
 import `in`.gov.ir.pia.repository.ProjectAssignmentRepository
 import `in`.gov.ir.pia.repository.ProjectRepository
+import `in`.gov.ir.pia.repository.TalukaDetailRepository
 import `in`.gov.ir.pia.repository.WorkflowInstanceRepository
 import `in`.gov.ir.pia.security.PiaPrincipal
 import `in`.gov.ir.pia.service.comment.CommentService
@@ -113,6 +116,39 @@ data class RecordHistoryEntry(
     val occurredAt: java.time.Instant,
 )
 
+// ── Sub-Division/Taluka details (Land Acquisition) ──────────────────────────
+
+data class TalukaDetailResponse(
+    val id: UUID,
+    val projectActivityId: UUID,
+    val talukaName: String,
+    val srpDeclaredInGazOn: LocalDate?,
+    val srpGazettePublishedOn: LocalDate?,
+    val srpGazetteNumber: String?,
+    val calaReceivedFromStateOn: LocalDate?,
+    val calaGazettePublishedOn: LocalDate?,
+    val calaGazetteNumber: String?,
+    /** Once true (via "Create"), the taluka can no longer be edited or deleted. */
+    val isFinalized: Boolean,
+    /** Number of records under this activity currently referencing this taluka by name. */
+    val recordCount: Long,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+    val version: Int,
+)
+
+data class TalukaDetailWriteRequest(
+    val talukaName: String,
+    val srpDeclaredInGazOn: LocalDate? = null,
+    val srpGazettePublishedOn: LocalDate? = null,
+    val srpGazetteNumber: String? = null,
+    val calaReceivedFromStateOn: LocalDate? = null,
+    val calaGazettePublishedOn: LocalDate? = null,
+    val calaGazetteNumber: String? = null,
+    /** "Save Draft" sends false; "Create" sends true — irreversible once set. */
+    val finalize: Boolean = false,
+)
+
 data class ActivityWorkflowActionResult(
     /** Total records in the activity (deleted records excluded). */
     val totalRecords: Int,
@@ -178,11 +214,14 @@ data class ActivityRecordDetailResponse(
  * accessible zones, so a project in an inaccessible zone yields 404 rather
  * than 403 (preventing zone enumeration).
  *
- * ## Multiple activities of the same type
+ * ## One activity per type per project
  *
- * Multiple activities of the same [activityTypeCode] on one project are
- * intentional (decision YYY): "Phase 1 LA" and "Phase 2 LA" are distinct
- * activities with separate record sets.
+ * A project holds at most ONE non-deleted activity of each [activityTypeCode]
+ * (one Land Acquisition, one Utility Shifting, …). Variation within a type —
+ * villages, sections, award phases — is modelled as records inside that single
+ * activity, never as a second activity. [create] enforces this at the
+ * application layer and the partial unique index `ux_pact_project_type`
+ * enforces it physically (race-proof for concurrent tabs / users).
  */
 @Service
 @Transactional(readOnly = true)
@@ -191,6 +230,7 @@ class ActivityService(
     private val assignmentRepository: ProjectAssignmentRepository,
     private val activityRepository: ProjectActivityRepository,
     private val recordRepository: ActivityRecordRepository,
+    private val talukaDetailRepository: TalukaDetailRepository,
     private val formDefinitionRepository: FormDefinitionRepository,
     private val auditLogWriter: AuditLogWriter,
     private val jdbc: JdbcTemplate,
@@ -200,6 +240,7 @@ class ActivityService(
     private val instanceRepository: WorkflowInstanceRepository,
     private val commentService: CommentService,
     private val drawingService: DrawingService,
+    private val attachmentService: AttachmentService,
     private val eventPublisher: ApplicationEventPublisher,
 ) {
     private val log = LoggerFactory.getLogger(ActivityService::class.java)
@@ -310,6 +351,23 @@ class ActivityService(
         requireProjectAccess(projectId, principal)
         requireDyceAssignment(projectId, principal)
 
+        // A project holds at most ONE non-deleted activity of each type. A second
+        // activity of the same type (whatever its name) is never intentional —
+        // variation within a type is modelled as records, not extra activities.
+        // Duplicates arise when a stale activity list makes the auto-create-on-
+        // first-record path fire twice. Block it here; the partial unique index
+        // ux_pact_project_type is the race-proof backstop for concurrent tabs/users.
+        if (activityRepository.existsByProjectIdAndActivityTypeCodeAndIsDeletedFalse(
+                projectId,
+                request.activityTypeCode,
+            )
+        ) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "This project already has a ${request.activityTypeCode} activity",
+            )
+        }
+
         // Look up the latest active form definition for this activity type.
         // Null is acceptable — form definitions are seeded per-phase.
         val formDef =
@@ -330,7 +388,22 @@ class ActivityService(
         activityRepository.save(activity)
         // Flush JPA writes to the DB before the JDBC detail-table INSERT so the
         // FK constraint (activity_id → project_activities.id) is satisfied.
-        entityManager.flush()
+        // The existsBy check above catches virtually every duplicate, but a
+        // sub-second concurrent double-submit (two tabs / two users on the same
+        // project) can slip past it; the partial unique index ux_pact_project_type
+        // is the race-proof backstop. Translate its violation into the same clean
+        // 409 the check returns.
+        try {
+            entityManager.flush()
+        } catch (ex: RuntimeException) {
+            if (isDuplicateActivityViolation(ex)) {
+                throw ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This project already has a ${request.activityTypeCode} activity",
+                )
+            }
+            throw ex
+        }
 
         // Write type-specific fields to the dedicated detail table.
         upsertDetails(activity.id, request.activityTypeCode, request.metadataJson)
@@ -379,6 +452,82 @@ class ActivityService(
         }
 
         return activity.toDetailResponse(readDetails(activity.id, request.activityTypeCode))
+    }
+
+    /**
+     * True if [ex] (or anything in its cause chain) is a violation of the
+     * partial unique index that enforces one non-deleted activity per
+     * (project_id, activity_type_code). Matched by index name so an unrelated
+     * constraint failure is not swallowed as a duplicate.
+     */
+    private fun isDuplicateActivityViolation(ex: Throwable): Boolean {
+        var cause: Throwable? = ex
+        while (cause != null) {
+            if (cause.message?.contains("ux_pact_project_type", ignoreCase = true) == true) {
+                return true
+            }
+            cause = cause.cause
+        }
+        return false
+    }
+
+    /**
+     * Super-admin-only cleanup: folds every record from [sourceActivityId] into
+     * [targetActivityId], then soft-deletes the now-empty source.
+     *
+     * For fixing accidental duplicate activities (same type,
+     * same project — see the create() guard above) that existed before that
+     * guard was added. Both activities must be non-deleted, on the same
+     * project, and of the same activity type; the source must not be the
+     * target. Does not touch [project_activity_summary] — that table is keyed
+     * by (project_id, activity_type_code), not by activity id, so moving a
+     * record between two activities of the same type on the same project
+     * doesn't change any dashboard total.
+     */
+    @Transactional
+    fun mergeActivities(
+        sourceActivityId: UUID,
+        targetActivityId: UUID,
+        principal: PiaPrincipal,
+    ) {
+        if (!principal.isSuperAdmin) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Only super admin can merge activities")
+        }
+        if (sourceActivityId == targetActivityId) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Source and target activity are the same")
+        }
+        val source = activityRepository.findByIdAndIsDeletedFalse(sourceActivityId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Source activity not found")
+        val target = activityRepository.findByIdAndIsDeletedFalse(targetActivityId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Target activity not found")
+        if (source.projectId != target.projectId) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Source and target must be on the same project")
+        }
+        if (source.activityTypeCode != target.activityTypeCode) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Source and target must be the same activity type")
+        }
+
+        val movedCount = recordRepository.reassignActivity(sourceActivityId, targetActivityId)
+
+        jdbc.update(
+            """
+            UPDATE project_activities
+               SET is_deleted = true, deleted_at = now(), deleted_by_user_id = ?, version = version + 1
+             WHERE id = ? AND is_deleted = false
+            """.trimIndent(),
+            principal.userId,
+            sourceActivityId,
+        )
+
+        auditLogWriter.write(
+            actorUserId = principal.userId,
+            action = "ACTIVITY.MERGE",
+            entityType = "ACTIVITY",
+            entityId = source.id,
+            afterJson = objectMapper.createObjectNode()
+                .put("mergedIntoActivityId", target.id.toString())
+                .put("movedRecordCount", movedCount),
+        )
     }
 
     /**
@@ -489,6 +638,194 @@ class ActivityService(
 
         return updated.toDetailResponse(readDetails(activityId, activity.activityTypeCode))
     }
+
+    // ── Sub-Division/Taluka details (Land Acquisition) ──────────────────────────
+
+    /** Lists all non-deleted talukas for an activity, alphabetical. */
+    fun listTalukas(
+        activityId: UUID,
+        principal: PiaPrincipal,
+    ): List<TalukaDetailResponse> {
+        getForPrincipal(activityId, principal)
+        return talukaDetailRepository
+            .findAllByProjectActivityIdAndIsDeletedFalseOrderByTalukaNameAsc(activityId)
+            .map { it.toResponse(recordRepository.countByActivityAndSubDivisionTaluka(activityId, it.talukaName)) }
+    }
+
+    @Transactional
+    fun createTaluka(
+        activityId: UUID,
+        request: TalukaDetailWriteRequest,
+        principal: PiaPrincipal,
+    ): TalukaDetailResponse {
+        val activity = getForPrincipal(activityId, principal)
+        requireDyceAssignment(activity.projectId, principal)
+
+        if (talukaDetailRepository.existsByProjectActivityIdAndTalukaNameIgnoreCaseAndIsDeletedFalse(activityId, request.talukaName)) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "A taluka with this name already exists on this activity.")
+        }
+
+        val taluka =
+            TalukaDetail(
+                projectActivityId = activityId,
+                talukaName = request.talukaName,
+                srpDeclaredInGazOn = request.srpDeclaredInGazOn,
+                srpGazettePublishedOn = request.srpGazettePublishedOn,
+                srpGazetteNumber = request.srpGazetteNumber,
+                calaReceivedFromStateOn = request.calaReceivedFromStateOn,
+                calaGazettePublishedOn = request.calaGazettePublishedOn,
+                calaGazetteNumber = request.calaGazetteNumber,
+                isFinalized = request.finalize,
+                createdByUserId = principal.userId,
+                updatedByUserId = principal.userId,
+            )
+        talukaDetailRepository.save(taluka)
+
+        auditLogWriter.write(
+            actorUserId = principal.userId,
+            action = "TALUKA_DETAIL.CREATE",
+            entityType = "ACTIVITY_TALUKA",
+            entityId = taluka.id,
+        )
+
+        return taluka.toResponse(recordCount = 0)
+    }
+
+    @Transactional
+    fun updateTaluka(
+        activityId: UUID,
+        talukaId: UUID,
+        request: TalukaDetailWriteRequest,
+        expectedVersion: Int,
+        principal: PiaPrincipal,
+    ): TalukaDetailResponse {
+        val activity = getForPrincipal(activityId, principal)
+        requireDyceAssignment(activity.projectId, principal)
+
+        val existing =
+            talukaDetailRepository.findByIdAndIsDeletedFalse(talukaId)
+                ?.takeIf { it.projectActivityId == activityId }
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+        if (existing.version != expectedVersion) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "This taluka was updated by someone else. Reload and retry.")
+        }
+
+        if (existing.isFinalized) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "This taluka was created and is locked — it can no longer be edited.")
+        }
+
+        if (!existing.talukaName.equals(request.talukaName, ignoreCase = true) &&
+            talukaDetailRepository.existsByProjectActivityIdAndTalukaNameIgnoreCaseAndIsDeletedFalse(activityId, request.talukaName)
+        ) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "A taluka with this name already exists on this activity.")
+        }
+
+        jdbc.update(
+            """
+            UPDATE activity_taluka_details
+               SET taluka_name                    = ?,
+                   srp_declared_in_gaz_on          = ?,
+                   srp_gazette_published_on        = ?,
+                   srp_gazette_number              = ?,
+                   cala_received_from_state_on     = ?,
+                   cala_gazette_published_on       = ?,
+                   cala_gazette_number             = ?,
+                   is_finalized                    = ?,
+                   updated_by_user_id              = ?,
+                   updated_at                      = now(),
+                   version                         = version + 1
+             WHERE id = ? AND is_deleted = false
+            """.trimIndent(),
+            request.talukaName,
+            request.srpDeclaredInGazOn,
+            request.srpGazettePublishedOn,
+            request.srpGazetteNumber,
+            request.calaReceivedFromStateOn,
+            request.calaGazettePublishedOn,
+            request.calaGazetteNumber,
+            request.finalize,
+            principal.userId,
+            talukaId,
+        )
+
+        entityManager.clear()
+
+        auditLogWriter.write(
+            actorUserId = principal.userId,
+            action = "TALUKA_DETAIL.UPDATE",
+            entityType = "ACTIVITY_TALUKA",
+            entityId = talukaId,
+        )
+
+        val updated = talukaDetailRepository.findByIdAndIsDeletedFalse(talukaId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return updated.toResponse(recordRepository.countByActivityAndSubDivisionTaluka(activityId, updated.talukaName))
+    }
+
+    @Transactional
+    fun deleteTaluka(
+        activityId: UUID,
+        talukaId: UUID,
+        principal: PiaPrincipal,
+    ) {
+        val activity = getForPrincipal(activityId, principal)
+        requireDyceAssignment(activity.projectId, principal)
+
+        val existing =
+            talukaDetailRepository.findByIdAndIsDeletedFalse(talukaId)
+                ?.takeIf { it.projectActivityId == activityId }
+                ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+        if (existing.isFinalized) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "This taluka was created and is locked — it can no longer be deleted.")
+        }
+
+        val recordCount = recordRepository.countByActivityAndSubDivisionTaluka(activityId, existing.talukaName)
+        if (recordCount > 0) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "This taluka is still used by $recordCount record(s). Reassign them to another taluka first.",
+            )
+        }
+
+        jdbc.update(
+            """
+            UPDATE activity_taluka_details
+               SET is_deleted = true, deleted_at = now(), deleted_by_user_id = ?, version = version + 1
+             WHERE id = ? AND is_deleted = false
+            """.trimIndent(),
+            principal.userId,
+            talukaId,
+        )
+
+        attachmentService.deleteAllForEntity("ACTIVITY_TALUKA__srp_gazette", talukaId, principal.userId)
+        attachmentService.deleteAllForEntity("ACTIVITY_TALUKA__cala_gazette", talukaId, principal.userId)
+
+        auditLogWriter.write(
+            actorUserId = principal.userId,
+            action = "TALUKA_DETAIL.DELETE",
+            entityType = "ACTIVITY_TALUKA",
+            entityId = talukaId,
+        )
+    }
+
+    private fun TalukaDetail.toResponse(recordCount: Long): TalukaDetailResponse =
+        TalukaDetailResponse(
+            id = id,
+            projectActivityId = projectActivityId,
+            talukaName = talukaName,
+            srpDeclaredInGazOn = srpDeclaredInGazOn,
+            srpGazettePublishedOn = srpGazettePublishedOn,
+            srpGazetteNumber = srpGazetteNumber,
+            calaReceivedFromStateOn = calaReceivedFromStateOn,
+            calaGazettePublishedOn = calaGazettePublishedOn,
+            calaGazetteNumber = calaGazetteNumber,
+            isFinalized = isFinalized,
+            recordCount = recordCount,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+            version = version,
+        )
 
     /**
      * Creates an empty [ActivityRecord] for an existing [ProjectActivity].

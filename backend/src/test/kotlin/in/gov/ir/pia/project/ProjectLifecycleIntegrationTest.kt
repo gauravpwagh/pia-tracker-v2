@@ -165,7 +165,7 @@ class ProjectLifecycleIntegrationTest {
         val allocateResponse =
             post(
                 "/api/v1/projects/$projectId/allocate",
-                AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+                AllocateProjectRequest(ceUserIds = listOf(CE_C_USER_ID)),
                 caoCookies,
                 ProjectDetailResponse::class.java,
             )
@@ -344,7 +344,7 @@ class ProjectLifecycleIntegrationTest {
         val allocResp =
             post(
                 "/api/v1/projects/$projectId/allocate",
-                AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+                AllocateProjectRequest(ceUserIds = listOf(CE_C_USER_ID)),
                 ceCookies,
                 String::class.java,
             )

@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@stores/authStore';
 import { logout as apiLogout } from '@api/auth';
-import { IR_PORTAL_URL, IRPSM_LOGOFF_URL } from '@lib/externalLinks';
+import { IR_PORTAL_URL } from '@lib/externalLinks';
 
 import railIcon from '../../assets/images/rail-icon-in.png';
 import homeIcon from '../../assets/images/home-icon.png';
@@ -37,13 +37,13 @@ export default function LandingPage() {
   const currentUser = useAuthStore((s) => s.currentUser);
 
   const handleLogout = async () => {
-    // End the PIA session server-side, then hand back to IRPSM's logoff (users came from
-    // there via SSO). Deliberately does NOT clear the auth store — nulling currentUser would
-    // re-render RequireAuth and flash the PIA /login page before the full-page redirect commits.
+    // End the PIA session server-side, then land on PIA's own login page. Deliberately does
+    // not clear the auth store — nulling currentUser would re-render RequireAuth and flash the
+    // PIA /login page before the full-page redirect commits.
     try {
       await apiLogout();
     } finally {
-      window.location.href = IRPSM_LOGOFF_URL;
+      window.location.href = '/login';
     }
   };
 

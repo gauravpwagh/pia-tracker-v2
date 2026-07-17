@@ -47,4 +47,20 @@ interface ProjectActivityRepository : JpaRepository<ProjectActivity, UUID> {
         @Param("projectId") projectId: UUID,
         @Param("userId") userId: UUID,
     ): Boolean
+
+    /**
+     * Is there already a non-deleted activity of [activityTypeCode] on
+     * [projectId]?
+     *
+     * A project may hold at most ONE non-deleted activity of each type
+     * (one Land Acquisition, one Utility Shifting, …). Variation within a type
+     * — villages, sections, award phases — is modelled as records inside the
+     * single activity, never as a second activity. This existence check is the
+     * application-layer guard; the partial unique index
+     * `ux_pact_project_type` is the race-proof physical backstop.
+     */
+    fun existsByProjectIdAndActivityTypeCodeAndIsDeletedFalse(
+        projectId: UUID,
+        activityTypeCode: String,
+    ): Boolean
 }

@@ -11,6 +11,8 @@ import `in`.gov.ir.pia.service.activity.PatchActivityRecordRequest
 import `in`.gov.ir.pia.service.activity.RecordHistoryEntry
 import `in`.gov.ir.pia.service.activity.RecordWorkflowStateResponse
 import `in`.gov.ir.pia.service.activity.SectionWorkflowStateResponse
+import `in`.gov.ir.pia.service.activity.TalukaDetailResponse
+import `in`.gov.ir.pia.service.activity.TalukaDetailWriteRequest
 import `in`.gov.ir.pia.service.activity.UpdateActivityRequest
 import `in`.gov.ir.pia.service.activity.WorkflowActionRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -86,7 +88,8 @@ class ActivityController(
      * The caller must hold an active DY_CE_C or NODAL_DY_CE_C assignment on
      * the project; [ActivityService.create] enforces this and returns 403 if not.
      *
-     * Multiple activities of the same type are permitted (decision YYY).
+     * A project may hold at most one non-deleted activity of each type;
+     * [ActivityService.create] returns 409 if one already exists.
      */
     @PostMapping("/api/v1/projects/{projectId}/activities")
     @ResponseStatus(HttpStatus.CREATED)
@@ -96,6 +99,21 @@ class ActivityController(
         @RequestBody request: CreateActivityRequest,
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): ActivityDetailResponse = activityService.create(projectId, request, principal)
+
+    /**
+     * Super-admin-only cleanup: folds every record from [sourceActivityId] into
+     * [targetActivityId], then soft-deletes the now-empty source. Fixes accidental
+     * duplicate activities (same type, same project) created before the
+     * create() one-per-type guard existed. See
+     * [ActivityService.mergeActivities] for the full validation rules.
+     */
+    @PostMapping("/api/v1/activities/{sourceActivityId}/merge-into/{targetActivityId}")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY.CREATE.ASSIGNED')")
+    fun mergeActivities(
+        @PathVariable sourceActivityId: UUID,
+        @PathVariable targetActivityId: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ) = activityService.mergeActivities(sourceActivityId, targetActivityId, principal)
 
     /**
      * Returns a single activity by its own ID.
@@ -142,6 +160,65 @@ class ActivityController(
         @RequestBody request: UpdateActivityRequest,
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): ActivityDetailResponse = activityService.update(activityId, request, principal)
+
+    // ── Sub-Division/Taluka details (Land Acquisition) ───────────────────────
+
+    /** Lists all non-deleted talukas for an activity, alphabetical. */
+    @GetMapping("/api/v1/activities/{activityId}/talukas")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY.READ.OWN')")
+    fun listTalukas(
+        @PathVariable activityId: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ): List<TalukaDetailResponse> = activityService.listTalukas(activityId, principal)
+
+    /** Creates a new taluka on the activity. 409 if the name already exists on this activity. */
+    @PostMapping("/api/v1/activities/{activityId}/talukas")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY.UPDATE.OWN')")
+    fun createTaluka(
+        @PathVariable activityId: UUID,
+        @RequestBody request: TalukaDetailWriteRequest,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+        response: HttpServletResponse,
+    ): TalukaDetailResponse {
+        val taluka = activityService.createTaluka(activityId, request, principal)
+        response.setHeader("ETag", "\"${taluka.version}\"")
+        return taluka
+    }
+
+    /** Updates a taluka's SRP/CALA details. Requires `If-Match` with the current version. */
+    @PatchMapping("/api/v1/activities/{activityId}/talukas/{talukaId}")
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY.UPDATE.OWN')")
+    fun updateTaluka(
+        @PathVariable activityId: UUID,
+        @PathVariable talukaId: UUID,
+        @RequestBody request: TalukaDetailWriteRequest,
+        @RequestHeader("If-Match") ifMatch: String,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+        response: HttpServletResponse,
+    ): TalukaDetailResponse {
+        val expectedVersion =
+            ifMatch.removePrefix("W/").trim('"').toIntOrNull()
+                ?: throw ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "If-Match header must be a quoted integer, e.g. \"3\" or W/\"3\"",
+                )
+        val updated = activityService.updateTaluka(activityId, talukaId, request, expectedVersion, principal)
+        response.setHeader("ETag", "\"${updated.version}\"")
+        return updated
+    }
+
+    /** Deletes a taluka. 409 if any records on this activity still reference it. */
+    @DeleteMapping("/api/v1/activities/{activityId}/talukas/{talukaId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("@pe.hasPermission(authentication, null, 'ACTIVITY.UPDATE.OWN')")
+    fun deleteTaluka(
+        @PathVariable activityId: UUID,
+        @PathVariable talukaId: UUID,
+        @AuthenticationPrincipal principal: PiaPrincipal,
+    ) {
+        activityService.deleteTaluka(activityId, talukaId, principal)
+    }
 
     // ── Activity Records ──────────────────────────────────────────────────────
 

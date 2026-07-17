@@ -99,7 +99,9 @@ data class ProjectDetailResponse(
     val chainageToKm: BigDecimal?,
     val lengthKm: BigDecimal?,
     val ipaDate: LocalDate?,
-    val stationNames: String?,
+    val stationsFrom: String?,
+    val stationsTo: String?,
+    val stationsInBetween: String?,
     val recommendedByBoardOn: LocalDate?,
     val targetCompletionYear: Int?,
     val lifecycleState: String,
@@ -112,12 +114,15 @@ data class ProjectDetailResponse(
 
 /**
  * Editable "Project Details" fields on the Overview panel (#8). Deliberately narrow —
- * Length and Station names only. Everything else (name, code, type, zone, lifecycle)
- * is set at project creation or via the dedicated lifecycle/assignment actions.
+ * Length and Stations (From/To/In Between) only. Everything else (name, code, type,
+ * zone, lifecycle) is set at project creation or via the dedicated lifecycle/assignment
+ * actions.
  */
 data class UpdateProjectDetailsRequest(
     val lengthKm: BigDecimal? = null,
-    val stationNames: String? = null,
+    val stationsFrom: String? = null,
+    val stationsTo: String? = null,
+    val stationsInBetween: String? = null,
 )
 
 // ── Service ────────────────────────────────────────────────────────────────────
@@ -682,15 +687,19 @@ class ProjectService(
         jdbc.update(
             """
             UPDATE projects
-               SET length_km          = ?,
-                   station_names      = ?,
-                   updated_by_user_id = ?,
-                   updated_at         = now(),
-                   version            = version + 1
+               SET length_km           = ?,
+                   stations_from       = ?,
+                   stations_to         = ?,
+                   stations_in_between = ?,
+                   updated_by_user_id  = ?,
+                   updated_at          = now(),
+                   version             = version + 1
              WHERE id = ? AND is_deleted = false
             """.trimIndent(),
             request.lengthKm,
-            request.stationNames,
+            request.stationsFrom,
+            request.stationsTo,
+            request.stationsInBetween,
             principal.userId,
             projectId,
         )
@@ -834,7 +843,9 @@ class ProjectService(
             chainageToKm = chainageToKm,
             lengthKm = lengthKm,
             ipaDate = ipaDate,
-            stationNames = stationNames,
+            stationsFrom = stationsFrom,
+            stationsTo = stationsTo,
+            stationsInBetween = stationsInBetween,
             recommendedByBoardOn = recommendedByBoardOn,
             targetCompletionYear = targetCompletionYear,
             lifecycleState = lifecycleState,

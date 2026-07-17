@@ -278,7 +278,7 @@ class AttachmentIntegrationTest {
         val cao = loginAs(CAO_USER_ID)
         restTemplate.postForEntity(
             "/api/v1/projects/${project.id}/allocate",
-            HttpEntity(AllocateProjectRequest(ceUserId = CE_USER_ID), headersFor(cao)),
+            HttpEntity(AllocateProjectRequest(ceUserIds = listOf(CE_USER_ID)), headersFor(cao)),
             ProjectDetailResponse::class.java,
         )
 

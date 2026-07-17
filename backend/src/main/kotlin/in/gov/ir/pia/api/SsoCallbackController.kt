@@ -54,6 +54,17 @@ class SsoCallbackController(
         val claims = ssoTokenVerifier.verify(token)
         val sub = claims.subject
 
+        // DEBUG-only, temporary: ABCDE's real tokens carry more claims than this
+        // controller currently uses (designation_code, primary_zone_id, division_code,
+        // phone_number, hrmsid, role, ...) — only sub/iat/exp are read below. This just
+        // prints what ABCDE is actually sending so it can be checked before deciding
+        // whether to start consuming any of it. log.debug is a no-op unless the
+        // in.gov.ir.pia.api.SsoCallbackController logger is explicitly set to DEBUG —
+        // remove once no longer needed.
+        if (log.isDebugEnabled) {
+            log.debug("SSO token claims received: {}", claims.claims)
+        }
+
         // Deny-by-default: only officers already provisioned in PIA can bridge in.
         // Name is intentionally NOT synced from the token — the CSV import is the
         // source of truth for users.name.

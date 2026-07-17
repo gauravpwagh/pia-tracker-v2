@@ -129,7 +129,7 @@ class TenderPackagingFormIntegrationTest {
                 ProjectDetailResponse::class.java,
             ).body!!.id
         val cao = loginAs(CAO_C_USER_ID)
-        post("/api/v1/projects/$projectId/allocate", AllocateProjectRequest(ceUserId = CE_C_USER_ID), cao, ProjectDetailResponse::class.java)
+        post("/api/v1/projects/$projectId/allocate", AllocateProjectRequest(ceUserIds = listOf(CE_C_USER_ID)), cao, ProjectDetailResponse::class.java)
         val ce = loginAs(CE_C_USER_ID)
         post("/api/v1/projects/$projectId/assign-dyce", AssignDyceRequest(dyceUserIds = listOf(DYCE_1_USER_ID)), ce, ProjectDetailResponse::class.java)
         return projectId

@@ -2,6 +2,9 @@ package `in`.gov.ir.pia.repository
 
 import `in`.gov.ir.pia.domain.activity.ActivityRecord
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Modifying
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import java.util.UUID
 
 /**
@@ -24,4 +27,39 @@ interface ActivityRecordRepository : JpaRepository<ActivityRecord, UUID> {
 
     /** Single non-deleted record. Returns null → 404 in service. */
     fun findByIdAndIsDeletedFalse(id: UUID): ActivityRecord?
+
+    /**
+     * Count of Land Acquisition records under [projectActivityId] whose
+     * `acquisition_details.sub_division_taluka` matches [talukaName] (case-insensitive).
+     * Used to block deleting a taluka master row that's still referenced.
+     */
+    @Query(
+        value = """
+            SELECT count(*) FROM activity_records
+             WHERE project_activity_id = :projectActivityId
+               AND is_deleted = false
+               AND lower(data_json #>> '{acquisition_details,sub_division_taluka}') = lower(:talukaName)
+        """,
+        nativeQuery = true,
+    )
+    fun countByActivityAndSubDivisionTaluka(
+        @Param("projectActivityId") projectActivityId: UUID,
+        @Param("talukaName") talukaName: String,
+    ): Long
+
+    /**
+     * Reassigns every non-deleted record from [sourceActivityId] to
+     * [targetActivityId]. Used by [in.gov.ir.pia.service.activity.ActivityService.mergeActivities]
+     * to fold an accidental duplicate activity's records into the real one
+     * before soft-deleting the duplicate. Returns the number of rows moved.
+     */
+    @Modifying
+    @Query(
+        "UPDATE ActivityRecord ar SET ar.projectActivityId = :targetActivityId " +
+            "WHERE ar.projectActivityId = :sourceActivityId AND ar.isDeleted = false",
+    )
+    fun reassignActivity(
+        @Param("sourceActivityId") sourceActivityId: UUID,
+        @Param("targetActivityId") targetActivityId: UUID,
+    ): Int
 }

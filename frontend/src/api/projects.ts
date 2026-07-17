@@ -47,7 +47,9 @@ export interface ProjectSummaryResponse {
   chainageToKm: number | null;
   lengthKm: number | null;
   ipaDate: string | null;
-  stationNames: string | null;
+  stationsFrom: string | null;
+  stationsTo: string | null;
+  stationsInBetween: string | null;
   targetCompletionYear: number | null;
   createdAt: string;
 }
@@ -63,7 +65,9 @@ export interface ProjectDetailResponse {
   chainageToKm: number | null;
   lengthKm: number | null;
   ipaDate: string | null;
-  stationNames: string | null;
+  stationsFrom: string | null;
+  stationsTo: string | null;
+  stationsInBetween: string | null;
   recommendedByBoardOn: string | null;
   targetCompletionYear: number | null;
   lifecycleState: string;
@@ -144,10 +148,12 @@ export async function fetchProjectDetail(id: string): Promise<ProjectDetailRespo
   return handleResponse<ProjectDetailResponse>(res);
 }
 
-/** Editable "Project Details" fields (#8) — Length and Station names only. */
+/** Editable "Project Details" fields (#8) — Length and Stations (From/To/In Between) only. */
 export interface UpdateProjectDetailsRequest {
   lengthKm?: number;
-  stationNames?: string;
+  stationsFrom?: string;
+  stationsTo?: string;
+  stationsInBetween?: string;
 }
 
 export async function updateProjectDetails(

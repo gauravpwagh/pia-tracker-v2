@@ -188,7 +188,7 @@ class TenderPackagingGateIntegrationTest {
 
         // ── 2. CAO_C allocates to CE_C ─────────────────────────────────────────
         val cao = loginAs(CAO_C_USER_ID)
-        post("/api/v1/projects/${project.id}/allocate", AllocateProjectRequest(ceUserId = CE_C_USER_ID), cao, ProjectDetailResponse::class.java)
+        post("/api/v1/projects/${project.id}/allocate", AllocateProjectRequest(ceUserIds = listOf(CE_C_USER_ID)), cao, ProjectDetailResponse::class.java)
 
         // ── 3. CE_C assigns DYCE_1, designates DYCE_2 as Nodal ────────────────
         val ce = loginAs(CE_C_USER_ID)

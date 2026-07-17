@@ -171,7 +171,7 @@ class ExcelExportGateIntegrationTest {
         // CAO/C allocates so the project is in ACTIVE / accessible state
         post(
             "/api/v1/projects/${project.id}/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            AllocateProjectRequest(ceUserIds = listOf(CE_C_USER_ID)),
             cao,
             ProjectDetailResponse::class.java,
         )

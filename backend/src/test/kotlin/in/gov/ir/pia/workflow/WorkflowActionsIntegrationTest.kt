@@ -134,7 +134,7 @@ class WorkflowActionsIntegrationTest {
         val cao = loginAs(CAO_C_USER_ID)
         post(
             "/api/v1/projects/$projectId/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            AllocateProjectRequest(ceUserIds = listOf(CE_C_USER_ID)),
             cao,
             ProjectDetailResponse::class.java,
         )

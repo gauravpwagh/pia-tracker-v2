@@ -30,7 +30,8 @@ import java.util.UUID
  * Phase 1.8 gate test (phasing.md § 1.8):
  *
  *   "A Dy CE/C creates a Land Acquisition activity on their project.
- *    An activity-of-the-same-type can be added a second time (decision YYY).
+ *    A second activity of the same type on that project is rejected (409) —
+ *    at most one activity per type per project.
  *    A non-assigned Dy CE/C gets 403."
  *
  * Setup for each test that needs a project:
@@ -139,7 +140,7 @@ class ActivityLifecycleIntegrationTest {
         val allocResp =
             post(
                 "/api/v1/projects/$projectId/allocate",
-                AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+                AllocateProjectRequest(ceUserIds = listOf(CE_C_USER_ID)),
                 caoCookies,
                 ProjectDetailResponse::class.java,
             )
@@ -163,22 +164,22 @@ class ActivityLifecycleIntegrationTest {
     // ── Gate test ─────────────────────────────────────────────────────────────
 
     /**
-     * Full activity creation flow: assigned Dy CE/C creates two Land Acquisition
-     * activities on the same project (decision YYY — same type allowed twice).
-     * Verifies DB rows and audit log.
+     * A project holds at most ONE non-deleted activity of each type. The first
+     * Land Acquisition activity is created; a second one on the same project is
+     * rejected with 409, regardless of its name. Verifies DB rows and audit log.
      */
     @Test
-    fun `assigned DyCEC creates Land Acquisition activity twice — both succeed`() {
+    fun `second activity of the same type on a project is rejected with 409`() {
         val projectId = createActiveProject(listOf(DYCE_1_USER_ID, DYCE_2_USER_ID))
         val dyceCookies = loginAs(DYCE_1_USER_ID)
 
-        // ── Step 1: Create first Land Acquisition activity ────────────────────
+        // ── Step 1: Create the Land Acquisition activity ──────────────────────
         val firstResp =
             post(
                 "/api/v1/projects/$projectId/activities",
                 CreateActivityRequest(
                     activityTypeCode = "LAND_ACQUISITION",
-                    name = "Phase 1 Land Acquisition — Ambala-Ludhiana",
+                    name = "Land Acquisition — Ambala-Ludhiana",
                     scopeNotes = "Village-level LA for the initial 42 km stretch",
                 ),
                 dyceCookies,
@@ -188,14 +189,15 @@ class ActivityLifecycleIntegrationTest {
         assertThat(firstResp.statusCode).isEqualTo(HttpStatus.CREATED)
         val firstActivity = firstResp.body!!
         assertThat(firstActivity.activityTypeCode).isEqualTo("LAND_ACQUISITION")
-        assertThat(firstActivity.name).isEqualTo("Phase 1 Land Acquisition — Ambala-Ludhiana")
+        assertThat(firstActivity.name).isEqualTo("Land Acquisition — Ambala-Ludhiana")
         assertThat(firstActivity.projectId).isEqualTo(projectId)
         assertThat(firstActivity.primaryDyceUserId).isEqualTo(DYCE_1_USER_ID)
         assertThat(firstActivity.status).isEqualTo("NOT_STARTED")
         // The seeded stub form definition should be resolved
         assertThat(firstActivity.defaultFormDefinitionId).isEqualTo(LAND_ACQUISITION_FORM_DEF_ID)
 
-        // ── Step 2: Create SECOND Land Acquisition activity (decision YYY) ────
+        // ── Step 2: A SECOND Land Acquisition activity is rejected (409) ───────
+        // Even with a different name — one activity per type per project.
         val secondResp =
             post(
                 "/api/v1/projects/$projectId/activities",
@@ -204,16 +206,12 @@ class ActivityLifecycleIntegrationTest {
                     name = "Phase 2 Land Acquisition — Ludhiana-Jalandhar",
                 ),
                 dyceCookies,
-                ActivityDetailResponse::class.java,
+                String::class.java,
             )
 
-        assertThat(secondResp.statusCode).isEqualTo(HttpStatus.CREATED)
-        val secondActivity = secondResp.body!!
-        assertThat(secondActivity.activityTypeCode).isEqualTo("LAND_ACQUISITION")
-        // IDs must differ — these are two distinct rows
-        assertThat(secondActivity.id).isNotEqualTo(firstActivity.id)
+        assertThat(secondResp.statusCode).isEqualTo(HttpStatus.CONFLICT)
 
-        // ── Verify DB: two project_activities rows ────────────────────────────
+        // ── Verify DB: still exactly ONE project_activities row ───────────────
         val activityCount =
             jdbc.queryForObject(
                 """
@@ -223,23 +221,22 @@ class ActivityLifecycleIntegrationTest {
                 Long::class.java,
                 projectId,
             )!!
-        assertThat(activityCount).isEqualTo(2L)
+        assertThat(activityCount).isEqualTo(1L)
 
-        // ── Verify audit log: two ACTIVITY.CREATE rows ────────────────────────
+        // ── Verify audit log: exactly ONE ACTIVITY.CREATE row ─────────────────
         val auditActions =
             jdbc.queryForList(
                 """
                 SELECT action FROM audit_log
-                 WHERE entity_type = 'ACTIVITY' AND entity_id IN (?, ?)
+                 WHERE entity_type = 'ACTIVITY' AND entity_id = ?
                  ORDER BY at
                 """.trimIndent(),
                 String::class.java,
                 firstActivity.id,
-                secondActivity.id,
             )
-        assertThat(auditActions).containsExactlyInAnyOrder("ACTIVITY.CREATE", "ACTIVITY.CREATE")
+        assertThat(auditActions).containsExactly("ACTIVITY.CREATE")
 
-        // ── Verify list endpoint returns both activities ───────────────────────
+        // ── Verify list endpoint returns only the one activity ─────────────────
         val listResp =
             restTemplate.exchange(
                 "/api/v1/projects/$projectId/activities",
@@ -248,8 +245,7 @@ class ActivityLifecycleIntegrationTest {
                 Array<ActivityDetailResponse>::class.java,
             )
         assertThat(listResp.statusCode).isEqualTo(HttpStatus.OK)
-        assertThat(listResp.body!!.map { it.id })
-            .containsExactlyInAnyOrder(firstActivity.id, secondActivity.id)
+        assertThat(listResp.body!!.map { it.id }).containsExactly(firstActivity.id)
     }
 
     // ── Guard test ────────────────────────────────────────────────────────────

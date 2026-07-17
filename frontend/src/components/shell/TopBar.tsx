@@ -29,7 +29,6 @@ import {
 } from '@api/notifications';
 import { fetchZones } from '@api/projects';
 import { logout as apiLogout } from '@api/auth';
-import { IRPSM_LOGOFF_URL } from '@lib/externalLinks';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
@@ -287,10 +286,10 @@ export function TopBar() {
                   icon: <LogoutOutlined />,
                   label: 'Logout',
                   danger: true,
-                  // End the PIA session server-side, then hand back to IRPSM's logoff. Uses the raw
-                  // API logout (not the store's) so currentUser isn't nulled — that would re-render
-                  // RequireAuth and flash the PIA /login page before the full-page redirect commits.
-                  onClick: () => void apiLogout().finally(() => { window.location.href = IRPSM_LOGOFF_URL; }),
+                  // End the PIA session server-side, then land on PIA's own login page. Uses the
+                  // raw API logout (not the store's) so currentUser isn't nulled before the
+                  // full-page redirect commits.
+                  onClick: () => void apiLogout().finally(() => { window.location.href = '/login'; }),
                 },
               ],
             }}

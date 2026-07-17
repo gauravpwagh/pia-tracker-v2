@@ -275,7 +275,7 @@ class UtilityShiftingGateIntegrationTest {
         val cao = loginAs(CAO_C_USER_ID)
         post(
             "/api/v1/projects/${project.id}/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            AllocateProjectRequest(ceUserIds = listOf(CE_C_USER_ID)),
             cao,
             ProjectDetailResponse::class.java,
         )

@@ -47,6 +47,7 @@ import {
 } from '@api/activityRecords';
 import { RecordDetailPanel } from './RecordDetailPanel';
 import { RecordEditor } from '@pages/records/RecordEditPage';
+import { TalukaDetailsPanel } from './TalukaDetailsPanel';
 
 // Lazy — MapLibre + JSZip are heavy and only needed on the Map tab.
 const MapView = lazy(() => import('./MapView').then((m) => ({ default: m.MapView })));
@@ -87,6 +88,11 @@ const ACTIVITY_TYPE_LABEL: Record<string, string> = {
   DRAWING_APPROVAL: 'Drawing Approval',
   TENDER_PACKAGING: 'Tender Packaging',
   TEMPORARY_OFFICE_SPACE: 'Office Space',
+};
+// Matches DashboardPage's ACTIVITIES accentColor mapping, for visual consistency.
+const ACTIVITY_TYPE_ACCENT: Record<string, string> = {
+  LAND_ACQUISITION: '#52c41a', UTILITY_SHIFTING: '#1677ff', FOREST_CLEARANCE: '#389e0d',
+  DRAWING_APPROVAL: '#9254de', TENDER_PACKAGING: '#fa8c16', TEMPORARY_OFFICE_SPACE: '#08979c',
 };
 const ACTIVITY_TYPE_ICON: Record<string, string> = {
   LAND_ACQUISITION: '📍', FOREST_CLEARANCE: '🌳', UTILITY_SHIFTING: '🔧',
@@ -212,7 +218,7 @@ function recordDisplayName(r: ActivityRecordDetail, i: number): string {
 }
 // ── Activity pane: filters + master-detail ─────────────────────────────────────
 
-type DetailMode = { kind: 'empty' } | { kind: 'record'; id: string } | { kind: 'add' } | { kind: 'scope' };
+type DetailMode = { kind: 'empty' } | { kind: 'record'; id: string } | { kind: 'add' } | { kind: 'scope' } | { kind: 'taluka' };
 
 function ActivityPane({ activity, activityType, projectId, canEdit, initialRecordId }: {
   activity: ActivityDetailResponse | null;
@@ -247,15 +253,21 @@ function ActivityPane({ activity, activityType, projectId, canEdit, initialRecor
   const [scNotes, setScNotes] = useState(activity?.scopeNotes ?? '');
   const [scTarget, setScTarget] = useState<dayjs.Dayjs | null>(activity?.targetCompletionDate ? dayjs(activity.targetCompletionDate) : null);
   const [scTotal, setScTotal] = useState<number | null>((activity?.metadataJson?.total_count as number | undefined) ?? null);
+  // Land Acquisition only — overall hectares planned for the whole activity (distinct from
+  // each record's own per-village area_hectares_total). Reuses the existing area_hectares_total
+  // column on land_acquisition_details (already read/written by upsertDetails/readDetails).
+  const [scTotalHa, setScTotalHa] = useState<number | null>((activity?.metadataJson?.area_hectares_total as number | undefined) ?? null);
 
   // Scope values as currently persisted on the activity (drive the KPI + Add-Record gate).
   const totalCount = (activity?.metadataJson?.total_count as number | undefined) ?? null;
+  const totalHa = (activity?.metadataJson?.area_hectares_total as number | undefined) ?? null;
 
   // Load the current scope values into the editor fields (used by the Scope button + auto-open).
   const openScope = () => {
     setScNotes(activity?.scopeNotes ?? '');
     setScTarget(activity?.targetCompletionDate ? dayjs(activity.targetCompletionDate) : null);
     setScTotal((activity?.metadataJson?.total_count as number | undefined) ?? null);
+    setScTotalHa((activity?.metadataJson?.area_hectares_total as number | undefined) ?? null);
     setMode({ kind: 'scope' });
   };
 
@@ -278,6 +290,17 @@ function ActivityPane({ activity, activityType, projectId, canEdit, initialRecor
     return { total: records.length, draft, verified, auth };
   }, [records]);
 
+  // Land Acquisition only — sum of each record's own Total Area (ha), for the
+  // "Land Details (ha)" KPI (acquired-so-far / Total Land Acquisition (ha) from scope).
+  const acquiredHa = useMemo(() => {
+    if (!isLa) return 0;
+    return records.reduce((sum, r) => {
+      const ad = (r.dataJson as Record<string, unknown> | undefined)?.acquisition_details as Record<string, unknown> | undefined;
+      const v = ad?.area_hectares_total;
+      return sum + (typeof v === 'number' ? v : 0);
+    }, 0);
+  }, [records, isLa]);
+
   const filtered = records.filter((r, i) => {
     if (search && !recordDisplayName(r, i).toLowerCase().includes(search.toLowerCase())) return false;
     if (statusF !== 'all' && stateBucket(r.recordState) !== statusF) return false;
@@ -285,17 +308,43 @@ function ActivityPane({ activity, activityType, projectId, canEdit, initialRecor
     return true;
   });
 
+  // Resolve (or lazily create) the activity for this type WITHOUT ever creating a
+  // second one. A stale activities cache could otherwise let two quick actions each
+  // create their own "Land Acquisition" / "Utility Shifting" row. We defend against
+  // that here: re-fetch the live list first and reuse any existing activity of this
+  // type, and if a create still loses a race (another tab/click, or the backend's
+  // unique guard fires) we re-fetch and reuse instead of surfacing an error.
+  const ensureActivityId = async (): Promise<string> => {
+    if (activityId) return activityId;
+    const findExisting = (list: ActivityDetailResponse[]) =>
+      list.find((a) => a.activityTypeCode === activityType)?.id;
+    const fresh = await queryClient.fetchQuery({
+      queryKey: ['activities', projectId],
+      queryFn: () => fetchActivities(projectId),
+    });
+    const existing = findExisting(fresh);
+    if (existing) return existing;
+    try {
+      const created = await createActivity(projectId, {
+        activityTypeCode: activityType,
+        name: ACTIVITY_TYPE_LABEL[activityType] ?? activityType.replace(/_/g, ' '),
+      });
+      return created.id;
+    } catch (err) {
+      const after = await queryClient.fetchQuery({
+        queryKey: ['activities', projectId],
+        queryFn: () => fetchActivities(projectId),
+      });
+      const reuse = findExisting(after);
+      if (reuse) return reuse;
+      throw err;
+    }
+  };
+
   const createMutation = useMutation({
     mutationFn: async () => {
       // Create the activity on demand the first time a record is added for this type.
-      let actId = activityId;
-      if (!actId) {
-        const created = await createActivity(projectId, {
-          activityTypeCode: activityType,
-          name: ACTIVITY_TYPE_LABEL[activityType] ?? activityType.replace(/_/g, ' '),
-        });
-        actId = created.id;
-      }
+      const actId = await ensureActivityId();
       const rec = await createRecord(actId, needsSubtype ? newSubtype : undefined, newName || undefined);
       if (isUs && newSubtype) await patchRecord(rec.id, { utility_type: newSubtype });
       return rec;
@@ -313,15 +362,21 @@ function ActivityPane({ activity, activityType, projectId, canEdit, initialRecor
       // Create the activity on first Save scope (it may not exist yet — six tabs are always
       // shown, but the DB row is created lazily). Records can't be added until this is saved.
       const name = activity?.name ?? (ACTIVITY_TYPE_LABEL[activityType] ?? activityType.replace(/_/g, ' '));
-      const metadataJson = { ...(activity?.metadataJson ?? {}), total_count: scTotal };
+      const metadataJson = {
+        ...(activity?.metadataJson ?? {}),
+        total_count: scTotal,
+        ...(isLa ? { area_hectares_total: scTotalHa } : {}),
+      };
       const payload = {
         name,
         scopeNotes: scNotes || undefined,
         targetCompletionDate: scTarget ? scTarget.format('YYYY-MM-DD') : undefined,
         metadataJson,
       };
-      if (activityId) return updateActivity(activityId, payload);
-      return createActivity(projectId, { activityTypeCode: activityType, ...payload });
+      // Resolve-or-create through the same dedupe-safe path as record creation, then
+      // write the scope onto whichever activity that resolved to (never a second row).
+      const id = await ensureActivityId();
+      return updateActivity(id, payload);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['activities'] });
@@ -373,9 +428,20 @@ function ActivityPane({ activity, activityType, projectId, canEdit, initialRecor
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '6px 20px', flexShrink: 0, borderBottom: '1px solid var(--ant-color-border)' }}>
         <h3 style={{ margin: 0, fontSize: 15 }}>{ACTIVITY_TYPE_LABEL[typeCode] ?? typeCode.replace(/_/g, ' ')}</h3>
         {canEdit && (
-          <Button size="small" type={mode.kind === 'scope' ? 'primary' : 'default'} icon={<EditOutlined />}
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            style={{ background: '#ffe7ba', borderColor: '#ffd591', color: 'rgba(0,0,0,0.85)' }}
             onClick={() => { if (mode.kind === 'scope') setMode({ kind: 'empty' }); else openScope(); }}>
             Scope
+          </Button>
+        )}
+        {isLa && (
+          <Button
+            size="small"
+            style={{ background: '#d9f7be', borderColor: '#b7eb8f', color: 'rgba(0,0,0,0.85)' }}
+            onClick={() => setMode(mode.kind === 'taluka' ? { kind: 'empty' } : { kind: 'taluka' })}>
+            Sub division/taluka
           </Button>
         )}
         <div style={{ display: 'flex', gap: 8, flex: 1, justifyContent: 'center' }}>
@@ -383,6 +449,9 @@ function ActivityPane({ activity, activityType, projectId, canEdit, initialRecor
           <Kpi label="Draft" value={kpi.draft} color="#6b7280" />
           <Kpi label="Verified" value={kpi.verified} color="#1d4ed8" />
           <Kpi label="Authenticated" value={kpi.auth} color="#166534" />
+          {isLa && (
+            <Kpi label="Land Details (ha)" value={`${acquiredHa.toFixed(2)} / ${totalHa != null ? totalHa.toFixed(2) : '—'}`} color="#7c3aed" />
+          )}
         </div>
         {canCreateType && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -416,6 +485,13 @@ function ActivityPane({ activity, activityType, projectId, canEdit, initialRecor
                   <InputNumber style={{ width: '100%' }} min={1} value={scTotal} onChange={(v) => setScTotal(v)} placeholder="e.g. 12" />
                 </Field>
               </div>
+              {isLa && (
+                <div style={{ flex: '0 1 200px' }}>
+                  <Field label="Total Land Acquisition (ha)">
+                    <InputNumber style={{ width: '100%' }} min={0} step={0.01} value={scTotalHa} onChange={(v) => setScTotalHa(v)} placeholder="e.g. 25.5" />
+                  </Field>
+                </div>
+              )}
               <div style={{ flex: '0 1 220px' }}>
                 <Field label="Target completion"><DatePicker style={{ width: '100%' }} value={scTarget} onChange={setScTarget} /></Field>
               </div>
@@ -466,17 +542,23 @@ function ActivityPane({ activity, activityType, projectId, canEdit, initialRecor
             )}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
               <Text type="secondary" style={{ fontSize: 12, marginRight: 'auto' }}>
-                Total count and target completion are required before records can be added.
+                {isLa && activityId && !laMandatoryReady
+                  ? 'Upload the mandatory checklist documents (KMZ, SRP, CALA) to save further scope changes.'
+                  : 'Total count and target completion are required before records can be added.'}
               </Text>
               <Button onClick={() => setMode({ kind: 'empty' })}>Cancel</Button>
               <Button type="primary" loading={scopeMutation.isPending}
-                disabled={!scTotal || scTotal < 1 || !scTarget}
+                disabled={!scTotal || scTotal < 1 || !scTarget || (isLa && !!activityId && !laMandatoryReady)}
                 onClick={() => scopeMutation.mutate()}>Save scope</Button>
             </div>
           </div>
         </div>
       )}
 
+      {mode.kind === 'taluka' && activityId ? (
+        <TalukaDetailsPanel activityId={activityId} canEdit={canEdit} />
+      ) : (
+      <>
       {/* Record filters — labels left, separated */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 20px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -604,6 +686,8 @@ function ActivityPane({ activity, activityType, projectId, canEdit, initialRecor
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -873,7 +957,7 @@ function orderedOfficerRows(assignments: ProjectAssignmentItem[]): { userId: str
 
 function OverviewView({ projectId, zoneId, project, autoOpenAssign, onAutoOpenAssignConsumed }: {
   projectId: string; zoneId: string;
-  project: { name: string; projectCode: string | null; projectType: string | null; lengthKm: number | null; stationNames: string | null; ipaDate: string | null; targetCompletionYear: number | null; lifecycleState: string };
+  project: { name: string; projectCode: string | null; projectType: string | null; lengthKm: number | null; stationsFrom: string | null; stationsTo: string | null; stationsInBetween: string | null; ipaDate: string | null; targetCompletionYear: number | null; lifecycleState: string };
   /** #19/#20 — open the Assign CE/C or Assign Dy CE/C modal immediately on mount. */
   autoOpenAssign?: 'ce' | 'dy' | null;
   onAutoOpenAssignConsumed?: () => void;
@@ -891,20 +975,26 @@ function OverviewView({ projectId, zoneId, project, autoOpenAssign, onAutoOpenAs
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenAssign]);
 
-  // ── Edit Details (#8) — Length + Station names, CE/C and Dy CE/C only ────────
+  // ── Edit Details (#8) — Length + Stations (From/To/In Between), CE/C and Dy CE/C only ──
   const canEditDetails = currentUser?.permissions.includes('PROJECT.UPDATE.OWN') ?? false;
   const [editingDetails, setEditingDetails] = useState(false);
   const [edLengthKm, setEdLengthKm] = useState<number | null>(project.lengthKm);
-  const [edStationNames, setEdStationNames] = useState(project.stationNames ?? '');
+  const [edStationsFrom, setEdStationsFrom] = useState(project.stationsFrom ?? '');
+  const [edStationsTo, setEdStationsTo] = useState(project.stationsTo ?? '');
+  const [edStationsInBetween, setEdStationsInBetween] = useState(project.stationsInBetween ?? '');
   const startEditingDetails = () => {
     setEdLengthKm(project.lengthKm);
-    setEdStationNames(project.stationNames ?? '');
+    setEdStationsFrom(project.stationsFrom ?? '');
+    setEdStationsTo(project.stationsTo ?? '');
+    setEdStationsInBetween(project.stationsInBetween ?? '');
     setEditingDetails(true);
   };
   const detailsMutation = useMutation({
     mutationFn: () => updateProjectDetails(projectId, {
       lengthKm: edLengthKm ?? undefined,
-      stationNames: edStationNames.trim() || undefined,
+      stationsFrom: edStationsFrom.trim() || undefined,
+      stationsTo: edStationsTo.trim() || undefined,
+      stationsInBetween: edStationsInBetween.trim() || undefined,
     }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -929,33 +1019,85 @@ function OverviewView({ projectId, zoneId, project, autoOpenAssign, onAutoOpenAs
   const refresh = () => { void queryClient.invalidateQueries({ queryKey: ['assignments', projectId] }); void queryClient.invalidateQueries({ queryKey: ['projects'] }); };
 
   // ── Stats + per-activity progress (records authenticated / total) ───────────
+  // One card per activity INSTANCE, not per type — a project can have more than one
+  // activity of the same type (e.g. two Land Acquisition activities), so the activity's
+  // own name is shown alongside the type label to tell them apart.
   const activityProgress = activities.map((a, i) => {
     const records = recordCountQueries[i]?.data ?? [];
-    const authenticated = records.filter((r) => r.recordState === 'AUTHENTICATED').length;
-    return { type: a.activityTypeCode, label: ACTIVITY_TYPE_LABEL[a.activityTypeCode] ?? a.activityTypeCode.replace(/_/g, ' '), authenticated, total: records.length };
+    const draft = records.filter((r) => stateBucket(r.recordState) === 'draft').length;
+    const verified = records.filter((r) => stateBucket(r.recordState) === 'verified').length;
+    const authenticated = records.filter((r) => stateBucket(r.recordState) === 'authenticated').length;
+    return {
+      id: a.id,
+      name: a.name,
+      typeLabel: ACTIVITY_TYPE_LABEL[a.activityTypeCode] ?? a.activityTypeCode.replace(/_/g, ' '),
+      accentColor: ACTIVITY_TYPE_ACCENT[a.activityTypeCode] ?? '#1677ff',
+      draft, verified, authenticated, total: records.length,
+    };
   });
-  const allRecords = recordCountQueries.flatMap((q) => q.data ?? []);
-  const totalAuthenticated = allRecords.filter((r) => r.recordState === 'AUTHENTICATED').length;
-  const overallProgress = allRecords.length > 0 ? Math.round((totalAuthenticated / allRecords.length) * 100) : 0;
-
   const officerRows = orderedOfficerRows(assignmentsQuery.data ?? []);
 
   return (
     <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Row 1 — stat cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
-        <StatCard label="Activities" value={activities.length} />
-        <StatCard label="Total records" value={allRecords.length} />
-        <StatCard label="Authenticated" value={totalAuthenticated} />
-        <StatCard label="Overall progress" value={`${overallProgress}%`} />
+      {/* Row 1 — activity progress: one compact card per activity instance (not
+          per type), all fit on a single row — each card lists its 4 record
+          counts vertically (Draft, In verification, Authenticated, Total). */}
+      <div style={{ background: 'var(--ant-color-bg-container)', border: '1px solid var(--ant-color-border)', borderRadius: 10, padding: '16px 18px' }}>
+        <h4 style={{ margin: '0 0 12px' }}>Activity progress</h4>
+        {activityProgress.length === 0 ? (
+          <Text type="secondary" style={{ fontSize: 13 }}>No activities yet.</Text>
+        ) : (
+          <div style={{ display: 'flex', gap: 12 }}>
+            {activityProgress.map((ap) => (
+              <div key={ap.id} style={{ flex: '1 1 0', minWidth: 0, border: '1px solid var(--ant-color-border)', borderLeft: `4px solid ${ap.accentColor}`, borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: ap.accentColor }}>{ap.typeLabel}</div>
+                  {ap.name && ap.name !== ap.typeLabel && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>{ap.name}</Text>
+                  )}
+                </div>
+                {ap.total === 0 ? (
+                  <Text type="secondary" style={{ fontSize: 12 }}>No records yet.</Text>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Draft</Text>
+                      <span style={{ fontSize: 14, fontWeight: 700 }}>{ap.draft}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>In verification</Text>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: '#1677ff' }}>{ap.verified}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Authenticated</Text>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: '#52c41a' }}>{ap.authenticated}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>Total</Text>
+                      <span style={{ fontSize: 14, fontWeight: 700 }}>{ap.total}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Row 2 — project details */}
+      {/* Row 2 — project details (wider) + designated officers (narrower), side by side */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 16, alignItems: 'start' }}>
       <div style={{ background: 'var(--ant-color-bg-container)', border: '1px solid var(--ant-color-border)', borderRadius: 10, padding: '16px 18px' }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
           <h4 style={{ margin: 0, flex: 1 }}>Project details</h4>
           {canEditDetails && !editingDetails && (
-            <Button size="small" icon={<EditOutlined />} onClick={startEditingDetails}>Edit Details</Button>
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              style={{ background: '#d9f7be', borderColor: '#b7eb8f', color: 'rgba(0,0,0,0.85)' }}
+              onClick={startEditingDetails}
+            >
+              Edit Details
+            </Button>
           )}
         </div>
         {editingDetails ? (
@@ -967,13 +1109,23 @@ function OverviewView({ projectId, zoneId, project, autoOpenAssign, onAutoOpenAs
                     onChange={(v) => setEdLengthKm(v)} placeholder="e.g. 42.5" />
                 </Field>
               </div>
-              <div style={{ flex: '1 1 320px' }}>
-                <Field label="Name of stations">
-                  <Input.TextArea rows={1} autoSize={{ minRows: 1, maxRows: 3 }} value={edStationNames}
-                    onChange={(e) => setEdStationNames(e.target.value)}
-                    placeholder="e.g. Daund, Baramati, Solapur (comma-separated)" />
+              <div style={{ flex: '1 1 200px' }}>
+                <Field label="Stations From">
+                  <Input value={edStationsFrom} onChange={(e) => setEdStationsFrom(e.target.value)} placeholder="e.g. Daund" />
                 </Field>
               </div>
+              <div style={{ flex: '1 1 200px' }}>
+                <Field label="Stations To">
+                  <Input value={edStationsTo} onChange={(e) => setEdStationsTo(e.target.value)} placeholder="e.g. Solapur" />
+                </Field>
+              </div>
+            </div>
+            <div>
+              <Field label="Stations In Between">
+                <Input.TextArea rows={1} autoSize={{ minRows: 1, maxRows: 3 }} value={edStationsInBetween}
+                  onChange={(e) => setEdStationsInBetween(e.target.value)}
+                  placeholder="e.g. Baramati, Indapur (comma-separated)" />
+              </Field>
             </div>
             {detailsMutation.isError && (
               <Alert type="error" showIcon message={detailsMutation.error instanceof Error ? detailsMutation.error.message : 'Failed to save'} />
@@ -991,83 +1143,52 @@ function OverviewView({ projectId, zoneId, project, autoOpenAssign, onAutoOpenAs
             <Detail label="Length" value={project.lengthKm != null ? `${project.lengthKm} km` : '—'} />
             <Detail label="IPA date" value={project.ipaDate ? dayjs(project.ipaDate).format('D MMM YYYY') : '—'} />
             <Detail label="Status" value={badge.label} />
+            <Detail label="Stations From" value={project.stationsFrom?.trim() || '—'} />
+            <Detail label="Stations To" value={project.stationsTo?.trim() || '—'} />
             <div style={{ gridColumn: '1 / -1' }}>
-              <Detail label="Stations" value={project.stationNames?.trim() || '—'} />
+              <Detail label="Stations In Between" value={project.stationsInBetween?.trim() || '—'} />
             </div>
           </div>
         )}
       </div>
 
-      {/* Row 3 — designated officers (left) + activity progress (right) */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <div style={{ background: 'var(--ant-color-bg-container)', border: '1px solid var(--ant-color-border)', borderRadius: 10, padding: '16px 18px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-            <h4 style={{ margin: 0, flex: 1 }}>Designated officers</h4>
-            <Space wrap>
-              {/* The Assign CE/C(s) modal also captures the Primary CE/C, so a
-                  separate "Primary CE/C" button is redundant and was removed. */}
-              {canAllocate && <Button type="primary" size="small" style={{ background: '#1565c0', borderColor: '#1565c0' }} icon={<UserAddOutlined />} onClick={() => setModal('allocate')}>Assign CE/C(s)</Button>}
-              {canAssignDyce && <Button type="primary" size="small" style={{ background: '#1565c0', borderColor: '#1565c0' }} icon={<UsergroupAddOutlined />} onClick={() => setModal('assignDyce')}>Assign Dy CE/C(s)</Button>}
-            </Space>
-          </div>
-          {assignmentsQuery.isLoading ? <Spin /> : officerRows.length === 0 ? (
-            <Text type="secondary" style={{ fontSize: 13 }}>No officers assigned yet.</Text>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead><tr>
-                <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 11, textTransform: 'uppercase', color: 'var(--ant-color-text-secondary)' }}>Role</th>
-                <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 11, textTransform: 'uppercase', color: 'var(--ant-color-text-secondary)' }}>Officer</th>
-              </tr></thead>
-              <tbody>
-                {officerRows.map((row) => (
-                  <tr key={row.userId}>
-                    <td style={{ padding: '7px 8px', borderBottom: '1px solid var(--ant-color-border)', color: 'var(--ant-color-text-secondary)' }}>
-                      {row.label}
-                    </td>
-                    <td style={{ padding: '7px 8px', borderBottom: '1px solid var(--ant-color-border)', fontWeight: 600 }}>{userName(row.userId)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+      {/* Designated officers — narrower column beside Project details */}
+      <div style={{ background: 'var(--ant-color-bg-container)', border: '1px solid var(--ant-color-border)', borderRadius: 10, padding: '16px 18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+          <h4 style={{ margin: 0, flex: 1 }}>Designated officers</h4>
+          <Space wrap>
+            {/* The Assign CE/C(s) modal also captures the Primary CE/C, so a
+                separate "Primary CE/C" button is redundant and was removed. */}
+            {canAllocate && <Button type="primary" size="small" style={{ background: '#1565c0', borderColor: '#1565c0' }} icon={<UserAddOutlined />} onClick={() => setModal('allocate')}>Assign CE/C(s)</Button>}
+            {canAssignDyce && <Button type="primary" size="small" style={{ background: '#1565c0', borderColor: '#1565c0' }} icon={<UsergroupAddOutlined />} onClick={() => setModal('assignDyce')}>Assign Dy CE/C(s)</Button>}
+          </Space>
         </div>
-
-        <div style={{ background: 'var(--ant-color-bg-container)', border: '1px solid var(--ant-color-border)', borderRadius: 10, padding: '16px 18px' }}>
-          <h4 style={{ margin: '0 0 12px' }}>Activity progress</h4>
-          {activityProgress.length === 0 ? (
-            <Text type="secondary" style={{ fontSize: 13 }}>No activities yet.</Text>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {activityProgress.map((ap) => {
-                const pct = ap.total > 0 ? Math.round((ap.authenticated / ap.total) * 100) : 0;
-                return (
-                  <div key={ap.type}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-                      <span>{ap.label}</span>
-                      <Text type="secondary">{ap.authenticated}/{ap.total}</Text>
-                    </div>
-                    <div style={{ height: 8, borderRadius: 4, background: 'var(--ant-color-bg-layout)', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: 'var(--ant-color-primary)', borderRadius: 4 }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        {assignmentsQuery.isLoading ? <Spin /> : officerRows.length === 0 ? (
+          <Text type="secondary" style={{ fontSize: 13 }}>No officers assigned yet.</Text>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr>
+              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 11, textTransform: 'uppercase', color: 'var(--ant-color-text-secondary)' }}>Role</th>
+              <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: 11, textTransform: 'uppercase', color: 'var(--ant-color-text-secondary)' }}>Officer</th>
+            </tr></thead>
+            <tbody>
+              {officerRows.map((row) => (
+                <tr key={row.userId}>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid var(--ant-color-border)', color: 'var(--ant-color-text-secondary)' }}>
+                    {row.label}
+                  </td>
+                  <td style={{ padding: '7px 8px', borderBottom: '1px solid var(--ant-color-border)', fontWeight: 600 }}>{userName(row.userId)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
       </div>
 
       <AllocateModal projectId={projectId} zoneId={zoneId} open={modal === 'allocate'} onClose={() => setModal(null)} onSuccess={refresh} />
       <PrimaryCeModal projectId={projectId} open={modal === 'primaryCe'} onClose={() => setModal(null)} onSuccess={refresh} />
       <AssignDyceModal projectId={projectId} zoneId={zoneId} open={modal === 'assignDyce'} onClose={() => setModal(null)} onSuccess={refresh} />
-    </div>
-  );
-}
-function StatCard({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div style={{ background: 'var(--ant-color-bg-container)', border: '1px solid var(--ant-color-border)', borderRadius: 10, padding: '16px 18px' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--ant-color-primary)' }}>{value}</div>
-      <div style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', marginTop: 2 }}>{label}</div>
     </div>
   );
 }

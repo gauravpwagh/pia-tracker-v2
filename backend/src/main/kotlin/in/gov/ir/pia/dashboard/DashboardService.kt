@@ -575,7 +575,8 @@ class DashboardService(
                     }
                 val projects =
                     jdbc.query(
-                        "SELECT id, name, project_code, zone_id FROM projects WHERE NOT is_deleted ORDER BY name",
+                        "SELECT id, name, project_code, zone_id FROM projects " +
+                            "WHERE NOT is_deleted AND lifecycle_state != 'REMOVED' ORDER BY name",
                     ) { rs, _ ->
                         ProjectOptionDto(
                             id = rs.getObject("id", UUID::class.java),
@@ -724,7 +725,8 @@ class DashboardService(
         if (zoneIds.isEmpty()) return emptyList()
         val ph = zoneIds.joinToString(",") { "?" }
         return jdbc.query(
-            "SELECT id, name, project_code, zone_id FROM projects WHERE zone_id IN ($ph) AND NOT is_deleted ORDER BY name",
+            "SELECT id, name, project_code, zone_id FROM projects " +
+                "WHERE zone_id IN ($ph) AND NOT is_deleted AND lifecycle_state != 'REMOVED' ORDER BY name",
             { rs, _ ->
                 ProjectOptionDto(
                     id = rs.getObject("id", UUID::class.java),
@@ -746,6 +748,7 @@ class DashboardService(
             WHERE pa.primary_dyce_user_id = ?
               AND NOT pa.is_deleted
               AND NOT p.is_deleted
+              AND p.lifecycle_state != 'REMOVED'
             ORDER BY p.name
             """.trimIndent(),
             { rs, _ ->

@@ -72,7 +72,13 @@ export function Sidebar() {
         label: (
           <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             {t('sidebar.inbox')}
-            {awaitingCount > 0 && <Badge count={awaitingCount} size="small" />}
+            {awaitingCount > 0 && (
+              <Badge
+                count={awaitingCount}
+                size="small"
+                style={{ backgroundColor: '#fff', color: '#000', boxShadow: '0 0 0 1px var(--ant-color-border) inset' }}
+              />
+            )}
           </span>
         ),
       },

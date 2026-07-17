@@ -57,8 +57,13 @@ class Project(
     val lengthKm: BigDecimal? = null,
     @Column(name = "ipa_date")
     val ipaDate: LocalDate? = null,
-    @Column(name = "station_names")
-    val stationNames: String? = null,
+    @Column(name = "stations_from")
+    val stationsFrom: String? = null,
+    @Column(name = "stations_to")
+    val stationsTo: String? = null,
+    /** Comma-separated list of intermediate station names. */
+    @Column(name = "stations_in_between")
+    val stationsInBetween: String? = null,
     @Column(name = "recommended_by_board_on")
     val recommendedByBoardOn: LocalDate? = null,
     @Column(name = "target_completion_year")

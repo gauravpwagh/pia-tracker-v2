@@ -65,8 +65,8 @@ const STATUS_BUCKET: Record<string, Exclude<StatusBucket, 'ALL'>> = {
 
 const LIFECYCLE_BADGE: Record<string, { color: string; label: string }> = {
   DRAFT:                   { color: 'default', label: 'Draft' },
-  AWAITING_CAO_ALLOCATION: { color: 'orange',  label: 'Awaiting Assignment' },
-  AWAITING_CEC_ASSIGNMENT: { color: 'blue',    label: 'Awaiting Assignment' },
+  AWAITING_CAO_ALLOCATION: { color: 'orange',  label: 'Awaiting CE/C Assignment' },
+  AWAITING_CEC_ASSIGNMENT: { color: 'blue',    label: 'Awaiting Dy.CE/C Assignment' },
   ACTIVE:                  { color: 'green',   label: 'Active' },
   ON_HOLD:                 { color: 'orange',  label: 'On Hold' },
   COMPLETED:               { color: 'cyan',    label: 'Completed' },
@@ -162,10 +162,23 @@ function useProjectColumns({
       title: 'Project',
       dataIndex: 'name',
       key: 'name',
+      width: 280,
       render: (name: string, row) => (
-        <Space size={8}>
+        <Space size={8} align="start">
           <ProjectTypeIcon projectType={row.projectType} />
-          <a onClick={() => onOpen(row)} style={{ fontWeight: 600 }}>{name}</a>
+          <a
+            onClick={() => onOpen(row)}
+            style={{
+              fontWeight: 600,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              lineHeight: '18px',
+            }}
+          >
+            {name}
+          </a>
         </Space>
       ),
     },
@@ -173,12 +186,14 @@ function useProjectColumns({
       title: 'Project ID',
       dataIndex: 'projectCode',
       key: 'projectCode',
-      render: (code: string | null) => code ?? '—',
+      width: 150,
+      render: (code: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{code ?? '—'}</span>,
     },
     {
       title: 'PH No. & Name',
       dataIndex: 'projectType',
       key: 'projectType',
+      width: 125,
       render: (projectType: string | null) => projectType
         ? `${PLAN_HEAD_BY_PROJECT_TYPE[projectType] ? `PH-${PLAN_HEAD_BY_PROJECT_TYPE[projectType]} : ` : ''}${PROJECT_TYPE_LABEL[projectType] ?? projectType}`
         : '—',
@@ -187,6 +202,7 @@ function useProjectColumns({
       title: 'Zone',
       dataIndex: 'zoneId',
       key: 'zoneId',
+      width: 60,
       render: (zoneId: string) => zoneShortMap[zoneId] || '—',
     },
     {
@@ -196,12 +212,14 @@ function useProjectColumns({
       title: 'Executing Agency',
       dataIndex: 'zoneId',
       key: 'executingAgency',
+      width: 100,
       render: (zoneId: string) => (zoneShortMap[zoneId] ? `CAO ${zoneShortMap[zoneId]}` : '—'),
     },
     {
       title: 'IPA Date',
       dataIndex: 'ipaDate',
       key: 'ipaDate',
+      width: 100,
       render: (ipaDate: string | null) => (ipaDate ? dayjs(ipaDate).format('D MMM YYYY') : '—'),
       sorter: (a, b) => (a.ipaDate ?? '').localeCompare(b.ipaDate ?? ''),
     },
@@ -209,10 +227,10 @@ function useProjectColumns({
       title: 'Status',
       dataIndex: 'lifecycleState',
       key: 'lifecycleState',
-      width: 150,
+      width: 165,
       render: (state: string) => {
         const badge = LIFECYCLE_BADGE[state] ?? { color: 'default', label: state };
-        return <Tag color={badge.color} style={{ margin: 0, borderRadius: 20, fontWeight: 600 }}>{badge.label}</Tag>;
+        return <Tag color={badge.color} style={{ margin: 0, borderRadius: 20, fontWeight: 600, whiteSpace: 'normal' }}>{badge.label}</Tag>;
       },
     },
     // #19 — per-row assign action. CAO sees "Assign CE/C" while awaiting allocation;
@@ -221,7 +239,7 @@ function useProjectColumns({
     {
       title: 'Action',
       key: 'action',
-      width: 150,
+      width: 92,
       fixed: 'right' as const,
       render: (_: unknown, row: ProjectSummaryResponse) => {
         const kind: 'ce' | 'dy' | null =
@@ -332,6 +350,13 @@ export default function ProjectsPage() {
   const typeOptions = [...new Set((projectsQuery.data ?? []).map((p) => p.projectType).filter(Boolean) as string[])]
     .map((tp) => ({ value: tp, label: PROJECT_TYPE_LABEL[tp] ?? tp }));
 
+  // Distinct zones actually present among the current projects, for the Zone dropdown
+  // (mirrors typeOptions above — no point listing a zone with nothing in it).
+  const presentZoneIds = new Set((projectsQuery.data ?? []).map((p) => p.zoneId).filter(Boolean));
+  const zoneOptions = (zonesQuery.data ?? [])
+    .filter((z) => presentZoneIds.has(z.id))
+    .map((z) => ({ value: z.id, label: `${z.shortName} — ${z.name}` }));
+
   const filteredProjects = (projectsQuery.data ?? [])
     .filter((p) => {
       const matchesSearch = !searchText || p.name.toLowerCase().includes(searchText.toLowerCase());
@@ -419,10 +444,7 @@ export default function ProjectsPage() {
                 value={zoneFilter ?? ''}
                 onChange={(v) => setZoneFilter(v || undefined)}
                 loading={zonesQuery.isLoading}
-                options={[
-                  { value: '', label: 'All' },
-                  ...(zonesQuery.data?.map((z) => ({ value: z.id, label: `${z.shortName} — ${z.name}` })) ?? []),
-                ]}
+                options={[{ value: '', label: 'All' }, ...zoneOptions]}
               />
             </FilterField>
             <FilterField label="Type of Project" width={200}>
@@ -462,7 +484,9 @@ export default function ProjectsPage() {
             dataSource={filteredProjects}
             loading={projectsQuery.isLoading}
             size="small"
-            scroll={{ x: 'max-content' }}
+            bordered
+            tableLayout="fixed"
+            scroll={{ x: 1180 }}
             pagination={{ pageSize: 20 }}
             onRow={(row) => ({ onClick: () => openProject(row), style: { cursor: 'pointer' } })}
             locale={{ emptyText: t('projects.empty', 'No projects match your filters.') }}

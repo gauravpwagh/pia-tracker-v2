@@ -160,13 +160,13 @@ class ZoneDashboardGateIntegrationTest {
         // CAO/C allocates both
         post(
             "/api/v1/projects/${project1.id}/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            AllocateProjectRequest(ceUserIds = listOf(CE_C_USER_ID)),
             cao,
             ProjectDetailResponse::class.java,
         )
         post(
             "/api/v1/projects/${project2.id}/allocate",
-            AllocateProjectRequest(ceUserId = CE_C_USER_ID),
+            AllocateProjectRequest(ceUserIds = listOf(CE_C_USER_ID)),
             cao,
             ProjectDetailResponse::class.java,
         )

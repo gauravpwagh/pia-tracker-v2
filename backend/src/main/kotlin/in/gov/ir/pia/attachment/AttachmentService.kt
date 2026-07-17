@@ -3,6 +3,7 @@ package `in`.gov.ir.pia.attachment
 import `in`.gov.ir.pia.config.MinioProperties
 import `in`.gov.ir.pia.domain.attachment.Attachment
 import `in`.gov.ir.pia.repository.AttachmentRepository
+import `in`.gov.ir.pia.repository.TalukaDetailRepository
 import `in`.gov.ir.pia.security.Principal
 import io.minio.GetObjectArgs
 import io.minio.GetPresignedObjectUrlArgs
@@ -115,6 +116,7 @@ data class CompletedPart(
 @Transactional
 class AttachmentService(
     private val attachmentRepo: AttachmentRepository,
+    private val talukaDetailRepository: TalukaDetailRepository,
     private val minioClient: PiaMinioClient,
     private val minioProps: MinioProperties,
     @Value("\${pia.clamav.host:clamav}") private val clamavHost: String,
@@ -398,10 +400,39 @@ class AttachmentService(
         if (!canDeleteAny && attachment.uploadedByUserId != actor.userId) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Cannot delete another user's attachment")
         }
+        if (attachment.entityType.startsWith("ACTIVITY_TALUKA__")) {
+            val taluka = talukaDetailRepository.findByIdAndIsDeletedFalse(attachment.entityId)
+            if (taluka?.isFinalized == true) {
+                throw ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This taluka was created and is locked — its gazette PDFs can no longer be deleted.",
+                )
+            }
+        }
         attachment.isDeleted = true
         attachment.deletedAt = Instant.now()
         attachment.deletedByUserId = actor.userId
         attachmentRepo.save(attachment)
+    }
+
+    /**
+     * Soft-deletes every attachment on [entityType]/[entityId] — used when the parent
+     * object itself is deleted (e.g. a Sub Division/Taluka's gazette PDFs when the
+     * taluka is deleted) so no orphaned attachment rows are left behind.
+     */
+    @Transactional
+    fun deleteAllForEntity(
+        entityType: String,
+        entityId: UUID,
+        actorUserId: UUID,
+    ) {
+        val now = Instant.now()
+        attachmentRepo.findByEntityTypeAndEntityIdOrderByCreatedAtDesc(entityType, entityId).forEach { attachment ->
+            attachment.isDeleted = true
+            attachment.deletedAt = now
+            attachment.deletedByUserId = actorUserId
+            attachmentRepo.save(attachment)
+        }
     }
 
     // ── Async: ClamAV scan (streamed, 8 MB chunks) ────────────────────────────

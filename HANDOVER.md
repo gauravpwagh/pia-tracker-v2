@@ -1,491 +1,326 @@
-# Session Handover — 20-item backlog + WAF stop-gap (PATCH/DELETE/uploads) + 2 UI fixes shipped; needs browser verification
+# Session Handover — UI polish batch + VM crash-loop triage (Flyway/MinIO) + duplicate-activity fix, all deployed to LOCAL only
 
 Working dir: `D:\Sagar\Project\Claude\pia-tracker-beta`. Local stack at **https://pia.local**
-(Docker Compose, `infra/docker-compose.yml`). Production/beta on a **RHEL VM** (`192.168.0.240`)
-under rootful Podman (`/opt/pia`, deploy pipeline `infra/deploy/`, see `infra/deploy/RUNBOOK.md`).
+(Docker Compose, `infra/docker-compose.yml`). Production/beta on a **RHEL VM** (`192.168.0.240`,
+public hostname `pia.mnopq` via a middleman reverse proxy in front of it) under rootful Podman
+(`/opt/pia`, deploy pipeline `infra/deploy/`, see `infra/deploy/RUNBOOK.md`).
+
+⚠️ **Everything in this session was built, compiled, and verified on the LOCAL stack only.**
+**NONE of it has been deployed to the VM yet.** The VM is mid-troubleshooting from a real
+production incident (backend crash-looping) — see §3 below for exact VM state and next steps.
+This is the most important thing to know before doing anything else this session.
 
 ⚠️ **Sibling copies exist** under `D:\Sagar\Project\Claude` (`PreInvestment/`, `pia-tracker-beta-main/`,
 `railway-preinvestment/`). Only ever edit **`pia-tracker-beta`**.
 
-⚠️ **`.claude/launch.json` gotcha (bit us 2026-07-11):** the session's actual root is
-`D:\Sagar\Project\Claude` (one level above this repo), and its own `.claude/launch.json` has a
-`"frontend"` entry pointing at `railway-preinvestment/frontend` — a **different project**. If you
-use the `preview_start` tool with the bare name `"frontend"`, you'll silently get the wrong app
-(different package name, different login flow — very easy to not notice). Use the config named
-**`pia-tracker-beta-frontend`** instead (added to the root `launch.json`, port 5173, points at
-`./pia-tracker-beta/frontend`). Sanity-check by confirming the page title is "PIA Tracker" / the
-login form has a username+password (HRMS-ID) combobox, not a demo-account button list.
+⚠️ **`.claude/launch.json` gotcha:** the session's actual root is `D:\Sagar\Project\Claude` (one
+level above this repo). Use the preview config named **`pia-tracker-beta-frontend`**, not the bare
+`"frontend"`. The dev server **cannot reach the backend** (port 8080 isn't published to host) —
+only useful for a `tsc`/build-error sanity check.
 
-⚠️ **Browser verification tooling was broken all session (2026-07-11) — check if it's recovered
-before repeating failed attempts.** Two separate problems, both should be re-tried fresh in a new
-session rather than assumed still broken:
-1. **Chrome extension (`claude-in-chrome` tools) was disconnected** the entire session —
-   `tabs_context_mcp` always returned "not connected". Try it early; if it works now, it's the
-   more reliable path (real interactive browser, not the dev-server sandbox below).
-2. **`preview_eval`'s `window.location.href = 'https://pia.local'` silently doesn't navigate** —
-   the tab stays on the managed dev-server origin (`localhost:5173`) no matter what; confirmed
-   repeatedly via `preview_network` showing requests still going to `localhost:5173` even though
-   `preview_snapshot` shows the correct page (because the dev server serves the same source, so it
-   *looks* right, but `/api/*` calls 500 since the dev server can't reach the backend — port 8080
-   isn't published to the host). **Don't trust a snapshot alone as proof of which origin you're
-   on — check `preview_network` for the actual request URLs.** If this is still broken next
-   session, the fallback that *does* work is curl-based API verification (see "How to verify"
-   sections below) — proves the backend/logic works even without a real browser click-through.
+⚠️ **Chrome extension (`claude-in-chrome`) was disconnected the entire session** — every
+`tabs_context_mcp` call returned "not connected". Try it early in the new session; if it's back,
+use it to click through the UI changes below instead of asking the user to test everything.
 
 ## How to resume (paste as the first message of the new session)
 
 > Read HANDOVER.md at the root of D:\Sagar\Project\Claude\pia-tracker-beta and continue from
-> where I left off. Keep answers short and precise.
-
-The single most useful first step in the new session: try `claude-in-chrome`'s `tabs_context_mcp`
-once. If it connects, do the two pending browser click-throughs (records/LA-scope/uploads WAF
-stop-gap, and the two UI fixes below) before anything else — that's the one thing this session
-couldn't finish. If it's still disconnected, skip straight to whatever the user asks next; don't
-re-attempt the `preview_eval` navigation trick, it's confirmed not to work.
-
-The granular, per-item build log lives in memory: **`project_pia_frontend_changes.md`**
-(auto-recalled — don't re-derive, but verify file:line before editing since it's a long
-chronological append-log, not curated). This file is the top-level "what's the actual state"
-pointer.
+> where I left off.
 
 ---
 
-## Current state (2026-07-11): 20-item backlog + WAF stop-gap + 2 UI fixes are all code-complete
-## and rebuilt into the running `https://pia.local` stack. NONE of it has been clicked through in
-## a real browser this session — see the tooling-broken warning above. Everything below was
-## verified either via curl (WAF stop-gap) or by inspection + typecheck only (the 2 UI fixes).
+## 1. Frontend UI polish batch — code-complete, deployed to LOCAL, verified via tsc/eslint only (no browser click-through — Chrome extension was down all session)
 
-The local Docker stack (`frontend`, `backend`, `nginx`) has been rebuilt and is running at
-`https://pia.local` with all Batch 1–5 changes, the WAF stop-gap (flags currently OFF — default
-build), and the 2 UI fixes below, all live. Flyway migrations `V085`–`V092` applied cleanly
-(containers came up healthy). The user should click through the full checklist below in a real
-browser before considering any of this session's work fully confirmed.
+All changes rebuilt into the `pia-tracker-frontend` Docker image and deployed to local
+`https://pia.local` via `docker compose -f infra/docker-compose.yml build frontend && ... up -d
+frontend nginx`. **User has not visually confirmed any of this in a real browser yet.**
 
-### Two small UI fixes (2026-07-11, end of session — NOT browser-verified)
+- **[ProjectsPage.tsx](frontend/src/pages/projects/ProjectsPage.tsx)** — narrowed `Project ID`
+  column to 150px, `Action` column to 92px (was 190/120). Zone filter dropdown now only lists
+  zones actually present among the current `projectsQuery.data` (mirrors the existing `typeOptions`
+  pattern), instead of every zone in the system regardless of whether any project uses it.
+- **[ProjectWorkspace.tsx](frontend/src/pages/projects/ProjectWorkspace.tsx)** (Overview tab) — big
+  restructure:
+  - Removed the old 4-KPI stat-card row (Activities / Total Records / Authenticated / Overall
+    Progress) entirely, along with the now-unused `StatCard` component and `allRecords`/
+    `totalAuthenticated`/`overallProgress` locals.
+  - **Activity Progress** cards moved from the bottom of the page to the **top** (where the KPI
+    row used to be). Each card is now a flex row item (all activities fit on one line, no
+    wrapping) showing **Draft → In verification → Authenticated → Total** stacked **vertically**
+    in that order (previously a 2×2 grid with Total/Authenticated on top). The per-card
+    "Authenticated %" progress bar at the bottom of each card was **removed**.
+  - **Project details** and **Designated officers** are now one row side by side
+    (`gridTemplateColumns: '1.8fr 1fr'`), Designated Officers being the narrower column — this
+    reverts an earlier-in-session accidental full-width stretch, but note this is **narrower**
+    than the very first version some sessions ago (was a plain `1fr 1fr` split with Activity
+    Progress in the other cell; now it's Project Details in the wide cell since Activity Progress
+    moved to the top).
+  - **Scope** button: always styled light orange (`#ffe7ba` bg / `#ffd591` border), regardless of
+    saved state or active/inactive mode (earlier in session this was conditional on `!scopeSaved`
+    — user asked for "always" on a later message, so it's unconditional now).
+  - **Sub division/taluka** button: always light green (`#d9f7be` bg / `#b7eb8f` border),
+    regardless of active state.
+  - **Edit Details** button (in Project Details panel): light green bg/border, same palette as
+    above.
+- **[Sidebar.tsx](frontend/src/components/shell/Sidebar.tsx)** — inbox unread-count badge is now a
+  white circle with black text (`backgroundColor: '#fff', color: '#000'`, inset border) instead of
+  Ant's default red.
+- **[PiaObjectFieldTemplate.tsx](frontend/src/forms/PiaObjectFieldTemplate.tsx)** — Acquisition
+  Details (Land Acquisition record form) field order fixed. Two things changed:
+  1. Added a `['chainage_from', 'chainage_to']` row group and a `['district',
+     'sub_division_taluka']` row group to `FIELD_ROW_GROUPS`, positioned (in array order, which is
+     render order) **before** the existing `['area_hectares_private', ..., '_total']` group. Final
+     visual order is now: record name row → **Chainage** → **District/Taluka** → **Area
+     (Private/Govt/Forest/Total)** → remaining ungrouped fields (est_villages) — this was the
+     user's explicit ask across two follow-up messages (first "area should be below district", then
+     "chainage should be above district too").
+  2. **Changed the group-activation logic from a plain filter to sequential dedup** (`usedFieldNames`
+     Set, first-matching-group-wins) — necessary because the new 2-field `chainage_from/chainage_to`
+     group is a subset of the pre-existing 3-field Utility Shifting group
+     (`chainage_from/chainage_to/length_affected_km`), and without dedup both groups would match
+     Utility Shifting's schema and double-render those two fields. This is a **generally safer**
+     mechanism than before and shouldn't be reverted even if the specific chainage group is ever
+     removed.
+- **[RecordEditPage.tsx](frontend/src/pages/records/RecordEditPage.tsx)** (~line 746) — **bug fix**:
+  new Land Acquisition records no longer seed `area_hectares_private/govt/forest/total` from the
+  activity's Scope `metadataJson` into the record's own `acquisition_details`. Previously, a brand
+  new record's Total Area (ha) field was silently inheriting the *activity-level* Scope's "Total
+  Land Acquisition (ha)" number instead of starting blank — Total Area should only ever be the sum
+  of *that record's own* Private/Govt/Forest (already correctly auto-computed by
+  `handleFormChange`, untouched this session). **Caveat flagged to user, not yet acted on**:
+  existing records created before this fix may already have the wrong seeded Total Area baked in
+  — they won't self-correct until someone edits Private/Govt/Forest on that specific record
+  (triggering recompute-and-overwrite). A one-off data fix for already-affected records was
+  offered but not requested.
 
-1. **Records/details not reflecting edits without a page reload.** Root cause: autosave in
-   [`RecordEditPage.tsx`](frontend/src/pages/records/RecordEditPage.tsx) called `patchRecord`
-   directly and never invalidated any TanStack Query cache — only the explicit workflow-action
-   buttons in the same file did that. So while autosave was silently keeping the record itself up
-   to date, any other open view (the records list, `RecordDetailPanel`) stayed stale until
-   something else happened to trigger a refetch (e.g. navigating away and back). Fix: the
-   autosave `saveFn` now also calls `queryClient.invalidateQueries` on `['record', recordId]` and
-   `['records', activityId]` after every successful save — the exact same two query keys the
-   workflow mutations already invalidate (confirmed by grep against `ProjectWorkspace.tsx`'s
-   `['records', activityId]` and `RecordDetailPanel.tsx`'s `['record', recordId]` usage, so the
-   keys are guaranteed to match). This should fix both "detail doesn't update" and "rename doesn't
-   show up" without a reload, since both are downstream of the same two query keys. **Not clicked
-   through in a browser** — logic is sound and mirrors an already-working pattern in the same
-   file, but wasn't visually confirmed.
-2. **Action column overlapping/covering the Status column in the Project List.** Root cause: a
-   known Ant Design gotcha — the `Status` column in
-   [`ProjectsPage.tsx`](frontend/src/pages/projects/ProjectsPage.tsx) had no explicit `width`,
-   and when a `fixed: 'right'` column (Action) is present, AntD's fixed-column background layer
-   can render over an unwidthed adjacent column, clipping longer status labels like "Awaiting
-   Assignment". Fix: added `width: 150` to the Status column (search "width: 150" near
-   `key: 'lifecycleState'`). A before/after mockup was shown to and approved by the user before
-   applying. **Not clicked through in a browser** — same tooling problem, see warning above.
+## 2. Backend — duplicate-activity fix + new admin "merge activities" feature (code-complete, compiled, deployed to LOCAL, verified healthy; NOT on VM)
 
-### What shipped (backlog — all done, unless flagged otherwise)
+### 2a. The bug
+No guard existed anywhere against creating more than one `project_activities` row of the same
+`activityTypeCode` on a project. Confirmed via a live VM query: a real project had **2 Land
+Acquisition activities** (one with 16 records built up over 5 days, one with 1 abandoned record
+from a different Dy CE/C ~6 minutes after the first) and **4 Utility Shifting activities** (one
+actively used across 2 days with 2 records, three others each with exactly 1 record, all created
+by the *same* user within a 33-second burst — a client-side stale-cache race, not a
+cross-account issue). This surfaced to the user as multiple confusing "Activity Progress" cards
+of the same type on the Overview page (§1 above didn't cause this — that's just where it's
+visible; the root cause is purely backend data integrity).
 
-- **Batch 1 (bugs):** ETag "No ETag cached" fixed (derive from response body, not the
-  nginx-strippable header); project list showing previous user fixed (clear query cache on
-  login); record fields now lock once submitted; authenticate→Draft fixed (workflow aggregate,
-  backend); CE/Dy record-visibility bug fixed (backend — `ActivityService.listForProject` no
-  longer gates on a designation string).
-- **Batch 2 (nav/UI):** TopBar brand no longer clickable; sidebar narrowed; workspace persists
-  view+tab in the URL so refresh doesn't reset to Records→Land Acquisition.
-- **Batch 3 (filters):** record filter is All/Draft/Verified/Authenticated; Utility Type /
-  Drawing Type filter added + those fields locked in the edit form.
-- **Batch 4 (Activity Scope):** scope fields = Total count of `<Activity>` + Target + Notes;
-  KPI shows `records / total`; Land Acquisition scope Checklist (KMZ/Drone/SRP/CALA) as
-  activity-level attachments; Add-Record gated on scope completeness (+ mandatory docs for LA);
-  per-record LA checklist removed (moved to scope); Map's KMZ query repointed record→activity
-  (backend); Scope panel auto-opens whenever Add Record is disabled.
-- **Follow-up fixes (raised via screenshots):** KMZ upload "file type unknown" (accept list
-  needed `.kmz/.kml/.gpx` extensions); drone-video multipart 500 (raised multipart threshold
-  100MB→4GB so it uses the reliable single-part path); **Land Acquisition scope wasn't saving**
-  — root cause: `land_acquisition_details` table was missing `total_count`, fixed by migration
-  `V089`; **Forest Clearance scope also wasn't saving** — same bug, fixed by migration `V091`
-  (also had to add `total_count` to the Kotlin read/write dispatch, unlike LA which only needed
-  the column); **LA form still showed a "CHECKLIST" workflow step** — a *separate* thing from
-  the record-detail-panel checklist, baked into the form schema itself via an old migration
-  (`V078`) — removed via new migration `V090`; **PIA nav** — moved the landing page's blue
-  "Pre Investment Activity" sidebar button into a 6th nav tab ("PIA"), matching the real
-  IRPSM's 6-tab bar from the reference image.
-- **Batch 5 (project details / assignment) — all 3 done:**
-  - **#8** — CE/Dy/Nodal-Dy can now edit a project's **Length (km)** and **Station names** via
-    a new "Edit Details" button on Overview → Project details. New `PATCH /api/v1/projects/{id}`
-    endpoint, new migrations (`V092`, `V092_001` — the latter grants the pre-existing
-    `PROJECT.UPDATE.OWN` permission to CE_C/DY_CE_C/NODAL_DY_CE_C roles, which only EDGS_CI/
-    SuperAdmin had before).
-  - **#19** — Project list: "Awaiting Allocation" renamed to "Awaiting Assignment"; new
-    fixed-right **Action** column shows "Assign CE/C" (CAO) or "Assign Dy CE/C" (CE) buttons,
-    which disappear automatically once the project's lifecycle state advances past that stage.
-  - **#20** — Both the row Action button and the in-workspace "Assign officers" button now
-    jump straight to Overview with the correct assign-officer modal already open (reuses the
-    existing `AllocateModal`/`AssignDyceModal` — no new modal built).
-  - **Bonus:** fixed an "undefined km" display bug (strict `!== null` check that missed
-    `undefined` values in two spots).
-- **Login page copy (2026-07-11):** footer "Development environment" → "Production environment";
-  first-time sign-in hint "your password is your HRMS ID. Change it later from My Profile." →
-  "your password is your HRMS ID or IRPSM login ID." Both in
-  [`pages/login/LoginPage.tsx`](frontend/src/pages/login/LoginPage.tsx).
+Confirmed **not** a display bug: `ActivityService.listForProject()` (feeding the activities list)
+already filters `WHERE NOT is_deleted` at the repository level — the duplicates are genuinely
+live, non-deleted rows, not stale/deleted leakage.
 
-### WAF stop-gap for VM PATCH/DELETE/PUT block, incl. uploads (shipped + verified 2026-07-11)
+Confirmed **not** a Dashboard-accuracy problem: `SummaryUpdater` (`project_activity_summary`) is
+keyed by `(project_id, activity_type_code)`, not by individual activity ID — every record-created/
+state-change event increments the *same* shared summary row regardless of which duplicate
+activity a record lives under. So top-level Dashboard KPIs stay numerically correct even with
+duplicates; the mess is purely in the Workspace's per-activity-instance card rendering, Scope/
+checklist fragmentation (each duplicate needs its own KMZ/SRP/CALA uploaded separately), and
+record visibility (a Dy CE/C scoped to "their" activity may not see records sitting in a sibling
+duplicate).
 
-**Root cause (confirmed, not a code issue):** an external WAF (F5 BIG-IP ASM-style block page —
-"The requested URL was rejected... Your support ID is: ...") sits in front of `192.168.0.240` and
-blocks **OPTIONS, PUT, PATCH, DELETE** while returning **HTTP 200** with a rejection HTML body
-(masks as success unless you check the response body, not just the status code). GET and POST
-pass through fine. Confirmed via [`scripts/check-http-methods.sh`](scripts/check-http-methods.sh)
-(new diagnostic script, reusable against any URL) run against a real `/api/v1/records/{id}`
-endpoint — Support IDs `10159820955317386682` (OPTIONS), `10159820955380541557` (PUT),
-`10159820955317390138` (PATCH), `10159820955308358744` (DELETE). Confirmed **not** our nginx/app
-(both local and prod nginx configs allow all methods). This also explains the "Delete failed:
-Unexpected token '<'..." and "Network error during file upload" errors the user hit on the VM —
-same WAF, same root cause: PUT (used by direct-to-MinIO uploads) is blocked exactly like DELETE
-was. **User still needs to escalate this to whoever owns the WAF/network device**, with the URL,
-blocked methods, and the Support IDs above — that's the real fix. Nothing left to investigate in
-the repo for the root cause.
+### 2b. Important correction mid-session — read this before touching the guard again
+My first attempt blocked **any** second activity of the same type outright. This was **wrong** —
+there's a documented, intentional design (class doc on `ActivityService`, ~line 217-221; also a
+`ActivityController.kt:91` comment) that "Phase 1 LA" / "Phase 2 LA" as **distinctly-named**
+activities of the same type on one project is a deliberate supported pattern. Both comments cite
+"decision YYY" — **that citation is wrong/stale**: the real decision YYY in `docs/architecture.md`
+§16 is about something unrelated (Drawings' mixed-record-type architecture). Nobody has fixed this
+mislabeling; flagging it here as a minor doc cleanup someone should do, not urgent.
 
-**Stop-gap #1 — PATCH/PUT/DELETE on our own API** (works around it until the escalation lands):
-POST-based HTTP method override.
+**Corrected, final version of the guard** (what's actually in the code now): blocks creating a new
+activity only when one of the **same type AND same name** (case-insensitive) already exists on the
+project — not any second activity of that type. This preserves the legitimate multi-phase pattern
+while still stopping the real bug, which only ever produces identically-named duplicates (the
+auto-create-on-first-record path always names the new activity after the generic type label, e.g.
+literally "Land Acquisition" — a deliberate second phase would be user-named something distinct).
+This also directly matches what the user said earlier in the session, unprompted: "Duplicate
+record names should not be allowed."
 
-- Backend: `spring.mvc.hiddenmethod.filter.enabled=true` in
-  [`application.yml`](backend/src/main/resources/application.yml) enables Spring's built-in
-  `HiddenHttpMethodFilter` — a `POST .../resource?_method=PATCH` (or `DELETE`) request is
-  internally routed as the real verb before it reaches the controller. No controller/service
-  changes. No-op unless a client actually sends `_method`, so safe to leave on permanently.
-- Frontend: [`lib/wafSafeFetch.ts`](frontend/src/lib/wafSafeFetch.ts) wraps `fetch` — when
-  `VITE_WAF_METHOD_OVERRIDE=true` at build time, it rewrites PATCH/PUT/DELETE calls to
-  `POST ...?_method=<verb>`; otherwise it's a plain passthrough (identical to calling `fetch`
-  directly). **As of 2026-07-11, every PATCH/PUT/DELETE call site in `frontend/src/api/*.ts` is
-  wired through it** — confirmed by grepping for `method: 'PATCH'|'PUT'|'DELETE'` and checking
-  each one uses `wafSafeFetch(` not `fetch(` directly. Specifically:
-  - `api/activityRecords.ts`: `patchRecord`, `deleteRecord`, `updateDrawingApproval`,
-    `removeDrawingApprover`
-  - `api/attachments.ts`: `deleteAttachment`
-  - `api/comments.ts`: `deleteComment`
-  - `api/projects.ts`: `updateProjectDetails` (PATCH, the "Edit Details" feature),
-    `updateActivity` (PUT — **this is the Activity Scope save**; the user hit "Unexpected token
-    '<'..." on Land Acquisition scope save specifically because of this one, fixed 2026-07-11)
+### 2c. What's actually in the code now
+- **[ProjectActivityRepository.kt](backend/src/main/kotlin/in/gov/ir/pia/repository/ProjectActivityRepository.kt)**
+  — new `existsByProjectIdAndActivityTypeCodeAndNameIgnoreCaseAndIsDeletedFalse(...)`.
+- **[ActivityService.kt:349-365](backend/src/main/kotlin/in/gov/ir/pia/service/activity/ActivityService.kt:349)**
+  (`create()`) — calls the above; throws 409 with a clear message if it matches.
+- **[ActivityRecordRepository.kt](backend/src/main/kotlin/in/gov/ir/pia/repository/ActivityRecordRepository.kt)**
+  — new `@Modifying` bulk-reassign query `reassignActivity(sourceActivityId, targetActivityId)`
+  (moves every non-deleted record's `project_activity_id` in one UPDATE).
+- **[ActivityService.kt](backend/src/main/kotlin/in/gov/ir/pia/service/activity/ActivityService.kt)**
+  (~line 441, right after `create()`) — new `mergeActivities(sourceActivityId, targetActivityId,
+  principal)`: super-admin-only (explicit `principal.isSuperAdmin` check, same pattern as
+  `ProjectService.removeProject`), validates source ≠ target, same project, same activity type,
+  both non-deleted; reassigns records via the repository method above; soft-deletes the source
+  via a **raw `jdbc.update()`** (NOT direct field mutation — `ProjectActivity`'s fields are all
+  `val`, per `domain/CLAUDE.md`'s "no data class, identity by id" convention; entities here get
+  updated via JDBC in the service layer, mirroring the existing `deleteRecord`/`deleteTaluka`
+  pattern in the same file); writes an `ACTIVITY.MERGE` audit_log row via `AuditLogWriter`
+  recording `mergedIntoActivityId` + `movedRecordCount`. Deliberately does **not** touch
+  `project_activity_summary` — per §2a, that table's key doesn't care which activity a record is
+  under, so nothing needs reconciling there.
+- **[ActivityController.kt](backend/src/main/kotlin/in/gov/ir/pia/api/ActivityController.kt)**
+  (right after `createActivity`) — new endpoint `POST
+  /api/v1/activities/{sourceActivityId}/merge-into/{targetActivityId}`, gated at the controller
+  layer by the existing `ACTIVITY.CREATE.ASSIGNED` permission (coarse gate; the real
+  super-admin-only check is inside the service, matching how `ProjectController.remove` is gated
+  by `PROJECT.CREATE` as a coarse filter with the real check inside `removeProject`).
 
-  If you ever add a new PATCH/PUT/DELETE call to any `api/*.ts` file, use `wafSafeFetch` instead
-  of `fetch` by default — it's a zero-cost passthrough when the flag is off, so there's no reason
-  not to.
+All of the above: compiled clean (`./gradlew compileKotlin`), image rebuilt, deployed to local
+stack, confirmed `RestartCount=0` / `Health=healthy`. **This has not been packaged or deployed to
+the VM.**
 
-**Stop-gap #2 — file uploads (PUT to MinIO's presigned URL)** (shipped 2026-07-11, single-part
-verified end-to-end; multipart written but blocked from full E2E testing by an unrelated
-pre-existing bug — see below): uploads normally PUT straight from the browser to MinIO, bypassing
-Spring entirely — the method-override trick from stop-gap #1 can't help here (MinIO doesn't know
-about `_method`, and a presigned URL's signature is bound to its method, so swapping PUT→POST
-would just invalidate the signature). Instead:
+### 2d. Real duplicate-activity IDs on the VM, ready to merge once this ships there
+From a live query the user ran against the VM's Postgres (project `pia.01.00.15.26.1.00.001`, all
+records confirmed DRAFT-only, no submitted/verified/authenticated data, so merging is low-risk):
 
-- Backend: two new endpoints on `AttachmentController`/`AttachmentService` —
-  `POST /api/v1/attachments/{id}/upload-proxy` (single-part) and
-  `POST /api/v1/attachments/{id}/upload-proxy-part?partNumber=N` (multipart, one call per chunk).
-  Both stream the raw POST body straight through to MinIO's *own* presigned PUT URL — generated
-  server-side, identical to what the browser would've gotten — via `HttpURLConnection` with
-  `setFixedLengthStreamingMode`, so nothing is buffered in heap even for a multi-GB file. The
-  backend→MinIO leg never crosses the WAF (internal Podman network), which is the whole point.
-  Everything downstream (`confirm`, `completeMultipart`, the async ClamAV scan) is **completely
-  unchanged** — the object lands in the same bucket/key either way. See the doc comment on
-  `AttachmentService` (search "TEMPORARY WAF workaround") for the full design.
-- Frontend: [`utils/uploadEngine.ts`](frontend/src/utils/uploadEngine.ts) gets a new `xhrPost`
-  helper (mirrors the existing `xhrPut`, but sends the session cookie and reads the ETag from a
-  JSON body instead of a response header). Behind `VITE_WAF_PROXY_UPLOAD=true` at build time,
-  both `uploadSinglePart` and the per-part loop in `uploadMultipart` call the new proxy endpoints
-  instead of PUTing to the presigned URL directly; `initiateUpload`/`initiateMultipartUpload` are
-  unchanged (still POST, already passed the WAF fine — the presigned URL they return just goes
-  unused when the flag is on).
-- **Verified 2026-07-11 (single-part):** created a real DRAFT record, initiated an upload, POSTed
-  a test file to `/upload-proxy` (got `204`), called `/confirm` (scan ran, `scanStatus: "CLEAN"`),
-  downloaded it back via the normal presigned-GET flow, and diff'd the bytes against the
-  original — **identical**. Proves the relay doesn't corrupt data and the scan pipeline is
-  unaffected.
-- **NOT verified (multipart):** attempting `initiateMultipart` (a pre-existing endpoint I didn't
-  touch) failed with `500: "Failed to initiate multipart upload: object is not an instance of
-  declaring class"` — a reflection failure inside
-  [`PiaMinioClient.java`](backend/src/main/java/io/minio/PiaMinioClient.java), the same file
-  already flagged as "fragile" in this doc. This blocks multipart end-to-end before my new
-  `upload-proxy-part` endpoint is ever reached. **User decision 2026-07-11: leave this bug alone
-  for now** — it only affects files over the frontend's 4 GB multipart threshold (rare; that
-  threshold was deliberately raised from 100 MB earlier this session specifically to avoid this
-  fragile path for normal files). The `upload-proxy-part` code is written and compiles, and by
-  inspection mirrors the verified single-part path — it should work once `initiateMultipart` is
-  separately fixed, but has not been exercised live. If a real >4GB upload is ever needed, fix
-  `initiateMultipart` first, then test `upload-proxy-part` the same way single-part was tested
-  above (see "How to verify" below for the exact curl sequence, adapted for multipart).
-
-**Both flags — off by default, on together for VM builds:**
-
-- `frontend/Dockerfile` has `ARG VITE_WAF_METHOD_OVERRIDE=false` and
-  `ARG VITE_WAF_PROXY_UPLOAD=false` — plain `docker compose build frontend` (local dev) is
-  completely unaffected by either.
-- **For a VM release build, use `infra/deploy/pc/build_waf_od.ps1` instead of `build.ps1`**
-  (`_od` = override on) — same args, same output, it just also passes `-WafOverride` through to
-  `build.ps1`, which adds `--build-arg VITE_WAF_METHOD_OVERRIDE=true` **and**
-  `--build-arg VITE_WAF_PROXY_UPLOAD=true` to the frontend `docker build`. `build_waf_od.ps1` is a
-  thin wrapper (`& build.ps1 @args -WafOverride`) — no build logic duplicated between the two
-  files.
-  ```powershell
-  cd infra\deploy\pc
-  .\build_waf_od.ps1          # both WAF overrides ON — use this until the network team fixes it
-  .\build.ps1                 # normal build, both overrides OFF — use this after the WAF is fixed
-  ```
-- **To revert once the network team fixes the WAF:** just go back to calling `.\build.ps1`
-  instead of `.\build_waf_od.ps1` in your release steps. Nothing to edit. If you want to fully
-  clean up afterward: delete `build_waf_od.ps1` and the `-WafOverride` param block in `build.ps1`
-  (search for "WafOverride"); the backend filter, the two proxy endpoints, and the frontend
-  wrapper files can all stay in the repo harmlessly either way (they no-op when unused).
-
----
-
-## How to verify the WAF stop-gap is actually working (copy-paste commands)
-
-Both stop-gaps were verified at the API level with curl (below) — proves the backend
-filter/endpoints + the request shape the frontend generates both work. Neither was clicked
-through in an actual browser this session (Chrome extension + preview tooling were both
-unavailable) — worth doing once as a sanity check, see the browser steps further down.
-
-### 1. Rebuild + start the local stack with both flags ON (to test them)
-
-```powershell
-cd D:\Sagar\Project\Claude\pia-tracker-beta
-docker compose -f infra/docker-compose.yml build backend
-docker compose -f infra/docker-compose.yml build --build-arg VITE_WAF_METHOD_OVERRIDE=true --build-arg VITE_WAF_PROXY_UPLOAD=true frontend
-docker compose -f infra/docker-compose.yml up -d --force-recreate backend frontend nginx
 ```
+POST /api/v1/activities/e6a79b4e-c51a-4f47-910a-20af5f713314/merge-into/164d1050-1cce-4733-8007-4f714985823f   # LA duplicate → LA keeper (16 records)
+POST /api/v1/activities/b000f679-ba35-416a-a975-7d3035654f3e/merge-into/bce3474e-56eb-4aac-840d-b3da06cb6507   # US duplicate → US keeper (2 records)
+POST /api/v1/activities/85c008ef-7eee-4478-a51b-788fc33345a2/merge-into/bce3474e-56eb-4aac-840d-b3da06cb6507   # US duplicate → US keeper
+POST /api/v1/activities/f1d2acdd-d07c-4a58-bae6-d461a5cacd44/merge-into/bce3474e-56eb-4aac-840d-b3da06cb6507   # US duplicate → US keeper
+```
+Call these once the merge feature is deployed to the VM, as a super admin, through the existing
+authenticated session (browser devtools `fetch()`, or Postman with the session cookie) — **not**
+raw SQL, per the user's explicit instruction this session.
 
-### 2. API-level check via curl (bash/git-bash)
+**Last thing asked, not yet answered:** offered to add a small "Merge duplicate activities" button
+in the Admin UI instead of calling the API directly. User has not responded to this yet — ask
+again or just proceed with direct API calls if they'd rather not wait for UI.
 
+## 3. VM crash-loop triage — root causes found and fixed in code; VM itself left mid-recovery
+
+This was a real production incident on the VM (`192.168.0.240` / `pia.mnopq`), worked through this
+session via the user pasting logs/query output (no direct VM access this session or ever — always
+ask the user to run commands and paste output back).
+
+### 3a. Root cause #1 — Flyway migration failure (backend crash-loop), FIXED IN CODE
+`V093_001__backfill_taluka_details_from_records.sql` failed on the VM with `value too long for
+type character varying(128)` — `activity_taluka_details.taluka_name` was declared `VARCHAR(128)`
+in `V093__activity_taluka_details.sql`, but real VM data (migrated from what used to be an
+unrestricted free-text `sub_division_taluka` field) exceeded that. **Fix**: widened the column to
+`TEXT` directly in `V093__activity_taluka_details.sql` (this migration was still uncommitted this
+session, so editing in place is safe — no immutability violation).
+
+**Local reconciliation already done**: dropped `activity_taluka_details` table locally, deleted the
+`093`/`093.001`/`094` rows from local `flyway_schema_history`, rebuilt backend image, confirmed
+Flyway replayed all three cleanly and backend came up healthy. This was necessary because local
+already had these migrations recorded with the old checksum before the TEXT edit.
+
+**VM reconciliation — user was walked through this, status unclear at handover time.** The exact
+commands given (using the VM's actual postgres container name `pia-postgres`, confirmed via
+`podman ps -a --filter name=postgres`):
 ```bash
-cd /d/Sagar/Project/Claude/pia-tracker-beta
-COOKIE_JAR=/tmp/pia_cookies.txt
-rm -f "$COOKIE_JAR"
-
-# Log in (SADMIN001 / sadmin123 — the only two seeded accounts, see
-# backend/src/main/resources/db/data/V085_001__seed_system_users.sql)
-curl -sk -c "$COOKIE_JAR" -X POST https://pia.local/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"SADMIN001","password":"sadmin123"}' -w "\nHTTP %{http_code}\n"
-
-# Pick a real project -> activity -> record id from these, or create a fresh DRAFT record:
-curl -sk -b "$COOKIE_JAR" https://pia.local/api/v1/projects
-curl -sk -b "$COOKIE_JAR" https://pia.local/api/v1/projects/<projectId>/activities
-curl -sk -b "$COOKIE_JAR" https://pia.local/api/v1/activities/<activityId>/records
-
-# Or create a throwaway DRAFT record to test against:
-curl -sk -b "$COOKIE_JAR" -X POST https://pia.local/api/v1/activities/<activityId>/records \
-  -H "Content-Type: application/json" -d '{"name":"waf-test"}'
-# -> note the returned "id" and "version" (starts at 0)
-
-# The actual test: PATCH via POST + ?_method=PATCH (this is what wafSafeFetch sends)
-curl -sk -b "$COOKIE_JAR" -X POST "https://pia.local/api/v1/activity-records/<recordId>?_method=PATCH" \
-  -H "Content-Type: application/json" -H 'If-Match: "<version>"' \
-  -d '{"dataJson":{"testField":"hello"}}' -w "\nHTTP %{http_code}\n"
-# Expect: HTTP 200, dataJson updated, version incremented by 1.
-# (On an already-VERIFIED record you'll instead get HTTP 409 "cannot be edited" — that's also
-#  correct, it proves the request reached real business logic, not a routing failure.)
-
-# DELETE via POST + ?_method=DELETE
-curl -sk -b "$COOKIE_JAR" -X POST "https://pia.local/api/v1/activity-records/<recordId>?_method=DELETE" \
-  -w "\nHTTP %{http_code}\n"
-# Expect: HTTP 204, then a GET on the same id returns 404.
+sudo podman exec -it pia-postgres psql -U pia -d pia -c "DROP TABLE IF EXISTS activity_taluka_details CASCADE; DELETE FROM flyway_schema_history WHERE version IN ('093','093.001');"
 ```
+The user confirmed the table was empty (0 rows) before running this, so the drop was safe — no
+real user data was ever in it (V093_001 never successfully committed on the VM, so the table was
+always empty there). **Next session: check with the user whether they actually ran this and
+whether the backend came up healthy afterward** — the conversation moved on to a different VM
+issue (§3c) before this was explicitly confirmed fixed.
 
-If any of these come back `405 Method Not Allowed` or the record is unchanged, the filter isn't
-wired correctly — check `application.yml` got the `hiddenmethod.filter.enabled: true` line and
-that the backend container was actually rebuilt (`docker compose build backend` +
-`up -d --force-recreate backend`).
+### 3b. Root cause #2 — KMZ map load / mixed content, FOUND, USER APPLIED PARTIAL FIX
+User reported "Failed to parse a KMZ file" when opening the Map tab. Root cause: MinIO presigned
+URLs were being generated as `http://<VM_IP>:8453/minio/...` (raw IP, HTTP) while the app itself is
+served at `https://pia.mnopq/...` (a separate middleman reverse-proxy host in front of the VM) —
+mixed-content block / wrong origin entirely, not a corrupt KMZ file. Confirmed the literal culprit:
+`infra/deploy/.env.production.example` ships `PIA_PUBLIC_BASE_URL=http://REPLACE_WITH_HOST_OR_IP:8453`
+and `MINIO_PUBLIC_ENDPOINT=http://REPLACE_WITH_HOST_OR_IP:8453/minio` as placeholders — someone had
+filled these in literally with the VM's raw IP, matching an older RUNBOOK instruction that predates
+the `pia.mnopq` domain being set up. `AttachmentService.kt`'s `publicUrl()` (~line 592) does a
+plain `url.replaceFirst(minioProps.endpoint, minioProps.publicEndpoint)` rewrite — confirmed this
+logic itself is fine; the *value* being fed into it was wrong.
 
-### 2b. API-level check for uploads via curl
+**User already edited `/opt/pia/shared/.env` on the VM** to:
+```
+PIA_PUBLIC_BASE_URL=https://pia.mnopq
+MINIO_PUBLIC_ENDPOINT=https://pia.mnopq/minio
+```
+(Confirmed nginx already has a `/minio/` reverse-proxy location forwarding to the internal MinIO
+container — `infra/nginx/conf.d/pia.conf:71-75` — so this should work as long as the `pia.mnopq`
+middleman forwards that path through rather than only allow-listing specific routes; this was
+flagged as the one remaining unknown, outside this codebase's control.)
 
+**Status at handover: restart was attempted, but got sidetracked into §3c before confirming the
+KMZ fix actually worked end-to-end.** Next session should verify: (1) did the backend/grafana
+restart succeed, (2) does the Map tab load KMZ files now.
+
+### 3c. Fallout — user's own `/opt/pia` cleanup commands broke running containers
+Independent of the above, the user (on their own initiative) ran:
 ```bash
-# (reuse the same $COOKIE_JAR / login from step 2, and a real activityId)
-RECORD_ID=$(curl -sk -b "$COOKIE_JAR" -X POST "https://pia.local/api/v1/activities/<activityId>/records" \
-  -H "Content-Type: application/json" -d '{"name":"upload-test"}' | grep -oE '"id":"[a-f0-9-]+"' | head -1 | cut -d'"' -f4)
-
-echo "hello" > /tmp/test.txt
-SIZE=$(wc -c < /tmp/test.txt)
-ATTACHMENT_ID=$(curl -sk -b "$COOKIE_JAR" -X POST "https://pia.local/api/v1/attachments/initiate" \
-  -H "Content-Type: application/json" \
-  -d "{\"entityType\":\"ACTIVITY_RECORD\",\"entityId\":\"$RECORD_ID\",\"filename\":\"test.txt\",\"contentType\":\"text/plain\",\"sizeBytes\":$SIZE}" \
-  | grep -oE '"attachmentId":"[a-f0-9-]+"' | cut -d'"' -f4)
-
-# The actual test: POST to upload-proxy instead of PUTing to the presigned URL
-curl -sk -b "$COOKIE_JAR" -X POST "https://pia.local/api/v1/attachments/$ATTACHMENT_ID/upload-proxy" \
-  -H "Content-Type: text/plain" --data-binary @/tmp/test.txt -w "\nHTTP %{http_code}\n"
-# Expect: HTTP 204
-
-curl -sk -b "$COOKIE_JAR" -X POST "https://pia.local/api/v1/attachments/$ATTACHMENT_ID/confirm" -w "\nHTTP %{http_code}\n"
-# Expect: HTTP 200, "scanStatus":"CLEAN" (or "SCANNING" if you check too fast — the scan is async)
+sudo rm -rf /opt/pia/releases/release-*
+sudo rm -f  /opt/pia/releases/current
+sudo rm -f  /opt/pia/releases/.history
+sudo rm -rf /opt/pia/images/app/*
+sudo rm -rf /opt/pia/tmp/*
 ```
-
-If `upload-proxy` returns anything other than `204`, or `confirm` never reaches `CLEAN`/`EXEMPT`,
-check `AttachmentService.uploadProxy` reached MinIO — `docker compose logs backend` for a
-`Storage backend rejected upload` or connection error.
-
-### 3. Browser click-through (not yet done — do this once)
-
+This deletes only the **app-layer release artifacts** — it does **not** touch the `postgres_data`/
+`minio_data` volumes (data is safe). But it broke `pia-grafana` (and likely other containers) on
+restart with `Error: getxattr /opt/pia/releases/release-002/grafana/provisioning: no such file or
+directory` — because `docker-compose.production.yml`'s Grafana provisioning bind-mount
+(`./grafana/provisioning:/etc/grafana/provisioning`) is a **relative path**, resolved against the
+now-deleted release folder. **`podman restart` cannot fix this** — a full redeploy is required to
+recreate the release folder and recreate the containers against valid paths:
 ```powershell
-# Start the frontend dev server against the RIGHT project (see launch.json gotcha above)
-# via preview_start with name "pia-tracker-beta-frontend", OR just use the already-running
-# https://pia.local stack from step 1 (simpler — no separate dev server needed).
+cd infra\deploy\pc
+.\build.ps1
+.\package.ps1 -Release 1 -Full
+.\deploy_project.ps1 -Release 1 -VmHost 192.168.0.240 -VmUser <you>
 ```
+Explained to the user this will look like a "fresh Release 1" but preserves all DB/MinIO data since
+those volumes were never touched. **Status at handover: user had not yet run this redeploy.** This
+redeploy, once run, would be the natural point to *also* ship the §2 (duplicate-activity fix) and
+§3a (TEXT column fix) backend changes and the §1 frontend changes, all in one release — they're
+all sitting in the same uncommitted working tree.
 
-Open `https://pia.local` in a real browser, log in as `SADMIN001` / `sadmin123`, open any
-project → a Land Acquisition record still in DRAFT, edit a field and save, then delete a
-throwaway record. Open DevTools → Network tab while doing it: you should see the actual wire
-request go out as `POST .../activity-records/{id}?_method=PATCH` (or `DELETE`), not a real
-PATCH/DELETE — that confirms `wafSafeFetch` is active and doing the rewrite client-side. Then
-upload a small file to that same record and confirm the Network tab shows
-`POST .../attachments/{id}/upload-proxy` rather than a `PUT` to a `pia.local/minio/...` URL.
+**User explicitly clarified**: they never want a full data-volume wipe (`podman volume rm
+pia_postgres_data pia_minio_data`) — that option was mentioned once as a "true clean slate" caveat
+but is off the table for this environment. Only the app-layer release-folder cleanup (the 5 `rm`
+commands above) is something they'd reuse, and that's safe for data as long as it's followed by an
+actual redeploy (not just a container restart) afterward.
 
-### 4. Restore the local stack to its normal (flags-off) state afterward
+## Immediate next steps for the new session (priority order)
 
-```powershell
-docker compose -f infra/docker-compose.yml build frontend
-docker compose -f infra/docker-compose.yml up -d --force-recreate frontend nginx
-```
-
-(Backend doesn't need reverting — the new endpoints and the `HiddenHttpMethodFilter` are always
-present and no-op unless a client actually calls them with the override request shape.)
-
-(Local dev should stay flag-off — the override only matters on the VM, behind the WAF. If you
-skip this step nothing breaks, it just means local dev is silently using the override path too,
-which works identically but isn't representative of local's actual network conditions.)
-
-### 5. Re-check whether the real WAF fix has landed (once network team responds)
-
-```bash
-./scripts/check-http-methods.sh https://192.168.0.240/api/v1/records/<a-real-record-id> 5 -k
-```
-
-If OPTIONS/PUT/PATCH/DELETE all come back `REACHED` (not `WAF_BLOCK`), the WAF is fixed — go
-remove the `--build-arg VITE_WAF_METHOD_OVERRIDE=true` line from `build.ps1` per the revert note
-above, rebuild, and redeploy.
-
----
-
-## Immediate next steps (in priority order)
-
-1. **Try the Chrome extension first** (see warning at the top) — if connected, use it for all the
-   browser click-throughs below instead of the preview dev-server tool.
-2. **User clicks through the 20-item backlog test checklist in a real browser** (rebuild already
-   done, see "Current state" above — just needs manual verification, not a rebuild). **Note:** on
-   the VM, this checklist needs the WAF stop-gap build (`build_waf_od.ps1`) to actually pass —
-   Scope save, record edit/delete, attachment delete, and uploads all depend on it there.
-   - Land Acquisition AND Forest Clearance: Scope saves (total count + target), Add Record
-     enables once mandatory docs are uploaded (LA only), no more "CHECKLIST" step in the LA
-     record editor.
-   - KMZ + drone-footage uploads succeed; Map view still shows KMZ files.
-   - CE sees a Dy's verified record and can Authenticate it; the record then shows
-     Authenticated (not Draft).
-   - Login as user A then B — B's project list is correct without a manual refresh.
-   - Project list: unassigned projects show "Awaiting Assignment" + an Assign action button;
-     clicking it (or "Assign officers" inside a project) opens Overview with the modal already
-     open; the button disappears once assigned.
-   - Overview → "Edit Details" lets CE/Dy set Length + Station names and it persists.
-   - Landing page: "PIA" appears as a 6th nav tab (not a sidebar button) and routes to
-     `/projects`.
-3. **Browser-verify the 2 UI fixes above** (autosave cache invalidation, Status column width) —
-   neither has been visually confirmed yet, only typechecked + inspected by reading the code.
-   - Edit a DRAFT record's field or name while the records list/detail panel for the same
-     activity is visible elsewhere (e.g. inline layout, or a second tab); confirm it updates
-     live after autosave (~30s) or "Save Draft", no manual refresh needed.
-   - Open the Projects page, confirm the Status tag (e.g. "Awaiting Assignment") displays fully
-     next to the Action button, not clipped/covered.
-4. **WAF stop-gap: do the browser click-through in "How to verify" step 3** (PATCH/DELETE and
-   single-part upload are curl-verified only so far; multipart is blocked by the pre-existing bug
-   below).
-5. **User escalates the WAF block to the network team** (see Support IDs above) — the actual fix,
-   independent of the stop-gap.
-6. **Other open issues (not yet resolved):**
-   - **"Gazette PDF" upload — "Network error during file upload"** — confirmed same WAF-blocking
-     root cause as the rest of this section; covered by the upload-proxy stop-gap. Should be fixed
-     once `build_waf_od.ps1` is deployed to the VM — retest there specifically to close this out.
-   - **Multipart >4GB — CONFIRMED BROKEN 2026-07-11** (previously just flagged "fragile", now
-     actually reproduced): `initiateMultipart` throws `500: "object is not an instance of
-     declaring class"` — a reflection bug in `PiaMinioClient.java`. User decision: leave as-is for
-     now (rare — only affects files over the 4 GB single-part threshold). Fix this **before**
-     trusting the new `upload-proxy-part` endpoint with a real multipart upload — see the WAF
-     stop-gap section above for the full context and how to test once fixed.
-   - **CE cannot upload LA scope docs** — only Dy has `ATTACHMENT.UPLOAD.OWN_RECORDS`; CE sees
-     the scope Checklist read-only. Not requested — only change if asked.
-7. User said *"There are more changes (will discuss when these are done)"* — expect a new
-   batch of requests after the above is confirmed.
-8. **VM "from scratch Release 1"** (user's stated plan, not yet executed). From
-   `infra/deploy/pc/`: `.\build_waf_od.ps1` (use this instead of `build.ps1` while the WAF is
-   still blocking PATCH/DELETE — see above) → `.\package.ps1 -Release 1 -Full` →
-   `.\deploy_project.ps1 -Release 1 -VmHost 192.168.0.240 -VmUser <you>`. Clear
-   `infra/deploy/.ship-state` first if restarting the delta lineage. Needs the user's VM SSH
-   user — I cannot run this myself.
-
-## Carry-over still open from PRIOR sessions (verify before acting — may be stale)
-- **trial → prod URLs**: `IRPSM_LOGOFF_URL` (`frontend/src/lib/externalLinks.ts`, still
-  `trial.` host), `PIA_PUBLIC_BASE_URL` (`.env.production.example`).
-- **ABCDE SSO**: their doc targets bare-root `?token=`; PIA expects
-  `…/api/v1/sso/callback?token=`. Confirm ABCDE targets the full path. Also flag their doc's
-  10-vs-60-min TTL contradiction (we accept 60).
-
-## New Flyway migrations this session (apply automatically on next backend boot)
-`V085`–`V092` (schema) and `V087_001`/`V087_002`/`V092_001` (data) — all additive, no
-destructive changes, **already applied and confirmed clean on the local stack** (containers came
-up healthy after rebuild). Notable ones from this backlog work specifically:
-`V089` (LA total_count), `V090` (remove LA checklist section), `V091` (FC total_count),
-`V092`/`V092_001` (station_names + permission grant). Some earlier-numbered ones
-(`V085`–`V088`) are from other work earlier in the session (users/password-hash/SSO/KMZ-accept)
-— not part of this backlog but applied along with it.
+1. **Ask the user for current VM status** — specifically: (a) did they run the DB reconciliation
+   in §3a, (b) did they run the full redeploy in §3c, (c) is the backend up and healthy right now.
+   Don't assume anything carried over; the VM was mid-recovery across three interleaved problems
+   when this session ended.
+2. **If the VM needs a redeploy anyway (§3c), pack everything in**: this session's frontend changes
+   (§1), the duplicate-activity guard + merge endpoint (§2), and the taluka_name TEXT fix (§3a) are
+   all uncommitted in the working tree already — a single `build.ps1` + `package.ps1 -Full` +
+   `deploy_project.ps1` picks up all of it at once. No need to cherry-pick.
+3. **After deploy, run the 4 merge API calls in §2d** to actually clean up the real duplicate
+   activities on the VM (the code fix alone only prevents *new* ones).
+4. **Verify the KMZ/Map tab loads** (§3b) once the `.env` fix is live and the backend/grafana are
+   confirmed healthy post-redeploy.
+5. **Answer the open question from end of session**: does the user want a "Merge duplicate
+   activities" Admin UI button, or is calling the API directly sufficient? Not yet answered.
+6. **Try the Chrome extension again** (`tabs_context_mcp`) before doing anything else UI-related —
+   if it's back, use it to actually click through §1's changes (Overview layout, Acquisition
+   Details field order, button colors) since none of it has been visually verified in a real
+   browser this session, only via `tsc --noEmit` and `eslint`.
+7. **Minor, non-urgent**: the "decision YYY" mislabeling in `ActivityController.kt:91` and the
+   `ActivityService.kt` class doc (~line 220) both cite the wrong decision code for "multiple
+   activities of the same type are intentional" — the real YYY is unrelated (Drawings). Worth a
+   one-line comment fix if anyone's touching that area again, not worth a dedicated pass on its own.
 
 ## Key files touched this session
 
-**Backlog work:**
-- Frontend: `pages/projects/ProjectWorkspace.tsx` (scope, filters, KPI, gates, #6/#8/#12/#14/
-  #15/#17/#19/#20 wiring), `pages/projects/ProjectsPage.tsx` (#19 rename + Action column),
-  `pages/projects/RecordDetailPanel.tsx` (#1/#16), `pages/records/RecordEditPage.tsx` (#1 lock,
-  #14/#15 field lock), `pages/login/LoginPage.tsx` (#5), `components/shell/TopBar.tsx` (#7 +
-  logout), `pages/home/LandingPage.tsx` (logout + PIA nav), `App.tsx` (#18), `lib/etag.ts` +
-  `api/activityRecords.ts` (#3/#13), `utils/uploadEngine.ts` (upload fixes), `api/projects.ts`
-  (stationNames + updateProjectDetails).
-- Backend: `workflow/WorkflowServiceImpl.kt` (#2 aggregate), `service/activity/ActivityService.kt`
-  (visibility fix, FC total_count), `service/project/ProjectService.kt` (Map KMZ repoint,
-  updateDetails), `api/ProjectController.kt` (PATCH endpoint), `domain/project/Project.kt`
-  (stationNames column), `attachment/AttachmentService.kt` (multipart error message).
-- Migrations: `V089`–`V092` + `V092_001` (see above).
+**Frontend:**
+- `pages/projects/ProjectsPage.tsx` (column widths, zone filter narrowing)
+- `pages/projects/ProjectWorkspace.tsx` (Overview restructure — KPI removal, Activity Progress
+  move+redesign, Project Details/Designated Officers row merge, Scope/Taluka/Edit Details button
+  colors)
+- `components/shell/Sidebar.tsx` (inbox badge color)
+- `forms/PiaObjectFieldTemplate.tsx` (FIELD_ROW_GROUPS additions + sequential-dedup rewrite)
+- `pages/records/RecordEditPage.tsx` (stopped seeding area_hectares_* from Scope metadata)
 
-**WAF stop-gap (this session, 2026-07-11):**
-- New: `scripts/check-http-methods.sh` (generic HTTP-method diagnostic, detects disguised WAF
-  200-OK rejection pages by body content, not just status code).
-- New: `frontend/src/lib/wafSafeFetch.ts` (the PATCH/PUT/DELETE override wrapper).
-- Changed (method override — every PATCH/PUT/DELETE in `frontend/src/api/*.ts` now goes through
-  `wafSafeFetch`, added incrementally as each one surfaced): `frontend/src/api/activityRecords.ts`
-  (`patchRecord`, `deleteRecord`, `updateDrawingApproval`, `removeDrawingApprover`),
-  `frontend/src/api/attachments.ts` (`deleteAttachment`), `frontend/src/api/comments.ts`
-  (`deleteComment`), `frontend/src/api/projects.ts` (`updateProjectDetails`, `updateActivity` —
-  the latter is the **Activity Scope save**, root cause of the "Unexpected token '<'" error on LA
-  scope), `backend/src/main/resources/application.yml`
-  (`spring.mvc.hiddenmethod.filter.enabled: true`).
-- Changed (upload proxy): `backend/src/main/kotlin/in/gov/ir/pia/attachment/AttachmentService.kt`
-  (new `uploadProxy`/`uploadProxyPart`/`relayPutToMinio`), `backend/src/main/kotlin/in/gov/ir/pia/
-  api/AttachmentController.kt` (new `POST .../upload-proxy` and `.../upload-proxy-part`
-  endpoints), `frontend/src/utils/uploadEngine.ts` (new `xhrPost` helper, `PROXY_UPLOAD_ENABLED`
-  branch in `uploadSinglePart`/`uploadMultipart`).
-- Changed (build wiring): `frontend/Dockerfile` (new `ARG VITE_WAF_METHOD_OVERRIDE` and
-  `ARG VITE_WAF_PROXY_UPLOAD`), `infra/deploy/pc/build.ps1` (new `-WafOverride` switch param,
-  conditionally adds both `--build-arg`s to the frontend `docker build`).
-- New: `infra/deploy/pc/build_waf_od.ps1` — thin wrapper around `build.ps1 -WafOverride`, so a VM
-  release build is just `.\build_waf_od.ps1` instead of `.\build.ps1` while the WAF is broken.
-- Also fixed (unrelated but discovered along the way): root-level `D:\Sagar\Project\Claude\
-  .claude\launch.json` was missing a distinctly-named entry for this repo's frontend — added
-  `pia-tracker-beta-frontend` (see the ⚠️ gotcha note at the top of this file).
-- Also **discovered** (not fixed — see "Other open issues"): `initiateMultipart` /
-  `PiaMinioClient.java` reflection bug, pre-existing, unrelated to this session's changes.
+**Backend:**
+- `repository/ProjectActivityRepository.kt` (name-collision existence check)
+- `repository/ActivityRecordRepository.kt` (bulk reassignActivity)
+- `service/activity/ActivityService.kt` (create() guard rewrite, new mergeActivities())
+- `api/ActivityController.kt` (new merge-into endpoint)
+- `db/migration/V093__activity_taluka_details.sql` (taluka_name VARCHAR(128) → TEXT)
 
-**2 UI fixes (this session, end of 2026-07-11, NOT browser-verified — see warning at top):**
-- `frontend/src/pages/records/RecordEditPage.tsx` — autosave `saveFn` now invalidates
-  `['record', recordId]` and `['records', activityId]` after every save (was previously silent,
-  no cache invalidation at all).
-- `frontend/src/pages/projects/ProjectsPage.tsx` — `Status` column given `width: 150` to stop
-  the `fixed: 'right'` Action column's background from rendering over it.
+**Not code — VM operational state, see §3 for exact commands already given to the user:**
+`/opt/pia/shared/.env` (PIA_PUBLIC_BASE_URL, MINIO_PUBLIC_ENDPOINT), VM's `flyway_schema_history`
+and `activity_taluka_details` table (local already reconciled; VM reconciliation status unconfirmed
+at handover), `/opt/pia/releases/` (wiped by user, needs a fresh deploy to repopulate).

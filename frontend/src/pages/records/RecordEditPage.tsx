@@ -92,6 +92,8 @@ import { useAuthStore } from '@stores/authStore';
 import { DrawingApproversPanel } from '@/pages/projects/DrawingApproversPanel';
 import { DrawingObservationsPanel } from '@/pages/projects/DrawingObservationsPanel';
 import type { DrawingObservation } from '@/pages/projects/DrawingObservationsPanel';
+import { TalukaSrpCalaPanel } from './TalukaSrpCalaPanel';
+import { fetchTalukas } from '@api/talukaDetails';
 
 const { Title, Text } = Typography;
 
@@ -164,7 +166,13 @@ function hasValue(v: unknown): boolean {
 function isSectionComplete(
   sectionCode: string,
   formData: Record<string, unknown>,
+  /** Land Acquisition's srp/cala sections are read-only (fetched from the
+   * selected taluka) rather than user-entered — their completeness is
+   * determined by the taluka's data, not formData, so callers pass an
+   * explicit override for those codes. */
+  completeOverride?: boolean,
 ): boolean {
+  if (completeOverride !== undefined) return completeOverride;
   const sectionData = formData[sectionCode];
   if (!sectionData || typeof sectionData !== 'object') return false;
   // A section is "done" when at least one field has a meaningful user-entered value.
@@ -177,12 +185,13 @@ function sectionStepStatus(
   activeSection: string,
   inst: SectionWorkflowState | undefined,
   formData: Record<string, unknown>,
+  completeOverride?: boolean,
 ): StepStatus {
   if (
     inst?.currentStateCode === 'SENT_BACK_TO_DYCE' ||
     inst?.currentStateCode === 'SENT_BACK_TO_NODAL'
   ) return 'error';
-  if (isSectionComplete(code, formData)) return 'finish';
+  if (isSectionComplete(code, formData, completeOverride)) return 'finish';
   if (code === activeSection) return 'process';
   if (
     inst?.currentStateCode === 'SUBMITTED_FOR_VERIFICATION' ||
@@ -205,16 +214,20 @@ interface SectionStepsProps {
   onSelect: (code: string) => void;
   sectionStates: Record<string, SectionWorkflowState>;
   formData: Record<string, unknown>;
+  /** Per-section-code override for the "finish" checkmark, bypassing the
+   * formData-based check — used by Land Acquisition's read-only srp/cala
+   * sections (see isSectionComplete). */
+  completeOverrides?: Record<string, boolean>;
 }
 
-function SectionSteps({ sectionCodes, activeSection, onSelect, sectionStates, formData }: SectionStepsProps) {
+function SectionSteps({ sectionCodes, activeSection, onSelect, sectionStates, formData, completeOverrides }: SectionStepsProps) {
   if (sectionCodes.length === 0) return null;
 
   return (
     <div style={{ padding: '12px 16px' }}>
       {sectionCodes.map((code, idx) => {
         const inst   = sectionStates[code];
-        const status = sectionStepStatus(code, activeSection, inst, formData);
+        const status = sectionStepStatus(code, activeSection, inst, formData, completeOverrides?.[code]);
         const colors = STEP_COLORS[status];
         const isLast = idx === sectionCodes.length - 1;
 
@@ -557,6 +570,44 @@ function filterUsSchema(
   return { ...rest, properties: filteredProps, required };
 }
 
+// ── Land Acquisition: JMR "Re-JMR" toggle ──────────────────────────────────────
+// The original 4 fee/date fields (jmr_fee_demanded_on, jmr_fee_amount,
+// jmr_fee_submitted_on, jmr_done_on) are always shown. Re-JMR adds a SECOND set
+// of the same 4 fields (re_jmr_*) for the repeat round, declared in the schema
+// but only shown once re_jmr is toggled on — same client-side filtering
+// technique as filterUsSchema above.
+
+const JMR_RE_JMR_ONLY_FIELDS = ['re_jmr_fee_demanded_on', 're_jmr_fee_amount', 're_jmr_fee_submitted_on', 're_jmr_done_on'];
+
+function filterJmrSchema(schema: RJSFSchema, reJmr: boolean): RJSFSchema {
+  if (reJmr) return schema;
+  const props = schema.properties;
+  const filteredProps = props
+    ? Object.fromEntries(Object.entries(props).filter(([k]) => !JMR_RE_JMR_ONLY_FIELDS.includes(k)))
+    : undefined;
+  return { ...schema, properties: filteredProps };
+}
+
+// ── Land Acquisition: turn sub_division_taluka into a picker ──────────────────
+// Patches the acquisition_details section schema to add an enum sourced from
+// the activity's Sub division/taluka master list, so RJSF renders a select
+// instead of a free-text input. Records with a value not (yet) in the master
+// list (e.g. pre-migration data) still keep working — RJSF's enum widget
+// falls back to showing the raw string as the selected value.
+
+function injectTalukaEnum(schema: RJSFSchema, talukaNames: string[]): RJSFSchema {
+  const props = schema.properties as Record<string, RJSFSchema> | undefined;
+  const field = props?.sub_division_taluka;
+  if (!field || talukaNames.length === 0) return schema;
+  return {
+    ...schema,
+    properties: {
+      ...props,
+      sub_division_taluka: { ...field, enum: talukaNames },
+    },
+  };
+}
+
 // ── Editor ────────────────────────────────────────────────────────────────────
 
 export interface RecordEditorProps {
@@ -618,6 +669,15 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
     queryFn: () => fetchWorkflowState(recordId),
     enabled: !!recordId,
     refetchOnWindowFocus: false,
+  });
+
+  // Land Acquisition only: Sub Division/Taluka names, used to turn the free-text
+  // acquisition_details.sub_division_taluka field into a picker.
+  const isLandAcquisition = formDef?.activityTypeCode === 'LAND_ACQUISITION';
+  const { data: talukas } = useQuery({
+    queryKey: ['talukas', activity?.id],
+    queryFn: () => fetchTalukas(activity!.id),
+    enabled: isLandAcquisition && !!activity?.id,
   });
 
   // ── Section state ──────────────────────────────────────────────────────────
@@ -683,9 +743,11 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
         const laName = record.name || (data.village_name as string | undefined);
         const seeded: Record<string, unknown> = { ...ad };
         if (seeded.record_name === undefined && laName) seeded.record_name = laName;
+        // Note: area_hectares_* are deliberately NOT seeded here — those are this
+        // record's own land area (Total = sum of its own Private/Govt/Forest, see
+        // handleFormChange below), not the activity-level Scope total.
         const metaFields = ['block_section_from','block_section_to','chainage_from','chainage_to','district','sub_division_taluka',
-          'area_hectares_total','area_hectares_private','area_hectares_govt',
-          'area_hectares_forest','est_villages'] as const;
+          'est_villages'] as const;
         for (const f of metaFields) {
           if (seeded[f] === undefined && meta[f] !== undefined) seeded[f] = meta[f];
         }
@@ -727,15 +789,36 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
 
   const handleFormChange = useCallback(
     (sectionData: Record<string, unknown>) => {
+      let effectiveSectionData = sectionData;
+
+      // Land Acquisition's Acquisition Details: Total Area (ha) auto-fills as the
+      // sum of Private/Govt/Forest whenever ANY of those three change, but stays
+      // editable — if the user only touches Total Area itself (private/govt/forest
+      // unchanged from the previous value), leave their entry alone.
+      if (isLandAcquisition && activeSectionResolved === 'acquisition_details') {
+        const prev = (formDataRef.current.acquisition_details as Record<string, unknown> | undefined) ?? {};
+        const num = (v: unknown) => (typeof v === 'number' ? v : 0);
+        const partsChanged =
+          num(sectionData.area_hectares_private) !== num(prev.area_hectares_private) ||
+          num(sectionData.area_hectares_govt) !== num(prev.area_hectares_govt) ||
+          num(sectionData.area_hectares_forest) !== num(prev.area_hectares_forest);
+        if (partsChanged) {
+          effectiveSectionData = {
+            ...sectionData,
+            area_hectares_total: num(sectionData.area_hectares_private) + num(sectionData.area_hectares_govt) + num(sectionData.area_hectares_forest),
+          };
+        }
+      }
+
       const next =
         hasSections && activeSectionResolved
-          ? { ...formDataRef.current, [activeSectionResolved]: sectionData }
-          : sectionData;
+          ? { ...formDataRef.current, [activeSectionResolved]: effectiveSectionData }
+          : effectiveSectionData;
       setFormData(next);
       formDataRef.current = next;
       markDirty();
     },
-    [markDirty, activeSectionResolved, hasSections],
+    [markDirty, activeSectionResolved, hasSections, isLandAcquisition],
   );
 
   // ── Conflict reload ────────────────────────────────────────────────────────
@@ -794,6 +877,20 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
       : (formDef.schemaJson as RJSFSchema)
     : undefined;
 
+  // Land Acquisition: the srp/cala left-nav steps show "finish" (green tick)
+  // based on the selected taluka's data, not formData — those sections are
+  // read-only, fetched displays (see TalukaSrpCalaPanel), so formData.srp/cala
+  // never reflects the taluka's actual SRP/CALA values.
+  const sectionCompleteOverrides: Record<string, boolean> | undefined = useMemo(() => {
+    if (!isLandAcquisition) return undefined;
+    const talukaName = (formData.acquisition_details as Record<string, unknown> | undefined)?.sub_division_taluka as string | undefined;
+    const matched = talukaName ? talukas?.find((t) => t.talukaName.toLowerCase() === talukaName.toLowerCase()) : undefined;
+    return {
+      srp: !!matched?.srpDeclaredInGazOn,
+      cala: !!matched?.calaReceivedFromStateOn,
+    };
+  }, [isLandAcquisition, formData.acquisition_details, talukas]);
+
   const rawSectionUiSchema: UiSchema | undefined = formDef
     ? activeSectionResolved
       ? ((formDef.uiSchemaJson as UiSchema)?.[activeSectionResolved] as UiSchema | undefined)
@@ -807,11 +904,21 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
   // utility_type is pre-populated in dataJson at record creation so it's
   // available from the first open. Falls back to record.recordSubtype.
   const effectiveSchema: RJSFSchema | undefined = useMemo(() => {
-    if (!sectionSchema || formDef?.activityTypeCode !== 'UTILITY_SHIFTING') return sectionSchema;
-    const utilityType     = (formData.utility_type     as string | undefined) ?? '';
-    const executingAgency = (formData.executing_agency as string | undefined) ?? '';
-    return filterUsSchema(sectionSchema, utilityType, executingAgency);
-  }, [sectionSchema, formDef?.activityTypeCode, formData.utility_type, formData.executing_agency]);
+    if (!sectionSchema) return sectionSchema;
+    if (formDef?.activityTypeCode === 'UTILITY_SHIFTING') {
+      const utilityType     = (formData.utility_type     as string | undefined) ?? '';
+      const executingAgency = (formData.executing_agency as string | undefined) ?? '';
+      return filterUsSchema(sectionSchema, utilityType, executingAgency);
+    }
+    if (isLandAcquisition && activeSectionResolved === 'acquisition_details' && talukas) {
+      return injectTalukaEnum(sectionSchema, talukas.map((t) => t.talukaName));
+    }
+    if (isLandAcquisition && activeSectionResolved === 'jmr') {
+      const reJmr = !!(formData.jmr as Record<string, unknown> | undefined)?.re_jmr;
+      return filterJmrSchema(sectionSchema, reJmr);
+    }
+    return sectionSchema;
+  }, [sectionSchema, formDef?.activityTypeCode, formData.utility_type, formData.executing_agency, isLandAcquisition, activeSectionResolved, talukas, formData.jmr]);
 
   // ── Loading / error states ─────────────────────────────────────────────────
 
@@ -889,6 +996,14 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
         recordId={recordId}
         canEdit={activeSectionState?.isTerminal !== true}
         recordCreatedAt={record?.createdAt}
+      />
+    ) : isLandAcquisition && activity?.id && (activeSectionResolved === 'srp' || activeSectionResolved === 'cala') ? (
+      <TalukaSrpCalaPanel
+        activityId={activity.id}
+        talukaName={
+          ((formData.acquisition_details as Record<string, unknown> | undefined)?.sub_division_taluka as string | undefined)
+        }
+        section={activeSectionResolved}
       />
     ) : activeSectionResolved === 'observations' ? (
       <DrawingObservationsPanel
@@ -1008,6 +1123,7 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
                   onSelect={setActiveSection}
                   sectionStates={sectionStates}
                   formData={formData}
+                  completeOverrides={sectionCompleteOverrides}
                 />
               </div>
             )}
@@ -1026,6 +1142,7 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
                   onSelect={setActiveSection}
                   sectionStates={sectionStates}
                   formData={formData}
+                  completeOverrides={sectionCompleteOverrides}
                 />
               </Col>
             )}
