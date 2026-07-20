@@ -1216,7 +1216,29 @@ export function RecordDetailPanel({
                         ? (data.observations as DrawingObservation[])
                         : [];
 
-                    const sanctionDate    = sa.sanction_received_date as string | undefined;
+                    const SANCTION_ORDER = [
+                      'date_sent_for_review', 'date_reviewed_by_officer', 'date_joint_survey',
+                      'date_of_approval', 'days_taken_for_approval', 'sanction_received_date',
+                    ];
+                    const SANCTION_LABELS: Record<string, string> = {
+                      date_sent_for_review:     'Sent for Review',
+                      date_reviewed_by_officer: 'Reviewed On',
+                      date_joint_survey:        'Joint Survey',
+                      date_of_approval:         'Approved On',
+                      days_taken_for_approval:  'Days Taken',
+                      sanction_received_date:   'Sanction Received',
+                    };
+                    const SANCTION_DATE_FIELDS = new Set([
+                      'date_sent_for_review', 'date_reviewed_by_officer', 'date_joint_survey',
+                      'date_of_approval', 'sanction_received_date',
+                    ]);
+                    const sanctionEntries = SANCTION_ORDER
+                      .filter((k) => sa[k] !== null && sa[k] !== undefined && sa[k] !== '')
+                      .map((k) => {
+                        const v = sa[k];
+                        const display = SANCTION_DATE_FIELDS.has(k) ? dayjs(String(v)).format('D MMM YYYY') : String(v);
+                        return [k, display] as [string, string];
+                      });
 
                     return (
                       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -1268,11 +1290,15 @@ export function RecordDetailPanel({
                             <Divider orientation="left" orientationMargin={0} style={{ ...DIVIDER_STYLE, margin: '0 0 8px' }}>
                               Sanction
                             </Divider>
-                            {sanctionDate ? (
-                              <div style={{ fontSize: 12 }}>
-                                <Text type="secondary" style={{ fontSize: 12 }}>Received: </Text>
-                                <Text strong style={{ fontSize: 12 }}>{dayjs(sanctionDate).format('D MMM YYYY')}</Text>
-                              </div>
+                            {sanctionEntries.length > 0 ? (
+                              <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                                {sanctionEntries.map(([k, display]) => (
+                                  <div key={k} style={{ fontSize: 12 }}>
+                                    <Text type="secondary" style={{ fontSize: 12 }}>{SANCTION_LABELS[k]}: </Text>
+                                    <Text strong style={{ fontSize: 12 }}>{display}</Text>
+                                  </div>
+                                ))}
+                              </Space>
                             ) : (
                               <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
                                 Sanction not yet received.
