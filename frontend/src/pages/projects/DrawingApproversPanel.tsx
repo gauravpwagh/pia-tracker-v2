@@ -16,6 +16,8 @@ import {
   Button,
   DatePicker,
   Input,
+  message,
+  Select,
   Skeleton,
   Space,
   Tag,
@@ -24,10 +26,14 @@ import {
 } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, SaveOutlined } from '@ant-design/icons';
 import {
+  addDrawingApprover,
   fetchDrawingApprovers,
+  removeDrawingApprover,
   updateDrawingApproval,
   type DrawingApproverDto,
 } from '@api/activityRecords';
+import { fetchApprovalRoleDesignations } from '@api/designations';
+import { useAuthStore } from '@stores/authStore';
 
 const { Text } = Typography;
 
@@ -50,11 +56,56 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
   const queryClient = useQueryClient();
   const queryKey = ['drawingApprovers', recordId];
 
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const canEditApprovers = currentUser?.permissions.includes('DRAWING.EDIT_APPROVERS') ?? false;
+
   const { data, isLoading, isError } = useQuery({
     queryKey,
     queryFn: () => fetchDrawingApprovers(recordId),
     staleTime: 30_000,
   });
+
+  // All possible approving authorities — source list for the picker, not just this
+  // drawing's default chain (decision DDDD: any approval-role designation is eligible).
+  const { data: allDesignations } = useQuery({
+    queryKey: ['approvalRoleDesignations'],
+    queryFn: fetchApprovalRoleDesignations,
+    staleTime: 5 * 60_000,
+    enabled: canEditApprovers,
+  });
+
+  const addApproverMutation = useMutation({
+    mutationFn: (designationCode: string) => addDrawingApprover(recordId, designationCode),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+    onError: (err) => void message.error(err instanceof Error ? err.message : 'Failed to add approver'),
+  });
+
+  const removeApproverMutation = useMutation({
+    mutationFn: (approverId: string) => removeDrawingApprover(recordId, approverId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+    onError: (err) => void message.error(err instanceof Error ? err.message : 'Failed to remove approver'),
+  });
+
+  function handleApproverSelectionChange(newCodes: string[]) {
+    if (!data) return;
+    const currentCodes = data.approvers.map((a) => a.approvalDesignationCode);
+
+    newCodes
+      .filter((code) => !currentCodes.includes(code))
+      .forEach((code) => addApproverMutation.mutate(code));
+
+    currentCodes
+      .filter((code) => !newCodes.includes(code))
+      .forEach((code) => {
+        const approver = data.approvers.find((a) => a.approvalDesignationCode === code);
+        if (!approver) return;
+        if (approver.approvedOn) {
+          void message.error(`Cannot remove ${approver.designationName} — already approved. Clear the approval date first.`);
+          return;
+        }
+        removeApproverMutation.mutate(approver.id);
+      });
+  }
 
   // Per-row local edit state keyed by approverId
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({});
@@ -145,6 +196,31 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
           </Tag>
         )}
       </div>
+
+      {/* Approver picker — Admin / CE/C / Nodal Dy CE/C only (DRAWING.EDIT_APPROVERS).
+          Lists every approval-role designation, not just this drawing type's default
+          chain; already-added approvers show up pre-selected. */}
+      {canEditApprovers && (
+        <div style={{ marginBottom: 12 }}>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+            Approvers
+          </Text>
+          <Select
+            mode="multiple"
+            style={{ width: '100%' }}
+            size="small"
+            placeholder="Select approving authorities"
+            loading={!allDesignations}
+            value={data.approvers.map((a) => a.approvalDesignationCode)}
+            onChange={handleApproverSelectionChange}
+            optionFilterProp="label"
+            options={(allDesignations ?? []).map((d) => ({
+              value: d.code,
+              label: `${d.shortLabel} — ${d.name}`,
+            }))}
+          />
+        </div>
+      )}
 
       {/* Approver rows — two per row on wider panes to cut vertical scrolling */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 8 }}>
