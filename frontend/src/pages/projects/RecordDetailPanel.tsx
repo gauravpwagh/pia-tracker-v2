@@ -1082,6 +1082,11 @@ export function RecordDetailPanel({
                           fieldKey="infringement_media"
                           title="Photos and Video of Infringement"
                         />
+                        <AttachmentSectionPanel
+                          recordId={record.id}
+                          fields={[{ key: 'drawing_attachment', label: 'Attach Drawing' }]}
+                          title="Drawing"
+                        />
                       </>
                     );
                   })()
