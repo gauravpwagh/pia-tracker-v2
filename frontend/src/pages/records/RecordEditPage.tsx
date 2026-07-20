@@ -541,7 +541,7 @@ const US_COMMON = [
   'chainage_from', 'chainage_to', 'length_affected_km',
   'executing_agency',
   'status_drawing_execution', 'target_removal_date',
-  'consent_state_govt', 'remarks',
+  'consent_state_govt', 'infringement_media', 'drawing_attachment', 'remarks',
 ];
 
 // Agency-conditional field groups
@@ -997,6 +997,7 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
       <DrawingApproversPanel
         recordId={recordId}
         canEdit={activeSectionState?.isTerminal !== true}
+        canEditApproverList={activeSectionState?.isTerminal !== true}
         recordCreatedAt={record?.createdAt}
       />
     ) : isLandAcquisition && activity?.id && (activeSectionResolved === 'srp' || activeSectionResolved === 'cala') ? (
