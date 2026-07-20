@@ -4,14 +4,19 @@
  * Schema field type: `string` with `"ui:widget": "attachment"`.
  *
  * Supported ui:options:
- *   accept       — comma-separated MIME types (defaults to all allowed types)
- *   uploadLabel  — button label (default: "Attach file")
- *   uploadHint   — hint below button (e.g. "PDF · KMZ · max 10 GB")
- *   entityType   — required: entity type for the attachment API
- *   entityId     — required: entity UUID for the attachment API
+ *   accept                — comma-separated MIME types (defaults to all allowed types)
+ *   uploadLabel            — button label (default: "Attach file")
+ *   uploadHint              — hint below button (e.g. "PDF · KMZ · max 10 GB")
+ *   entityType              — required: entity type for the attachment API
+ *   entityId                — required: entity UUID for the attachment API
+ *   secondaryUploadLabel    — shows a disabled button after the panel for an
+ *                             upload type that isn't wired up yet (e.g. video),
+ *                             so the capability is visible without being live.
+ *   secondaryUploadHint     — tooltip on the disabled button (default: "Coming soon")
  */
 
-import { Typography } from 'antd';
+import { Button, Tooltip, Typography } from 'antd';
+import { UploadOutlined } from '@ant-design/icons';
 import type { WidgetProps } from '@rjsf/utils';
 import { AttachmentPanel, ACCEPT_ALL } from '@components/attachments/AttachmentPanel';
 
@@ -37,6 +42,8 @@ export function AttachmentWidget({ id, label, schema, required, uiSchema, formCo
   const accept = (opts.accept as string | undefined) ?? ACCEPT_ALL;
   const uploadLabel = (opts.uploadLabel as string | undefined) ?? 'Attach file';
   const uploadHint = opts.uploadHint as string | undefined;
+  const secondaryUploadLabel = opts.secondaryUploadLabel as string | undefined;
+  const secondaryUploadHint = (opts.secondaryUploadHint as string | undefined) ?? 'Coming soon';
 
   return (
     <div>
@@ -49,14 +56,23 @@ export function AttachmentWidget({ id, label, schema, required, uiSchema, formCo
         </div>
       )}
       {entityId ? (
-        <AttachmentPanel
-          entityType={effectiveEntityType}
-          entityId={entityId}
-          canUpload
-          accept={accept}
-          uploadLabel={uploadLabel}
-          uploadHint={uploadHint}
-        />
+        <>
+          <AttachmentPanel
+            entityType={effectiveEntityType}
+            entityId={entityId}
+            canUpload
+            accept={accept}
+            uploadLabel={uploadLabel}
+            uploadHint={uploadHint}
+          />
+          {secondaryUploadLabel && (
+            <Tooltip title={secondaryUploadHint}>
+              <Button icon={<UploadOutlined />} size="small" disabled style={{ marginTop: 8 }}>
+                {secondaryUploadLabel}
+              </Button>
+            </Tooltip>
+          )}
+        </>
       ) : (
         <Text type="secondary" style={{ fontSize: 12 }}>
           Save the form first to attach files.
