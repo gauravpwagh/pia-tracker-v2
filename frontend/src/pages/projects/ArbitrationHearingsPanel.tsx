@@ -3,9 +3,11 @@
  *
  * A case can go through multiple hearings before it's finalized. Hearings are
  * stored as a JSON array in dataJson.arbitration_hearings (one entry per
- * hearing), the same repeat-a-block pattern as DrawingObservationsPanel: if a
- * case isn't finalized on a hearing, the user just clicks "Add" again for the
- * next hearing date rather than editing the existing entry.
+ * hearing), the same repeat-a-block pattern as DrawingObservationsPanel. The
+ * add/edit form is inline (not a modal). The first hearing's form opens
+ * automatically since a record always needs at least one; answering "No" to
+ * "case finalized on 1st hearing?" and saving opens the next hearing's form
+ * automatically too, rather than making the user click "Add Hearing" again.
  *
  * Each hearing's four PDF attachments are scoped by the hearing's own id
  * (ACTIVITY_RECORD__arbitration_hearing__{hearingId}__{field}), so a new,
@@ -13,7 +15,7 @@
  * attachment fields have somewhere stable to upload to before "Save".
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import {
@@ -25,9 +27,8 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
-  Select,
   Space,
+  Switch,
   Tag,
   Typography,
 } from 'antd';
@@ -85,8 +86,8 @@ function emptyForm(id: string): FormState {
     arbitration_case_no: '',
     date_of_hearing: null,
     date_of_hearing_d: null,
-    case_finalized_on_first_hearing: null,
-    more_compensation_to_be_paid: null,
+    case_finalized_on_first_hearing: false,
+    more_compensation_to_be_paid: false,
     extra_compensation_amount: null,
   };
 }
@@ -95,23 +96,19 @@ function entityTypeFor(hearingId: string, field: string) {
   return `ACTIVITY_RECORD__arbitration_hearing__${hearingId}__${field}`;
 }
 
-const YES_NO_OPTIONS = [
-  { value: true, label: 'Yes' },
-  { value: false, label: 'No' },
-];
-
 export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEdit }: Props) {
   const queryClient = useQueryClient();
-  const [modalOpen, setModalOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(() => emptyForm(crypto.randomUUID()));
+  const autoOpenedRef = useRef(false);
 
   const saveMutation = useMutation({
     mutationFn: (newHearings: ArbitrationHearing[]) =>
       patchRecord(recordId, { ...recordData, arbitration_hearings: newHearings }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['record', recordId] });
-      setModalOpen(false);
+      setFormOpen(false);
       setEditingId(null);
     },
   });
@@ -119,18 +116,36 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
   function openAdd() {
     setEditingId(null);
     setForm(emptyForm(crypto.randomUUID()));
-    setModalOpen(true);
+    setFormOpen(true);
   }
+
+  // First time this record has no hearings yet, open the "Add Hearing" form
+  // automatically instead of making the user click the button — there is
+  // always at least one hearing to fill in.
+  useEffect(() => {
+    if (!autoOpenedRef.current && canEdit && hearings.length === 0) {
+      autoOpenedRef.current = true;
+      openAdd();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEdit, hearings.length]);
 
   function openEdit(h: ArbitrationHearing) {
     setEditingId(h.id);
     setForm({
       ...h,
+      case_finalized_on_first_hearing: h.case_finalized_on_first_hearing ?? false,
+      more_compensation_to_be_paid: h.more_compensation_to_be_paid ?? false,
       fees_demand_date_d: h.fees_demand_date ? dayjs(h.fees_demand_date) : null,
       fees_paid_date_d: h.fees_paid_date ? dayjs(h.fees_paid_date) : null,
       date_of_hearing_d: h.date_of_hearing ? dayjs(h.date_of_hearing) : null,
     });
-    setModalOpen(true);
+    setFormOpen(true);
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    setEditingId(null);
   }
 
   function handleSave() {
@@ -148,7 +163,7 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
       date_of_hearing: form.date_of_hearing_d?.format('YYYY-MM-DD') ?? null,
       case_finalized_on_first_hearing: form.case_finalized_on_first_hearing,
       more_compensation_to_be_paid:
-        form.case_finalized_on_first_hearing === true ? form.more_compensation_to_be_paid : null,
+        form.case_finalized_on_first_hearing === true ? form.more_compensation_to_be_paid : false,
       extra_compensation_amount:
         form.case_finalized_on_first_hearing === true && form.more_compensation_to_be_paid === true
           ? form.extra_compensation_amount
@@ -158,12 +173,27 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
     const newHearings = editingId
       ? hearings.map((h) => (h.id === editingId ? built : h))
       : [...hearings, built];
-    saveMutation.mutate(newHearings);
+    // Case not finalized on a freshly-added hearing → the next hearing is
+    // needed, so open its form automatically instead of making the user
+    // click "Add Hearing" again. Only for the add flow, not when editing an
+    // older hearing (that could spawn a duplicate follow-up hearing).
+    const openNextHearing = !editingId && built.case_finalized_on_first_hearing === false;
+    saveMutation.mutate(newHearings, {
+      onSuccess: () => {
+        if (openNextHearing) openAdd();
+      },
+    });
   }
 
   function handleDelete(id: string) {
     saveMutation.mutate(hearings.filter((h) => h.id !== id));
   }
+
+  // 1-based position of the hearing currently open in the form, purely for
+  // display ("Hearing 2") — editing an existing hearing keeps its original
+  // position; adding a new one is always the next position in the list.
+  const editIndex = editingId ? hearings.findIndex((h) => h.id === editingId) : -1;
+  const activeHearingNumber = editIndex >= 0 ? editIndex + 1 : hearings.length + 1;
 
   return (
     <div>
@@ -175,12 +205,200 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
         >
           Arbitration Hearings
         </Divider>
-        {canEdit && (
+        {canEdit && !formOpen && (
           <Button size="small" icon={<PlusOutlined />} onClick={openAdd} style={{ flexShrink: 0 }}>
             Add Hearing
           </Button>
         )}
       </div>
+
+      {formOpen && (
+        <div
+          style={{
+            border: '1px solid var(--ant-color-border)',
+            borderRadius: 6,
+            padding: '12px 12px 4px',
+            marginBottom: 8,
+            background: 'var(--ant-color-fill-alter)',
+          }}
+        >
+          <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+            {editingId ? `Edit Hearing ${activeHearingNumber}` : `Add Hearing ${activeHearingNumber}`}
+          </Text>
+          <Form layout="vertical">
+            <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+              <Form.Item label="Gat Number" style={{ flex: 1 }}>
+                <Input value={form.gat_number} onChange={(e) => setForm((f) => ({ ...f, gat_number: e.target.value }))} />
+              </Form.Item>
+              <Form.Item label="Acquired Area Affected (ha)" style={{ flex: 1 }}>
+                <InputNumber
+                  style={{ width: '100%' }}
+                  min={0}
+                  value={form.acquired_area_affected}
+                  onChange={(v) => setForm((f) => ({ ...f, acquired_area_affected: v }))}
+                />
+              </Form.Item>
+            </div>
+            <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+              <Form.Item label="Name of Person / Land Owner" style={{ flex: 1 }}>
+                <Input value={form.land_owner_name} onChange={(e) => setForm((f) => ({ ...f, land_owner_name: e.target.value }))} />
+              </Form.Item>
+              <Form.Item label="Name of Arbitrator" style={{ flex: 1 }}>
+                <Input value={form.arbitrator_name} onChange={(e) => setForm((f) => ({ ...f, arbitrator_name: e.target.value }))} />
+              </Form.Item>
+            </div>
+
+            <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, margin: '4px 0 8px' }}>Fees Demanded by Arbitrator</Divider>
+            <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+              <Form.Item label="Date" style={{ flex: 1 }}>
+                <DatePicker
+                  style={{ width: '100%' }}
+                  format="D MMM YYYY"
+                  value={form.fees_demand_date_d}
+                  onChange={(v) => setForm((f) => ({ ...f, fees_demand_date_d: v }))}
+                />
+              </Form.Item>
+              <Form.Item label="Amount" style={{ flex: 1 }}>
+                <InputNumber
+                  style={{ width: '100%' }}
+                  min={0}
+                  value={form.fees_demand_amount}
+                  onChange={(v) => setForm((f) => ({ ...f, fees_demand_amount: v }))}
+                />
+              </Form.Item>
+            </div>
+            <Form.Item label="Fees Demand PDF">
+              <AttachmentPanel
+                entityType={entityTypeFor(form.id, 'fees_demand_pdf')}
+                entityId={recordId}
+                accept="application/pdf"
+                canUpload
+                canDelete
+              />
+            </Form.Item>
+
+            <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, margin: '4px 0 8px' }}>Fees Paid to Arbitrator</Divider>
+            <Form.Item label="Date">
+              <DatePicker
+                style={{ width: '100%' }}
+                format="D MMM YYYY"
+                value={form.fees_paid_date_d}
+                onChange={(v) => setForm((f) => ({ ...f, fees_paid_date_d: v }))}
+              />
+            </Form.Item>
+            <Form.Item label="Fees Paid PDF">
+              <AttachmentPanel
+                entityType={entityTypeFor(form.id, 'fees_paid_pdf')}
+                entityId={recordId}
+                accept="application/pdf"
+                canUpload
+                canDelete
+              />
+            </Form.Item>
+
+            <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, margin: '4px 0 8px' }}>Hearing</Divider>
+            <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+              <Form.Item label="Arbitration Case No." style={{ flex: 1 }}>
+                <Input value={form.arbitration_case_no} onChange={(e) => setForm((f) => ({ ...f, arbitration_case_no: e.target.value }))} />
+              </Form.Item>
+              <Form.Item label="Date of Hearing" style={{ flex: 1 }}>
+                <DatePicker
+                  style={{ width: '100%' }}
+                  format="D MMM YYYY"
+                  value={form.date_of_hearing_d}
+                  onChange={(v) => setForm((f) => ({ ...f, date_of_hearing_d: v }))}
+                />
+              </Form.Item>
+            </div>
+            <Form.Item label="Discussion of Case Minutes (PDF)">
+              <AttachmentPanel
+                entityType={entityTypeFor(form.id, 'discussion_minutes_pdf')}
+                entityId={recordId}
+                accept="application/pdf"
+                canUpload
+                canDelete
+              />
+            </Form.Item>
+            <Form.Item label="Decision Copy of Arbitrator (PDF)">
+              <AttachmentPanel
+                entityType={entityTypeFor(form.id, 'decision_copy_pdf')}
+                entityId={recordId}
+                accept="application/pdf"
+                canUpload
+                canDelete
+              />
+            </Form.Item>
+
+            <Form.Item label="Whether case finalized at this hearing?">
+              <Switch
+                checked={form.case_finalized_on_first_hearing === true}
+                checkedChildren="Yes"
+                unCheckedChildren="No"
+                onChange={(checked) =>
+                  setForm((f) => ({
+                    ...f,
+                    case_finalized_on_first_hearing: checked,
+                    more_compensation_to_be_paid: checked ? f.more_compensation_to_be_paid : false,
+                    extra_compensation_amount: checked ? f.extra_compensation_amount : null,
+                  }))
+                }
+              />
+            </Form.Item>
+
+            {form.case_finalized_on_first_hearing === true && (
+              <>
+                <Form.Item label="Whether more compensation to be paid?">
+                  <Switch
+                    checked={form.more_compensation_to_be_paid === true}
+                    checkedChildren="Yes"
+                    unCheckedChildren="No"
+                    onChange={(checked) =>
+                      setForm((f) => ({
+                        ...f,
+                        more_compensation_to_be_paid: checked,
+                        extra_compensation_amount: checked ? f.extra_compensation_amount : null,
+                      }))
+                    }
+                  />
+                </Form.Item>
+                {form.more_compensation_to_be_paid === true && (
+                  <Form.Item label="Amount of Extra Compensation">
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      min={0}
+                      value={form.extra_compensation_amount}
+                      onChange={(v) => setForm((f) => ({ ...f, extra_compensation_amount: v }))}
+                    />
+                  </Form.Item>
+                )}
+              </>
+            )}
+
+            {form.case_finalized_on_first_hearing === false && (
+              <Alert
+                type="info"
+                showIcon
+                message="Case not finalized"
+                description={
+                  editingId
+                    ? 'Save this hearing, then click "Add Hearing" to record the next hearing date.'
+                    : 'The next hearing will be added automatically after you save this one.'
+                }
+                style={{ marginBottom: 12 }}
+              />
+            )}
+          </Form>
+          {saveMutation.isError && (
+            <Alert type="error" message="Failed to save hearing" showIcon style={{ marginBottom: 12 }} />
+          )}
+          <Space style={{ marginBottom: 12 }}>
+            <Button type="primary" onClick={handleSave} loading={saveMutation.isPending}>
+              {editingId ? 'Update' : 'Add'}
+            </Button>
+            <Button onClick={closeForm}>Cancel</Button>
+          </Space>
+        </div>
+      )}
 
       {hearings.length === 0 ? (
         <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
@@ -188,7 +406,9 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
         </Text>
       ) : (
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          {hearings.map((h) => (
+          {hearings.map((h, idx) => {
+            const hearingNumber = idx + 1;
+            return (
             <div
               key={h.id}
               style={{
@@ -204,10 +424,11 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
                 <div style={{ flex: 1 }}>
                   <Space size={6} wrap style={{ marginBottom: 4 }}>
                     <Text strong style={{ fontSize: 12 }}>
-                      {h.date_of_hearing ? `Hearing — ${dayjs(h.date_of_hearing).format('D MMM YYYY')}` : 'Hearing'}
+                      {`Hearing ${hearingNumber}`}
+                      {h.date_of_hearing ? ` — ${dayjs(h.date_of_hearing).format('D MMM YYYY')}` : ''}
                     </Text>
                     {h.case_finalized_on_first_hearing === true ? (
-                      <Tag color="green" style={{ margin: 0 }}>Finalized on 1st hearing</Tag>
+                      <Tag color="green" style={{ margin: 0 }}>Finalized</Tag>
                     ) : h.case_finalized_on_first_hearing === false ? (
                       <Tag color="orange" style={{ margin: 0 }}>Not finalized — next hearing pending</Tag>
                     ) : null}
@@ -236,7 +457,14 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
                       </Descriptions.Item>
                     )}
                   </Descriptions>
-                  <Space size={16} wrap style={{ marginTop: 6 }}>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                      gap: 16,
+                      marginTop: 6,
+                    }}
+                  >
                     <div>
                       <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Fees Demand PDF</Text>
                       <AttachmentPanel
@@ -277,9 +505,9 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
                         canDelete={canEdit}
                       />
                     </div>
-                  </Space>
+                  </div>
                 </div>
-                {canEdit && (
+                {canEdit && !formOpen && (
                   <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
                     <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(h)} />
                     <Button
@@ -293,184 +521,11 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </Space>
       )}
 
-      <Modal
-        title={editingId ? 'Edit Arbitration Hearing' : 'Add Arbitration Hearing'}
-        open={modalOpen}
-        onCancel={() => setModalOpen(false)}
-        onOk={handleSave}
-        okText={editingId ? 'Update' : 'Add'}
-        okButtonProps={{ loading: saveMutation.isPending }}
-        width={640}
-        destroyOnClose
-      >
-        <Form layout="vertical" style={{ marginTop: 8 }}>
-          <div style={{ display: 'flex', gap: 12, width: '100%' }}>
-            <Form.Item label="Gat Number" style={{ flex: 1 }}>
-              <Input value={form.gat_number} onChange={(e) => setForm((f) => ({ ...f, gat_number: e.target.value }))} />
-            </Form.Item>
-            <Form.Item label="Acquired Area Affected (ha)" style={{ flex: 1 }}>
-              <InputNumber
-                style={{ width: '100%' }}
-                min={0}
-                value={form.acquired_area_affected}
-                onChange={(v) => setForm((f) => ({ ...f, acquired_area_affected: v }))}
-              />
-            </Form.Item>
-          </div>
-          <div style={{ display: 'flex', gap: 12, width: '100%' }}>
-            <Form.Item label="Name of Person / Land Owner" style={{ flex: 1 }}>
-              <Input value={form.land_owner_name} onChange={(e) => setForm((f) => ({ ...f, land_owner_name: e.target.value }))} />
-            </Form.Item>
-            <Form.Item label="Name of Arbitrator" style={{ flex: 1 }}>
-              <Input value={form.arbitrator_name} onChange={(e) => setForm((f) => ({ ...f, arbitrator_name: e.target.value }))} />
-            </Form.Item>
-          </div>
-
-          <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, margin: '4px 0 8px' }}>Fees Demanded by Arbitrator</Divider>
-          <div style={{ display: 'flex', gap: 12, width: '100%' }}>
-            <Form.Item label="Date" style={{ flex: 1 }}>
-              <DatePicker
-                style={{ width: '100%' }}
-                format="D MMM YYYY"
-                value={form.fees_demand_date_d}
-                onChange={(v) => setForm((f) => ({ ...f, fees_demand_date_d: v }))}
-              />
-            </Form.Item>
-            <Form.Item label="Amount" style={{ flex: 1 }}>
-              <InputNumber
-                style={{ width: '100%' }}
-                min={0}
-                value={form.fees_demand_amount}
-                onChange={(v) => setForm((f) => ({ ...f, fees_demand_amount: v }))}
-              />
-            </Form.Item>
-          </div>
-          <Form.Item label="Fees Demand PDF">
-            <AttachmentPanel
-              entityType={entityTypeFor(form.id, 'fees_demand_pdf')}
-              entityId={recordId}
-              accept="application/pdf"
-              canUpload
-              canDelete
-            />
-          </Form.Item>
-
-          <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, margin: '4px 0 8px' }}>Fees Paid to Arbitrator</Divider>
-          <Form.Item label="Date">
-            <DatePicker
-              style={{ width: '100%' }}
-              format="D MMM YYYY"
-              value={form.fees_paid_date_d}
-              onChange={(v) => setForm((f) => ({ ...f, fees_paid_date_d: v }))}
-            />
-          </Form.Item>
-          <Form.Item label="Fees Paid PDF">
-            <AttachmentPanel
-              entityType={entityTypeFor(form.id, 'fees_paid_pdf')}
-              entityId={recordId}
-              accept="application/pdf"
-              canUpload
-              canDelete
-            />
-          </Form.Item>
-
-          <Divider orientation="left" orientationMargin={0} style={{ fontSize: 11, margin: '4px 0 8px' }}>Hearing</Divider>
-          <div style={{ display: 'flex', gap: 12, width: '100%' }}>
-            <Form.Item label="Arbitration Case No." style={{ flex: 1 }}>
-              <Input value={form.arbitration_case_no} onChange={(e) => setForm((f) => ({ ...f, arbitration_case_no: e.target.value }))} />
-            </Form.Item>
-            <Form.Item label="Date of Hearing" style={{ flex: 1 }}>
-              <DatePicker
-                style={{ width: '100%' }}
-                format="D MMM YYYY"
-                value={form.date_of_hearing_d}
-                onChange={(v) => setForm((f) => ({ ...f, date_of_hearing_d: v }))}
-              />
-            </Form.Item>
-          </div>
-          <Form.Item label="Discussion of Case Minutes (PDF)">
-            <AttachmentPanel
-              entityType={entityTypeFor(form.id, 'discussion_minutes_pdf')}
-              entityId={recordId}
-              accept="application/pdf"
-              canUpload
-              canDelete
-            />
-          </Form.Item>
-          <Form.Item label="Decision Copy of Arbitrator (PDF)">
-            <AttachmentPanel
-              entityType={entityTypeFor(form.id, 'decision_copy_pdf')}
-              entityId={recordId}
-              accept="application/pdf"
-              canUpload
-              canDelete
-            />
-          </Form.Item>
-
-          <Form.Item label="Whether case finalized on 1st hearing?">
-            <Select
-              allowClear
-              value={form.case_finalized_on_first_hearing ?? undefined}
-              onChange={(v) =>
-                setForm((f) => ({
-                  ...f,
-                  case_finalized_on_first_hearing: v ?? null,
-                  more_compensation_to_be_paid: v === true ? f.more_compensation_to_be_paid : null,
-                  extra_compensation_amount: v === true ? f.extra_compensation_amount : null,
-                }))
-              }
-              options={YES_NO_OPTIONS}
-              placeholder="Select"
-            />
-          </Form.Item>
-
-          {form.case_finalized_on_first_hearing === true && (
-            <>
-              <Form.Item label="Whether more compensation to be paid?">
-                <Select
-                  allowClear
-                  value={form.more_compensation_to_be_paid ?? undefined}
-                  onChange={(v) =>
-                    setForm((f) => ({
-                      ...f,
-                      more_compensation_to_be_paid: v ?? null,
-                      extra_compensation_amount: v === true ? f.extra_compensation_amount : null,
-                    }))
-                  }
-                  options={YES_NO_OPTIONS}
-                  placeholder="Select"
-                />
-              </Form.Item>
-              {form.more_compensation_to_be_paid === true && (
-                <Form.Item label="Amount of Extra Compensation">
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    min={0}
-                    value={form.extra_compensation_amount}
-                    onChange={(v) => setForm((f) => ({ ...f, extra_compensation_amount: v }))}
-                  />
-                </Form.Item>
-              )}
-            </>
-          )}
-
-          {form.case_finalized_on_first_hearing === false && (
-            <Alert
-              type="info"
-              showIcon
-              message="Case not finalized"
-              description={'Save this hearing, then click "Add Hearing" again to record the next hearing date.'}
-            />
-          )}
-        </Form>
-        {saveMutation.isError && (
-          <Alert type="error" message="Failed to save hearing" showIcon style={{ marginTop: 8 }} />
-        )}
-      </Modal>
     </div>
   );
 }
