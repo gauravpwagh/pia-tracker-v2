@@ -21,7 +21,12 @@ location /api/ {
 # ($host). Presigned S3 signatures include Host; forwarding the client's own Host
 # (a public IP/domain) instead breaks the signature and MinIO returns 403
 # SignatureDoesNotMatch on every upload/download. See docker-compose.production.yml.
-location /minio/ {
+# ^~ pins this as a prefix match so it can never lose to a regex location (e.g.
+# a static-asset cache rule for .jpg/.png/etc.) added elsewhere in this shared
+# include — regex locations otherwise win regardless of file order, which would
+# 404 any image attachment whose object key happens to end in .jpg/.png/etc.
+# (see infra/nginx/conf.d/pia.conf, which hit exactly this bug).
+location ^~ /minio/ {
     set $pia_minio http://pia-minio:9000;
     rewrite ^/minio/(.*)$ /$1 break;
     proxy_pass         $pia_minio;
