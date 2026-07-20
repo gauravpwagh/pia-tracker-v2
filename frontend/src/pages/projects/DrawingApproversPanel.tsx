@@ -39,6 +39,8 @@ interface Props {
 }
 
 interface RowState {
+  sentForReviewOn: dayjs.Dayjs | null;
+  reviewedOn: dayjs.Dayjs | null;
   approvedOn: dayjs.Dayjs | null;
   remarks: string;
   dirty: boolean;
@@ -58,8 +60,19 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({});
 
   const saveMutation = useMutation({
-    mutationFn: ({ approverId, approvedOn, remarks }: { approverId: string; approvedOn: string | null; remarks: string | null }) =>
-      updateDrawingApproval(recordId, approverId, approvedOn, remarks),
+    mutationFn: ({
+      approverId,
+      approvedOn,
+      remarks,
+      sentForReviewOn,
+      reviewedOn,
+    }: {
+      approverId: string;
+      approvedOn: string | null;
+      remarks: string | null;
+      sentForReviewOn: string | null;
+      reviewedOn: string | null;
+    }) => updateDrawingApproval(recordId, approverId, { approvedOn, remarks, sentForReviewOn, reviewedOn }),
     onSuccess: (updated) => {
       // Patch the cached list in place
       queryClient.setQueryData<typeof data>(queryKey, (prev) => {
@@ -88,6 +101,8 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
 
   function getRow(approver: DrawingApproverDto): RowState {
     return rowStates[approver.id] ?? {
+      sentForReviewOn: approver.sentForReviewOn ? dayjs(approver.sentForReviewOn) : null,
+      reviewedOn: approver.reviewedOn ? dayjs(approver.reviewedOn) : null,
       approvedOn: approver.approvedOn ? dayjs(approver.approvedOn) : null,
       remarks: approver.remarks ?? '',
       dirty: false,
@@ -97,6 +112,8 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
   function setRow(approverId: string, patch: Partial<RowState>) {
     setRowStates((prev) => {
       const current = prev[approverId] ?? {
+        sentForReviewOn: null,
+        reviewedOn: null,
         approvedOn: null,
         remarks: '',
         dirty: false,
@@ -109,6 +126,8 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
     const row = getRow(approver);
     saveMutation.mutate({
       approverId: approver.id,
+      sentForReviewOn: row.sentForReviewOn ? row.sentForReviewOn.format('YYYY-MM-DD') : null,
+      reviewedOn: row.reviewedOn ? row.reviewedOn.format('YYYY-MM-DD') : null,
       approvedOn: row.approvedOn ? row.approvedOn.format('YYYY-MM-DD') : null,
       remarks: row.remarks.trim() || null,
     });
@@ -149,26 +168,55 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
                   : 'var(--ant-color-warning-bg)',
               }}
             >
-              {/* Designation name + status tag */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              {/* Designation name + status tag(s) */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 6 }}>
                 <Text strong style={{ fontSize: 12 }}>{approver.designationName}</Text>
-                {approver.approvedOn ? (
-                  <Tag color="green" style={{ margin: 0, fontSize: 11 }}>
-                    Approved {dayjs(approver.approvedOn).format('D MMM YYYY')}
-                  </Tag>
-                ) : pendingDays !== null ? (
-                  <Tag color="orange" icon={<ClockCircleOutlined />} style={{ margin: 0, fontSize: 11 }}>
-                    Pending {pendingDays} day{pendingDays !== 1 ? 's' : ''}
-                  </Tag>
-                ) : (
-                  <Tag color="orange" icon={<ClockCircleOutlined />} style={{ margin: 0, fontSize: 11 }}>
-                    Pending
-                  </Tag>
-                )}
+                <Space size={4}>
+                  {approver.daysTakenForApproval !== null && (
+                    <Tag style={{ margin: 0, fontSize: 11 }}>
+                      {approver.daysTakenForApproval} day{approver.daysTakenForApproval !== 1 ? 's' : ''} taken
+                    </Tag>
+                  )}
+                  {approver.approvedOn ? (
+                    <Tag color="green" style={{ margin: 0, fontSize: 11 }}>
+                      Approved {dayjs(approver.approvedOn).format('D MMM YYYY')}
+                    </Tag>
+                  ) : pendingDays !== null ? (
+                    <Tag color="orange" icon={<ClockCircleOutlined />} style={{ margin: 0, fontSize: 11 }}>
+                      Pending {pendingDays} day{pendingDays !== 1 ? 's' : ''}
+                    </Tag>
+                  ) : (
+                    <Tag color="orange" icon={<ClockCircleOutlined />} style={{ margin: 0, fontSize: 11 }}>
+                      Pending
+                    </Tag>
+                  )}
+                </Space>
               </div>
 
               {canEdit && (
                 <Space size={6} style={{ width: '100%' }} wrap>
+                  <Tooltip title="Date the drawing was sent to this authority for review">
+                    <DatePicker
+                      size="small"
+                      style={{ width: 130 }}
+                      format="D MMM YYYY"
+                      value={row.sentForReviewOn}
+                      onChange={(val) => setRow(approver.id, { sentForReviewOn: val })}
+                      placeholder="Sent for review"
+                      allowClear
+                    />
+                  </Tooltip>
+                  <Tooltip title="Date the concerned officer completed their review">
+                    <DatePicker
+                      size="small"
+                      style={{ width: 130 }}
+                      format="D MMM YYYY"
+                      value={row.reviewedOn}
+                      onChange={(val) => setRow(approver.id, { reviewedOn: val })}
+                      placeholder="Reviewed on"
+                      allowClear
+                    />
+                  </Tooltip>
                   <Tooltip title="Date of physical sign-off">
                     <DatePicker
                       size="small"
@@ -200,8 +248,22 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
                 </Space>
               )}
 
-              {!canEdit && approver.remarks && (
-                <Text type="secondary" style={{ fontSize: 11 }}>{approver.remarks}</Text>
+              {!canEdit && (approver.sentForReviewOn || approver.reviewedOn || approver.remarks) && (
+                <Space direction="vertical" size={0}>
+                  {approver.sentForReviewOn && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Sent for review: {dayjs(approver.sentForReviewOn).format('D MMM YYYY')}
+                    </Text>
+                  )}
+                  {approver.reviewedOn && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Reviewed on: {dayjs(approver.reviewedOn).format('D MMM YYYY')}
+                    </Text>
+                  )}
+                  {approver.remarks && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>{approver.remarks}</Text>
+                  )}
+                </Space>
               )}
             </div>
           );

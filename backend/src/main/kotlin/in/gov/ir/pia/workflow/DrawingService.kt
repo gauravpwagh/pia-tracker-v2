@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
@@ -24,10 +25,26 @@ data class DrawingApproverResponse(
     /** Human-readable designation name, e.g. "Senior Divisional Engineer". */
     val designationName: String,
     val position: Int,
+    /** Date the drawing was sent to this authority for review. */
+    val sentForReviewOn: java.time.LocalDate?,
+    /** Date the concerned officer completed their review. */
+    val reviewedOn: java.time.LocalDate?,
     /** Date the physical sign-off was received; null = not yet approved. */
     val approvedOn: java.time.LocalDate?,
+    /** Computed as (approvedOn - sentForReviewOn) in days; null unless both are set. */
+    val daysTakenForApproval: Int?,
     val remarks: String?,
 )
+
+private fun daysTakenForApproval(
+    sentForReviewOn: java.time.LocalDate?,
+    approvedOn: java.time.LocalDate?,
+): Int? =
+    if (sentForReviewOn != null && approvedOn != null) {
+        ChronoUnit.DAYS.between(sentForReviewOn, approvedOn).toInt()
+    } else {
+        null
+    }
 
 data class DrawingApproverListResponse(
     val recordId: UUID,
@@ -43,6 +60,8 @@ data class DrawingApproverListResponse(
 data class UpdateApprovalRequest(
     val approvedOn: java.time.LocalDate?,
     val remarks: String? = null,
+    val sentForReviewOn: java.time.LocalDate? = null,
+    val reviewedOn: java.time.LocalDate? = null,
 )
 
 /**
@@ -96,19 +115,24 @@ class DrawingService(
             jdbc.query(
                 """
                 SELECT da.id, da.approval_designation_code, COALESCE(d.short_label, d.name, da.approval_designation_code) AS designation_name,
-                       da.position, da.approved_on, da.remarks
+                       da.position, da.sent_for_review_on, da.reviewed_on, da.approved_on, da.remarks
                   FROM drawing_approvers da
                   LEFT JOIN designations d ON d.code = da.approval_designation_code
                  WHERE da.activity_record_id = ? AND NOT da.is_deleted
                  ORDER BY da.position
                 """.trimIndent(),
                 { rs, _ ->
+                    val sentForReviewOn = rs.getDate("sent_for_review_on")?.toLocalDate()
+                    val approvedOn = rs.getDate("approved_on")?.toLocalDate()
                     DrawingApproverResponse(
                         id = UUID.fromString(rs.getString("id")),
                         approvalDesignationCode = rs.getString("approval_designation_code"),
                         designationName = rs.getString("designation_name"),
                         position = rs.getInt("position"),
-                        approvedOn = rs.getDate("approved_on")?.toLocalDate(),
+                        sentForReviewOn = sentForReviewOn,
+                        reviewedOn = rs.getDate("reviewed_on")?.toLocalDate(),
+                        approvedOn = approvedOn,
+                        daysTakenForApproval = daysTakenForApproval(sentForReviewOn, approvedOn),
                         remarks = rs.getString("remarks"),
                     )
                 },
@@ -143,12 +167,16 @@ class DrawingService(
         jdbc.update(
             """
             UPDATE drawing_approvers
-               SET approved_on = ?,
-                   remarks     = ?,
-                   updated_at  = now()
+               SET sent_for_review_on = ?,
+                   reviewed_on        = ?,
+                   approved_on        = ?,
+                   remarks            = ?,
+                   updated_at         = now()
              WHERE id = ?
                AND NOT is_deleted
             """.trimIndent(),
+            request.sentForReviewOn,
+            request.reviewedOn,
             request.approvedOn,
             request.remarks,
             approverId,
@@ -176,7 +204,10 @@ class DrawingService(
             approvalDesignationCode = approver.approvalDesignationCode,
             designationName = designationName,
             position = approver.position,
+            sentForReviewOn = request.sentForReviewOn,
+            reviewedOn = request.reviewedOn,
             approvedOn = request.approvedOn,
+            daysTakenForApproval = daysTakenForApproval(request.sentForReviewOn, request.approvedOn),
             remarks = request.remarks,
         )
     }
@@ -261,7 +292,10 @@ class DrawingService(
             approvalDesignationCode = approver.approvalDesignationCode,
             designationName = designationName,
             position = approver.position,
+            sentForReviewOn = null,
+            reviewedOn = null,
             approvedOn = null,
+            daysTakenForApproval = null,
             remarks = null,
         )
     }
