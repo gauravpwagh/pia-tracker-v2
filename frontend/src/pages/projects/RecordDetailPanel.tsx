@@ -26,6 +26,7 @@ import {
   Divider,
   Dropdown,
   Form,
+  Image,
   Input,
   Modal,
   notification,
@@ -290,6 +291,57 @@ function AttachmentSectionPanel({ recordId, fields, title }: { recordId: string;
           );
         })}
       </Descriptions>
+    </>
+  );
+}
+
+// ── Photo gallery — thumbnails with built-in click-to-zoom next/previous nav ───
+// (Ant Design's Image.PreviewGroup) for image-only attachment fields.
+
+function PhotoGallery({ recordId, fieldKey, title }: { recordId: string; fieldKey: string; title: string }) {
+  const entityType = `${BASE_ENTITY_TYPE}__${fieldKey}`;
+
+  const { data: files, isLoading } = useQuery({
+    queryKey: ['attachments', 'gallery', entityType, recordId],
+    queryFn: () => fetchAttachments(entityType, recordId),
+    staleTime: 0,
+  });
+
+  const photos = (files ?? []).filter(
+    (f) => f.contentType.startsWith('image/') && f.scanStatus !== 'INFECTED',
+  );
+
+  const { data: urls } = useQuery({
+    queryKey: ['attachments', 'gallery-urls', entityType, recordId, photos.map((f) => f.id)],
+    queryFn: () => Promise.all(photos.map((f) => getAttachmentDownloadUrl(f.id))),
+    enabled: photos.length > 0,
+    staleTime: 60_000,
+  });
+
+  return (
+    <>
+      <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
+      {isLoading ? (
+        <Text type="secondary" style={{ fontSize: 12 }}>Loading…</Text>
+      ) : photos.length === 0 ? (
+        <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>No photos uploaded yet.</Text>
+      ) : (
+        <Image.PreviewGroup>
+          <Space size={8} wrap>
+            {photos.map((f, i) => (
+              <Image
+                key={f.id}
+                src={urls?.[i]?.presignedUrl}
+                alt={f.originalFilename}
+                width={80}
+                height={80}
+                style={{ objectFit: 'cover', borderRadius: 4 }}
+                placeholder
+              />
+            ))}
+          </Space>
+        </Image.PreviewGroup>
+      )}
     </>
   );
 }
@@ -1025,10 +1077,10 @@ export function RecordDetailPanel({
                             No details recorded yet. Click "Edit" to add them.
                           </Text>
                         )}
-                        <AttachmentSectionPanel
+                        <PhotoGallery
                           recordId={record.id}
-                          fields={[{ key: 'infringement_media', label: 'Photos and Video of Infringement' }]}
-                          title="Attachments"
+                          fieldKey="infringement_media"
+                          title="Photos and Video of Infringement"
                         />
                       </>
                     );
