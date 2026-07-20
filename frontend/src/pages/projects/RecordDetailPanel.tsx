@@ -74,6 +74,7 @@ import {
 import { ActivityMetadataForm, ActivityMetadataView } from './ActivityMetadataForm';
 import { DrawingApproversPanel } from './DrawingApproversPanel';
 import { DrawingObservationsPanel, type DrawingObservation } from './DrawingObservationsPanel';
+import { ArbitrationHearingsPanel, type ArbitrationHearing } from './ArbitrationHearingsPanel';
 
 const { Text } = Typography;
 
@@ -519,6 +520,10 @@ function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
       arbitration_notes:'Arbitration Notes' },
   );
 
+  const arbitrationHearings = Array.isArray(dataJson.arbitration_hearings)
+    ? (dataJson.arbitration_hearings as ArbitrationHearing[])
+    : [];
+
   const dl = (id: string) => downloadMutation.mutate(id);
 
   return (
@@ -534,6 +539,14 @@ function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
       <LaSectionBlock title="Section 20H-I" entries={s20hiEntries} attachFiles={attachFor('section_20h_i')} downloadFn={dl} />
       {/* #16 — the LA document checklist (KMZ/Drone/SRP/CALA) moved to the Activity Scope. */}
       <LaSectionBlock title="Mutation" entries={mutationEntries} attachFiles={attachFor('mutation')} downloadFn={dl} />
+      <div style={{ marginTop: 8 }}>
+        <ArbitrationHearingsPanel
+          recordId={recordId}
+          recordData={dataJson}
+          hearings={arbitrationHearings}
+          canEdit={false}
+        />
+      </div>
     </>
   );
 }
@@ -1337,6 +1350,7 @@ export function RecordDetailPanel({
                           {/* Observations — panel renders its own heading + Add button */}
                           <DrawingObservationsPanel
                             recordId={recordId}
+                            recordData={data}
                             observations={observations}
                             canEdit={canEdit}
                           />

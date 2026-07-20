@@ -92,6 +92,8 @@ import { useAuthStore } from '@stores/authStore';
 import { DrawingApproversPanel } from '@/pages/projects/DrawingApproversPanel';
 import { DrawingObservationsPanel } from '@/pages/projects/DrawingObservationsPanel';
 import type { DrawingObservation } from '@/pages/projects/DrawingObservationsPanel';
+import { ArbitrationHearingsPanel } from '@/pages/projects/ArbitrationHearingsPanel';
+import type { ArbitrationHearing } from '@/pages/projects/ArbitrationHearingsPanel';
 import { TalukaSrpCalaPanel } from './TalukaSrpCalaPanel';
 import { fetchTalukas } from '@api/talukaDetails';
 
@@ -1008,9 +1010,21 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
     ) : activeSectionResolved === 'observations' ? (
       <DrawingObservationsPanel
         recordId={recordId}
+        recordData={(record?.dataJson as Record<string, unknown> | undefined) ?? {}}
         observations={
           Array.isArray((record?.dataJson as Record<string, unknown> | undefined)?.observations)
             ? ((record.dataJson as Record<string, unknown>).observations as DrawingObservation[])
+            : []
+        }
+        canEdit={activeSectionState?.isTerminal !== true}
+      />
+    ) : isLandAcquisition && activeSectionResolved === 'arbitration' ? (
+      <ArbitrationHearingsPanel
+        recordId={recordId}
+        recordData={(record?.dataJson as Record<string, unknown> | undefined) ?? {}}
+        hearings={
+          Array.isArray((record?.dataJson as Record<string, unknown> | undefined)?.arbitration_hearings)
+            ? ((record.dataJson as Record<string, unknown>).arbitration_hearings as ArbitrationHearing[])
             : []
         }
         canEdit={activeSectionState?.isTerminal !== true}
