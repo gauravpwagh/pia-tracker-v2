@@ -22,6 +22,7 @@ import { customWidgets } from './widgets';
 import { PiaObjectFieldTemplate } from './PiaObjectFieldTemplate';
 import { PiaFieldTemplate } from './PiaFieldTemplate';
 import { ApprovalChainField } from './fields/ApprovalChainField';
+import { LandCoverageField } from './fields/LandCoverageField';
 
 export interface RjsfFormHandle {
   /** Programmatically trigger form validation + submit. */
@@ -77,7 +78,7 @@ export const RjsfForm = forwardRef<RjsfFormHandle, RjsfFormProps>(function RjsfF
       formData={formData}
       validator={validator}
       widgets={customWidgets}
-      fields={{ approvalChain: ApprovalChainField }}
+      fields={{ approvalChain: ApprovalChainField, landCoverage: LandCoverageField }}
       templates={{ ObjectFieldTemplate: PiaObjectFieldTemplate, FieldTemplate: PiaFieldTemplate }}
       onChange={handleChange}
       onSubmit={handleSubmit}

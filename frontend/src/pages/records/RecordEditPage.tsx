@@ -1040,7 +1040,11 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
             : formData
         }
         onChange={handleFormChange}
-        formContext={{ entityType: 'ACTIVITY_RECORD', entityId: recordId }}
+        formContext={{
+          entityType: 'ACTIVITY_RECORD',
+          entityId: recordId,
+          acquisitionDetails: (formData.acquisition_details as Record<string, unknown> | undefined) ?? {},
+        }}
         disabled={readOnly || autosaveStatus === 'conflict' || stateLocked}
       />
     );
