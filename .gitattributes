@@ -2,3 +2,10 @@
 # (postgres:16-alpine, entrypoint scripts) that lack CRLF-tolerant shells.
 # A Windows checkout without this rule silently breaks container init scripts.
 *.sh text eol=lf
+
+# Gradle wrapper is invoked as ./gradlew inside Linux build containers; CRLF
+# breaks its shebang and Docker build fails with "gradlew: not found".
+gradlew text eol=lf
+
+# Scripts with a #! shebang, invoked directly rather than via `python`/etc.
+*.py text eol=lf
