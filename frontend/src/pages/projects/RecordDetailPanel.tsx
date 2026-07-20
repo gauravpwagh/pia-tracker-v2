@@ -1179,7 +1179,7 @@ export function RecordDetailPanel({
                       TUNNEL_DESIGN:          'Tunnel Design',
                     };
                     const DA_DETAILS_ORDER = [
-                      'record_name', 'drawing_type', 'section', 'station',
+                      'record_name', 'drawing_id', 'name_of_work', 'drawing_type', 'section', 'station',
                       'drawing_number', 'chainage_from', 'chainage_to',
                       'description', 'revision',
                       'concept_esp_difference', 'curve_details',
@@ -1187,6 +1187,8 @@ export function RecordDetailPanel({
                     ];
                     const DA_LABELS: Record<string, string> = {
                       record_name:              'Record Name',
+                      drawing_id:               'Drawing ID',
+                      name_of_work:             'Name of Work',
                       drawing_type:             'Drawing Type',
                       section:                  'Section',
                       station:                  'Station',
