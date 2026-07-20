@@ -20,7 +20,9 @@ import java.util.UUID
  *   - All rows have [approvedOn] set → APPROVED (record_state → AUTHENTICATED)
  *   - Any row has [approvedOn] null  → PENDING  (record_state → DRAFT)
  *
- * Schema: V014 (created) + V029 (dropped workflow columns, added approvedOn/remarks).
+ * Schema: V014 (created) + V029 (dropped workflow columns, added approvedOn/remarks)
+ * + V110 (added sentForReviewOn/reviewedOn). Days taken for approval is computed
+ * on read from (approvedOn - sentForReviewOn), not stored.
  */
 @Entity
 @Table(name = "drawing_approvers")
@@ -34,6 +36,12 @@ class DrawingApprover(
     /** Display order. */
     @Column(name = "position", nullable = false)
     val position: Int = 0,
+    /** Date the drawing was sent to this authority for review. */
+    @Column(name = "sent_for_review_on")
+    val sentForReviewOn: LocalDate? = null,
+    /** Date the concerned officer completed their review. */
+    @Column(name = "reviewed_on")
+    val reviewedOn: LocalDate? = null,
     /** Date the physical sign-off was received. Null = not yet approved. */
     @Column(name = "approved_on")
     val approvedOn: LocalDate? = null,

@@ -183,8 +183,14 @@ export interface DrawingApproverDto {
   /** Human-readable designation name, e.g. "Senior Divisional Engineer". */
   designationName: string;
   position: number;
+  /** ISO date string "YYYY-MM-DD" or null — date the drawing was sent to this authority for review. */
+  sentForReviewOn: string | null;
+  /** ISO date string "YYYY-MM-DD" or null — date the concerned officer completed their review. */
+  reviewedOn: string | null;
   /** ISO date string "YYYY-MM-DD" or null if not yet approved. */
   approvedOn: string | null;
+  /** Computed as (approvedOn - sentForReviewOn) in days; null unless both are set. */
+  daysTakenForApproval: number | null;
   remarks: string | null;
 }
 
@@ -203,14 +209,18 @@ export async function fetchDrawingApprovers(recordId: string): Promise<DrawingAp
 export async function updateDrawingApproval(
   recordId: string,
   approverId: string,
-  approvedOn: string | null,
-  remarks: string | null,
+  update: {
+    approvedOn: string | null;
+    remarks: string | null;
+    sentForReviewOn?: string | null;
+    reviewedOn?: string | null;
+  },
 ): Promise<DrawingApproverDto> {
   const res = await wafSafeFetch(`${BASE}/activity-records/${recordId}/drawing-approvers/${approverId}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ approvedOn, remarks }),
+    body: JSON.stringify(update),
   });
   return handleResponse<DrawingApproverDto>(res);
 }
