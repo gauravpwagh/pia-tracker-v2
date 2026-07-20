@@ -9,7 +9,7 @@
 -- next hearing date, same "Add" pattern as observations.
 
 UPDATE form_definitions
-SET section_codes = section_codes || 'arbitration'
+SET section_codes = section_codes || ARRAY['arbitration']
 WHERE id = 'ffffffff-0001-0001-0001-000000000001';
 
 UPDATE form_definitions
