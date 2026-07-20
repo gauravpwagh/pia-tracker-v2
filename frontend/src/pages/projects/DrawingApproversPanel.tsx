@@ -39,7 +39,14 @@ const { Text } = Typography;
 
 interface Props {
   recordId: string;
+  /** Governs the inline approval-date/remarks fields — shown in both the
+   * read-only details pane (quick sign-off entry) and the full edit page. */
   canEdit: boolean;
+  /** Governs the "Edit approvers" add/remove-authority picker — a structural
+   * change to who's in the approval chain, only allowed from the actual edit
+   * page's Approvals section, never from the details pane. Defaults to false
+   * so callers must opt in explicitly. */
+  canEditApproverList?: boolean;
   /** ISO string — used to compute pending days for unapproved slots. */
   recordCreatedAt?: string;
 }
@@ -52,7 +59,7 @@ interface RowState {
   dirty: boolean;
 }
 
-export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Props) {
+export function DrawingApproversPanel({ recordId, canEdit, canEditApproverList = false, recordCreatedAt }: Props) {
   const queryClient = useQueryClient();
   const queryKey = ['drawingApprovers', recordId];
 
@@ -197,10 +204,13 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
         )}
       </div>
 
-      {/* Approver picker — Admin / CE/C / Nodal Dy CE/C only (DRAWING.EDIT_APPROVERS).
-          Lists every approval-role designation, not just this drawing type's default
-          chain; already-added approvers show up pre-selected. */}
-      {canEditApprovers && (
+      {/* Approver picker — Admin / CE/C / Nodal Dy CE/C only (DRAWING.EDIT_APPROVERS),
+          and only on the actual edit page's Approvals section (canEditApproverList),
+          never in the read-only details pane. maxTagCount keeps it to one line
+          instead of wrapping every selected tag onto its own row. Lists every
+          approval-role designation, not just this drawing type's default chain;
+          already-added approvers show up pre-selected. */}
+      {canEditApproverList && canEditApprovers && (
         <div style={{ marginBottom: 12 }}>
           <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
             Approvers
@@ -214,6 +224,7 @@ export function DrawingApproversPanel({ recordId, canEdit, recordCreatedAt }: Pr
             value={data.approvers.map((a) => a.approvalDesignationCode)}
             onChange={handleApproverSelectionChange}
             optionFilterProp="label"
+            maxTagCount="responsive"
             options={(allDesignations ?? []).map((d) => ({
               value: d.code,
               label: `${d.shortLabel} — ${d.name}`,
