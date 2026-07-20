@@ -250,10 +250,10 @@ const CHECKLIST_FIELDS: { key: string; label: string }[] = [
 const BASE_ENTITY_TYPE = 'ACTIVITY_RECORD';
 
 function FcCALandPanel({ recordId }: { recordId: string }) {
-  return <FcAttachmentSectionPanel recordId={recordId} fields={CA_LAND_FIELDS} title="CA Land" />;
+  return <AttachmentSectionPanel recordId={recordId} fields={CA_LAND_FIELDS} title="CA Land" />;
 }
 
-function FcAttachmentSectionPanel({ recordId, fields, title }: { recordId: string; fields: { key: string; label: string }[]; title: string }) {
+function AttachmentSectionPanel({ recordId, fields, title }: { recordId: string; fields: { key: string; label: string }[]; title: string }) {
   const entityTypes = fields.map(({ key }) => `${BASE_ENTITY_TYPE}__${key}`);
   const { data, isLoading } = useQuery({
     queryKey: ['attachments', 'section-panel', ...entityTypes, recordId],
@@ -611,7 +611,7 @@ function FcDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
       <FcSectionBlock title="Stage I" entries={stageIEntries} attachFiles={attachFor('stage_i')} downloadFn={dl} />
       <FcSectionBlock title="Stage II" entries={stageIIEntries} attachFiles={attachFor('stage_ii')} downloadFn={dl} />
       <FcCALandPanel recordId={recordId} />
-      <FcAttachmentSectionPanel recordId={recordId} fields={CHECKLIST_FIELDS} title="Checklist" />
+      <AttachmentSectionPanel recordId={recordId} fields={CHECKLIST_FIELDS} title="Checklist" />
       <FcSectionBlock title="Post Approval" entries={postApprovalEntries} downloadFn={dl} />
     </>
   );
@@ -1003,25 +1003,34 @@ export function RecordDetailPanel({
                     const orderedEntries = US_ORDER
                       .filter((k) => data[k] !== null && data[k] !== undefined && data[k] !== '')
                       .map((k) => [k, data[k]] as [string, unknown]);
-                    return hasData ? (
-                      <Descriptions size="small" column={2} bordered={false} colon>
-                        {orderedEntries.map(([k, v]) => {
-                            const display =
-                              k === 'utility_type'     ? (UTILITY_TYPE_LABELS[String(v)] ?? String(v)) :
-                              k === 'executing_agency' ? (EXECUTING_AGENCY_LABELS[String(v)] ?? String(v)) :
-                              typeof v === 'boolean'   ? (v ? 'Yes' : 'No') :
-                              String(v);
-                            return (
-                              <Descriptions.Item key={k} label={US_LABELS[k] ?? k}>
-                                {display}
-                              </Descriptions.Item>
-                            );
-                          })}
-                      </Descriptions>
-                    ) : (
-                      <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
-                        No details recorded yet. Click "Edit" to add them.
-                      </Text>
+                    return (
+                      <>
+                        {hasData ? (
+                          <Descriptions size="small" column={2} bordered={false} colon>
+                            {orderedEntries.map(([k, v]) => {
+                                const display =
+                                  k === 'utility_type'     ? (UTILITY_TYPE_LABELS[String(v)] ?? String(v)) :
+                                  k === 'executing_agency' ? (EXECUTING_AGENCY_LABELS[String(v)] ?? String(v)) :
+                                  typeof v === 'boolean'   ? (v ? 'Yes' : 'No') :
+                                  String(v);
+                                return (
+                                  <Descriptions.Item key={k} label={US_LABELS[k] ?? k}>
+                                    {display}
+                                  </Descriptions.Item>
+                                );
+                              })}
+                          </Descriptions>
+                        ) : (
+                          <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                            No details recorded yet. Click "Edit" to add them.
+                          </Text>
+                        )}
+                        <AttachmentSectionPanel
+                          recordId={record.id}
+                          fields={[{ key: 'infringement_media', label: 'Photos and Video of Infringement' }]}
+                          title="Attachments"
+                        />
+                      </>
                     );
                   })()
                 ) : activity.activityTypeCode === 'TEMPORARY_OFFICE_SPACE' ? (
