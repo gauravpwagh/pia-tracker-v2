@@ -469,6 +469,33 @@ function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
       area_hectares_govt:'Govt. Land (ha)', area_hectares_forest:'Forest Land (ha)',
       est_villages:'Est. No. of Villages' },
   );
+  // Land Coverage Progress block: Private/Govt/Forest Land fetched live from this
+  // same Acquisition Details section (not stored in land_coverage); Total/Done/%
+  // computed live, not stored — see LandCoverageField (edit form) for the matching
+  // computation. The per-field labels below name the Land Acquisition Act's actual
+  // Section 20E — a legal section, not the app's Section 20E tab.
+  {
+    const acqDetails = (dataJson.acquisition_details as Record<string, unknown> | undefined) ?? {};
+    const landCoverage = (acqDetails.land_coverage as Record<string, unknown> | undefined) ?? {};
+    const num = (v: unknown) => (typeof v === 'number' ? v : 0);
+    const privateLand = num(acqDetails.area_hectares_private);
+    const govtLand = num(acqDetails.area_hectares_govt);
+    const forestLand = num(acqDetails.area_hectares_forest);
+    const donePrivate = num(landCoverage.section_20e_done_private);
+    const doneGovt = num(landCoverage.permission_taken_govt_land);
+    const doneForest = num(landCoverage.working_permission_obtained);
+    const totalLand = privateLand + govtLand + forestLand;
+    const sectionEDone = donePrivate + doneGovt + doneForest;
+    const percentDone = totalLand > 0 ? (sectionEDone / totalLand) * 100 : 0;
+    adEntries.push(
+      { label: 'Section 20E Done (Private)', value: donePrivate.toFixed(4) },
+      { label: 'Permission Taken by Railway (Govt. Land)', value: doneGovt.toFixed(4) },
+      { label: 'Working Permission Obtained', value: doneForest.toFixed(4) },
+      { label: 'Total Land (ha)', value: totalLand.toFixed(4) },
+      { label: 'Section E Done (ha)', value: sectionEDone.toFixed(4) },
+      { label: '% Section E Done', value: `${percentDone.toFixed(1)}%` },
+    );
+  }
   const srpEntries = flattenSection(
     (dataJson.srp as Record<string, unknown> | undefined) ?? {},
     ['srp_declared_in_gaz_on'],
@@ -501,35 +528,6 @@ function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
     ['local_newspaper_pub_date'],
     { local_newspaper_pub_date:'Newspaper Pub. Date' },
   );
-  // Land Coverage block: Private/Govt/Forest Land fetched live from Acquisition
-  // Details (not stored in section_20e); Total/Done/% computed live, not stored —
-  // see LandCoverageField (edit form) for the matching computation.
-  {
-    const acqDetails = (dataJson.acquisition_details as Record<string, unknown> | undefined) ?? {};
-    const landCoverage =
-      ((dataJson.section_20e as Record<string, unknown> | undefined)?.land_coverage as Record<string, unknown> | undefined) ?? {};
-    const num = (v: unknown) => (typeof v === 'number' ? v : 0);
-    const privateLand = num(acqDetails.area_hectares_private);
-    const govtLand = num(acqDetails.area_hectares_govt);
-    const forestLand = num(acqDetails.area_hectares_forest);
-    const donePrivate = num(landCoverage.section_20e_done_private);
-    const doneGovt = num(landCoverage.permission_taken_govt_land);
-    const doneForest = num(landCoverage.working_permission_obtained);
-    const totalLand = privateLand + govtLand + forestLand;
-    const sectionEDone = donePrivate + doneGovt + doneForest;
-    const percentDone = totalLand > 0 ? (sectionEDone / totalLand) * 100 : 0;
-    s20eEntries.push(
-      { label: 'Private Land (ha)', value: privateLand.toFixed(4) },
-      { label: 'Section 20E Done (Private)', value: donePrivate.toFixed(4) },
-      { label: 'Govt Land (ha)', value: govtLand.toFixed(4) },
-      { label: 'Permission Taken by Railway (Govt. Land)', value: doneGovt.toFixed(4) },
-      { label: 'Forest Land (ha)', value: forestLand.toFixed(4) },
-      { label: 'Working Permission Obtained', value: doneForest.toFixed(4) },
-      { label: 'Total Land (ha)', value: totalLand.toFixed(4) },
-      { label: 'Section E Done (ha)', value: sectionEDone.toFixed(4) },
-      { label: '% Section E Done', value: `${percentDone.toFixed(1)}%` },
-    );
-  }
   const s20fgEntries = flattenSection(
     (dataJson.section_20f_g as Record<string, unknown> | undefined) ?? {},
     ['competent_authority','compensation_determined_on','compensation_amount','market_value_basis'],

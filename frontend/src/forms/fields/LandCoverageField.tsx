@@ -1,15 +1,17 @@
 /**
- * LandCoverageField — Land Acquisition Section 20E "Land Coverage" block.
+ * LandCoverageField — Land Acquisition "Land Coverage Progress" block, part
+ * of the Acquisition Details section.
  *
  * Private/Govt/Forest Land are live-fetched (read-only) from this same
- * record's own Acquisition Details section via formContext.acquisitionDetails
- * — not duplicated into section_20e's own data, so they can never drift from
- * the Acquisition Details values. Total Land, Section E Done, and % Section E
- * Done are computed live from those plus the three user-entered fields below;
+ * record's own Acquisition Details fields via formContext.acquisitionDetails
+ * — not duplicated into land_coverage's own data, so they can never drift.
+ * Total Land, Section E Done, and % Section E Done are computed live from
+ * those plus the three user-entered fields below (which name the Land
+ * Acquisition Act's actual Section 20E — a legal section, not an app tab);
  * none of the three computed values are persisted, only recomputed on render.
  *
  * Registered as  ui:field: "landCoverage"  on the `land_coverage` property in
- * Section 20E's ui_schema_json.
+ * Acquisition Details' ui_schema_json.
  */
 
 import { InputNumber, Typography } from 'antd';
@@ -62,7 +64,7 @@ export function LandCoverageField({ formData, onChange, disabled, readonly, form
         type="secondary"
         style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 8 }}
       >
-        Land Coverage — Section 20E Progress
+        Land Coverage Progress
       </Text>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', marginBottom: 12 }}>
