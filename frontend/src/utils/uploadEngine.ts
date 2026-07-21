@@ -19,7 +19,7 @@ import {
 import { API_BASE } from '@lib/apiBase';
 
 /**
- * TEMPORARY WAF workaround (see HANDOVER.md): the VM's WAF blocks PUT, so a direct
+ * TEMPORARY WAF workaround (see docs/deployment.md § 4a): the VM's WAF blocks PUT, so a direct
  * PUT to MinIO's presigned URL never reaches it there. When this build flag is on,
  * uploads instead POST to our own backend (POST passes the WAF), which relays the
  * bytes to MinIO internally — see AttachmentService.uploadProxy/uploadProxyPart.

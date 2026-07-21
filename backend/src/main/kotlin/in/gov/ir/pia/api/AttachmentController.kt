@@ -40,7 +40,7 @@ import java.util.UUID
  *   GET    /api/v1/attachments/{id}/download            — presigned GET URL
  *   DELETE /api/v1/attachments/{id}                     — soft-delete
  *
- * TEMPORARY WAF workaround (see HANDOVER.md / AttachmentService doc comment):
+ * TEMPORARY WAF workaround (see docs/deployment.md § 4a / AttachmentService doc comment):
  *   POST /api/v1/attachments/{id}/upload-proxy               — single-part, in place of a direct PUT
  *   POST /api/v1/attachments/{id}/upload-proxy-part?partNumber=N — multipart, in place of a direct PUT
  */

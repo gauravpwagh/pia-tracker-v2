@@ -129,6 +129,27 @@ Rollback: `git checkout v1.1.0 && make build-prod-image && docker compose ... up
 
 For Flyway forward-only migrations, rollback requires a deliberate inverse migration shipped in a subsequent release, not a Flyway-level "undo". For this reason, every PR that adds a destructive migration must reference its inverse in the changelog.
 
+### 4a. WAF workaround (temporary)
+
+The network path in front of the beta/prod VM (a middleman reverse proxy, separate from this repo's Nginx) runs a Web Application Firewall that blocks `PATCH`/`PUT`/`DELETE` — it returns an HTTP 200 rejection page instead of forwarding the request, so a naive client sees a "successful" response that's actually the WAF's own block page. `GET` and `POST` pass through untouched. Diagnose with `scripts/check-http-methods.sh <url>`, which sends all seven verbs and flags any that come back as a WAF rejection page, a silent timeout, or a connection reset, so you can tell a network-level block apart from an app-level 4xx/5xx.
+
+Two frontend build-time flags work around this, both **off by default** (so local dev is unaffected) and turned on together only for the affected VM build:
+
+| Flag | Effect | Implementation |
+|---|---|---|
+| `VITE_WAF_METHOD_OVERRIDE` | Resends `PATCH`/`PUT`/`DELETE` as `POST ...?_method=<verb>` | [`frontend/src/lib/wafSafeFetch.ts`](../frontend/src/lib/wafSafeFetch.ts) wraps `fetch`; the backend's `HiddenHttpMethodFilter` (`spring.mvc.hiddenmethod.filter.enabled`, `application.yml`) reads `_method` and routes the request as the real verb, so controllers/security/ETag handling are unaffected. |
+| `VITE_WAF_PROXY_UPLOAD` | Routes file uploads through the backend as `POST` instead of a direct `PUT` to MinIO's presigned URL | [`frontend/src/utils/uploadEngine.ts`](../frontend/src/utils/uploadEngine.ts) POSTs bytes to `POST /api/v1/attachments/{id}/upload-proxy` (single-part) or `.../upload-proxy-part?partNumber=N` (multipart); `AttachmentService.uploadProxy`/`uploadProxyPart` (backend) relay the stream to MinIO over the internal Docker network. **Downloads are unaffected** — presigned `GET` URLs go straight to MinIO's `/minio/` proxy in Nginx either way, since `GET` isn't blocked by the WAF. |
+
+Build with both flags on via the wrapper script (don't pass `-WafOverride` to `build.ps1` directly except through this):
+
+```powershell
+cd infra\deploy\pc
+.\build_waf_od.ps1 -Base   # first build, or when a base image version changes
+.\build_waf_od.ps1         # subsequent builds
+```
+
+**To revert once the network team allows `PATCH`/`PUT`/`DELETE` through directly**: stop building with `build_waf_od.ps1` (use plain `build.ps1`, or unset `VITE_WAF_METHOD_OVERRIDE`/`VITE_WAF_PROXY_UPLOAD`) — no code changes needed, both flags default to off. `infra/deploy/pc/build_waf_od.ps1` and the `-WafOverride` param on `build.ps1` can then be deleted.
+
 ---
 
 ## 5. Production deployment

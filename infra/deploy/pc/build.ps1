@@ -16,7 +16,7 @@
 .PARAMETER SkipBackend
   Skip the backend image build (reuse the tar already in staging).
 .PARAMETER WafOverride
-  TEMPORARY (see HANDOVER.md): build the frontend with VITE_WAF_METHOD_OVERRIDE=true (so
+  TEMPORARY (see docs/deployment.md § 4a): build the frontend with VITE_WAF_METHOD_OVERRIDE=true (so
   PATCH/PUT/DELETE go out as POST+?_method=<verb>) and VITE_WAF_PROXY_UPLOAD=true (so file
   uploads POST through the backend instead of PUTing to MinIO directly). Needed only while
   the VM's WAF blocks those methods directly. Normally invoked via build_waf_od.ps1 rather
