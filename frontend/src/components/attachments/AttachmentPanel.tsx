@@ -271,64 +271,50 @@ export function AttachmentPanel({
         dataSource={attachments}
         locale={{ emptyText: 'No attachments yet' }}
         renderItem={(item) => (
-          <List.Item
-            style={{ padding: '6px 0' }}
-            actions={[
-              <Button
-                key="dl"
-                type="text"
-                icon={<DownloadOutlined />}
-                size="small"
-                loading={downloadMutation.isPending}
-                disabled={item.scanStatus === 'INFECTED'}
-                onClick={() => downloadMutation.mutate(item.id)}
-                title="Download"
-              />,
-              canDelete && (item.uploadedByUserId === currentUserId || !currentUserId) && (
-                <Popconfirm
-                  key="del"
-                  title="Delete this attachment?"
-                  onConfirm={() => deleteMutation.mutate(item.id)}
-                  okText="Delete"
-                  okButtonProps={{ danger: true }}
-                >
-                  <Button
-                    type="text"
-                    icon={<DeleteOutlined />}
-                    size="small"
-                    danger
-                    loading={deleteMutation.isPending}
-                    title="Delete"
-                  />
-                </Popconfirm>
-              ),
-            ].filter(Boolean)}
-          >
-            <List.Item.Meta
-              avatar={
-                <PaperClipOutlined
-                  style={{ color: 'var(--ant-color-text-secondary)', marginTop: 3 }}
+          <List.Item style={{ padding: '6px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minWidth: 0, flexWrap: 'wrap' }}>
+              <PaperClipOutlined style={{ color: 'var(--ant-color-text-secondary)', flexShrink: 0 }} />
+              <Text
+                style={{ fontSize: 13, flex: '1 1 120px', minWidth: 0 }}
+                ellipsis={{ tooltip: item.originalFilename }}
+                delete={item.scanStatus === 'INFECTED'}
+              >
+                {item.originalFilename}
+              </Text>
+              <Tag style={{ fontSize: 11, flexShrink: 0, margin: 0 }}>{formatBytes(item.fileSizeBytes)}</Tag>
+              <ScanBadge status={item.scanStatus} />
+              <Text type="secondary" style={{ fontSize: 11, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                {dayjs(item.createdAt).format('DD MMM YYYY HH:mm')}
+              </Text>
+              <Space size={0} style={{ flexShrink: 0, marginLeft: 'auto' }}>
+                <Button
+                  type="text"
+                  icon={<DownloadOutlined />}
+                  size="small"
+                  loading={downloadMutation.isPending}
+                  disabled={item.scanStatus === 'INFECTED'}
+                  onClick={() => downloadMutation.mutate(item.id)}
+                  title="Download"
                 />
-              }
-              title={
-                <Space size={6} wrap>
-                  <Text
-                    style={{ fontSize: 13 }}
-                    ellipsis={{ tooltip: item.originalFilename }}
-                    delete={item.scanStatus === 'INFECTED'}
+                {canDelete && (item.uploadedByUserId === currentUserId || !currentUserId) && (
+                  <Popconfirm
+                    title="Delete this attachment?"
+                    onConfirm={() => deleteMutation.mutate(item.id)}
+                    okText="Delete"
+                    okButtonProps={{ danger: true }}
                   >
-                    {item.originalFilename}
-                  </Text>
-                  <Tag style={{ fontSize: 11 }}>{formatBytes(item.fileSizeBytes)}</Tag>
-                  <ScanBadge status={item.scanStatus} />
-                </Space>
-              }
-              description={
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {dayjs(item.createdAt).format('DD MMM YYYY HH:mm')}
-                </Text>
-              }
-            />
+                    <Button
+                      type="text"
+                      icon={<DeleteOutlined />}
+                      size="small"
+                      danger
+                      loading={deleteMutation.isPending}
+                      title="Delete"
+                    />
+                  </Popconfirm>
+                )}
+              </Space>
+            </div>
           </List.Item>
         )}
       />

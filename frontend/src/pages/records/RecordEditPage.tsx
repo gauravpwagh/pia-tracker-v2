@@ -92,6 +92,8 @@ import { useAuthStore } from '@stores/authStore';
 import { DrawingApproversPanel } from '@/pages/projects/DrawingApproversPanel';
 import { DrawingObservationsPanel } from '@/pages/projects/DrawingObservationsPanel';
 import type { DrawingObservation } from '@/pages/projects/DrawingObservationsPanel';
+import { ArbitrationHearingsPanel } from '@/pages/projects/ArbitrationHearingsPanel';
+import type { ArbitrationHearing } from '@/pages/projects/ArbitrationHearingsPanel';
 import { TalukaSrpCalaPanel } from './TalukaSrpCalaPanel';
 import { fetchTalukas } from '@api/talukaDetails';
 
@@ -539,7 +541,7 @@ const US_COMMON = [
   'chainage_from', 'chainage_to', 'length_affected_km',
   'executing_agency',
   'status_drawing_execution', 'target_removal_date',
-  'consent_state_govt', 'remarks',
+  'consent_state_govt', 'infringement_media', 'drawing_attachment', 'remarks',
 ];
 
 // Agency-conditional field groups
@@ -995,6 +997,7 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
       <DrawingApproversPanel
         recordId={recordId}
         canEdit={activeSectionState?.isTerminal !== true}
+        canEditApproverList={activeSectionState?.isTerminal !== true}
         recordCreatedAt={record?.createdAt}
       />
     ) : isLandAcquisition && activity?.id && (activeSectionResolved === 'srp' || activeSectionResolved === 'cala') ? (
@@ -1008,9 +1011,21 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
     ) : activeSectionResolved === 'observations' ? (
       <DrawingObservationsPanel
         recordId={recordId}
+        recordData={(record?.dataJson as Record<string, unknown> | undefined) ?? {}}
         observations={
           Array.isArray((record?.dataJson as Record<string, unknown> | undefined)?.observations)
             ? ((record.dataJson as Record<string, unknown>).observations as DrawingObservation[])
+            : []
+        }
+        canEdit={activeSectionState?.isTerminal !== true}
+      />
+    ) : isLandAcquisition && activeSectionResolved === 'arbitration' ? (
+      <ArbitrationHearingsPanel
+        recordId={recordId}
+        recordData={(record?.dataJson as Record<string, unknown> | undefined) ?? {}}
+        hearings={
+          Array.isArray((record?.dataJson as Record<string, unknown> | undefined)?.arbitration_hearings)
+            ? ((record.dataJson as Record<string, unknown>).arbitration_hearings as ArbitrationHearing[])
             : []
         }
         canEdit={activeSectionState?.isTerminal !== true}
@@ -1026,7 +1041,11 @@ export function RecordEditor({ recordId, layout = 'page', onBack, readOnly = fal
             : formData
         }
         onChange={handleFormChange}
-        formContext={{ entityType: 'ACTIVITY_RECORD', entityId: recordId }}
+        formContext={{
+          entityType: 'ACTIVITY_RECORD',
+          entityId: recordId,
+          acquisitionDetails: (formData.acquisition_details as Record<string, unknown> | undefined) ?? {},
+        }}
         disabled={readOnly || autosaveStatus === 'conflict' || stateLocked}
       />
     );

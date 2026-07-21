@@ -26,6 +26,7 @@ import {
   Divider,
   Dropdown,
   Form,
+  Image,
   Input,
   Modal,
   notification,
@@ -73,6 +74,7 @@ import {
 import { ActivityMetadataForm, ActivityMetadataView } from './ActivityMetadataForm';
 import { DrawingApproversPanel } from './DrawingApproversPanel';
 import { DrawingObservationsPanel, type DrawingObservation } from './DrawingObservationsPanel';
+import { ArbitrationHearingsPanel, type ArbitrationHearing } from './ArbitrationHearingsPanel';
 
 const { Text } = Typography;
 
@@ -250,10 +252,10 @@ const CHECKLIST_FIELDS: { key: string; label: string }[] = [
 const BASE_ENTITY_TYPE = 'ACTIVITY_RECORD';
 
 function FcCALandPanel({ recordId }: { recordId: string }) {
-  return <FcAttachmentSectionPanel recordId={recordId} fields={CA_LAND_FIELDS} title="CA Land" />;
+  return <AttachmentSectionPanel recordId={recordId} fields={CA_LAND_FIELDS} title="CA Land" />;
 }
 
-function FcAttachmentSectionPanel({ recordId, fields, title }: { recordId: string; fields: { key: string; label: string }[]; title: string }) {
+function AttachmentSectionPanel({ recordId, fields, title }: { recordId: string; fields: { key: string; label: string }[]; title: string }) {
   const entityTypes = fields.map(({ key }) => `${BASE_ENTITY_TYPE}__${key}`);
   const { data, isLoading } = useQuery({
     queryKey: ['attachments', 'section-panel', ...entityTypes, recordId],
@@ -294,6 +296,57 @@ function FcAttachmentSectionPanel({ recordId, fields, title }: { recordId: strin
   );
 }
 
+// ── Photo gallery — thumbnails with built-in click-to-zoom next/previous nav ───
+// (Ant Design's Image.PreviewGroup) for image-only attachment fields.
+
+function PhotoGallery({ recordId, fieldKey, title }: { recordId: string; fieldKey: string; title: string }) {
+  const entityType = `${BASE_ENTITY_TYPE}__${fieldKey}`;
+
+  const { data: files, isLoading } = useQuery({
+    queryKey: ['attachments', 'gallery', entityType, recordId],
+    queryFn: () => fetchAttachments(entityType, recordId),
+    staleTime: 0,
+  });
+
+  const photos = (files ?? []).filter(
+    (f) => f.contentType.startsWith('image/') && f.scanStatus !== 'INFECTED',
+  );
+
+  const { data: urls } = useQuery({
+    queryKey: ['attachments', 'gallery-urls', entityType, recordId, photos.map((f) => f.id)],
+    queryFn: () => Promise.all(photos.map((f) => getAttachmentDownloadUrl(f.id))),
+    enabled: photos.length > 0,
+    staleTime: 60_000,
+  });
+
+  return (
+    <>
+      <Divider orientation="left" orientationMargin={0} style={{ fontSize: 12, margin: '12px 0 6px' }}>{title}</Divider>
+      {isLoading ? (
+        <Text type="secondary" style={{ fontSize: 12 }}>Loading…</Text>
+      ) : photos.length === 0 ? (
+        <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>No photos uploaded yet.</Text>
+      ) : (
+        <Image.PreviewGroup>
+          <Space size={8} wrap>
+            {photos.map((f, i) => (
+              <Image
+                key={f.id}
+                src={urls?.[i]?.presignedUrl}
+                alt={f.originalFilename}
+                width={80}
+                height={80}
+                style={{ objectFit: 'cover', borderRadius: 4 }}
+                placeholder
+              />
+            ))}
+          </Space>
+        </Image.PreviewGroup>
+      )}
+    </>
+  );
+}
+
 // ── LA section attachment field map ──────────────────────────────────────────
 // Each entry: RJSF field suffix (after stripping root_) → display label, grouped by section key.
 
@@ -302,7 +355,8 @@ const LA_SECTION_ATTACH: Record<string, { key: string; label: string }[]> = {
   cala:          [{ key: 'cala_publication_in_gaz_pdf_attachment_id', label: 'Gazette PDF' }],
   section_20a:   [{ key: 'gazette_pub_pdf_attachment_id',             label: 'Gazette PDF' },
                   { key: 'local_newspaper_pdf',                        label: 'Local Newspaper PDF' }],
-  section_20d:   [{ key: 'objections_pdf',                            label: 'Objections PDF' }],
+  section_20d:   [{ key: 'objections_pdf',                            label: 'Objections PDF' },
+                  { key: 'cala_decision_pdf',                          label: 'CALA Decision PDF' }],
   section_20e:   [{ key: 'declaration_gazette_pdf_attachment_id',     label: 'Gazette PDF' }],
   section_20h_i: [{ key: 'possession_pdf',                            label: 'Possession PDF' }],
   mutation:      [{ key: 'mutation_certificate',                       label: 'Mutation Certificate' }],
@@ -447,6 +501,35 @@ function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
     ['local_newspaper_pub_date'],
     { local_newspaper_pub_date:'Newspaper Pub. Date' },
   );
+  // Land Coverage block: Private/Govt/Forest Land fetched live from Acquisition
+  // Details (not stored in section_20e); Total/Done/% computed live, not stored —
+  // see LandCoverageField (edit form) for the matching computation.
+  {
+    const acqDetails = (dataJson.acquisition_details as Record<string, unknown> | undefined) ?? {};
+    const landCoverage =
+      ((dataJson.section_20e as Record<string, unknown> | undefined)?.land_coverage as Record<string, unknown> | undefined) ?? {};
+    const num = (v: unknown) => (typeof v === 'number' ? v : 0);
+    const privateLand = num(acqDetails.area_hectares_private);
+    const govtLand = num(acqDetails.area_hectares_govt);
+    const forestLand = num(acqDetails.area_hectares_forest);
+    const donePrivate = num(landCoverage.section_20e_done_private);
+    const doneGovt = num(landCoverage.permission_taken_govt_land);
+    const doneForest = num(landCoverage.working_permission_obtained);
+    const totalLand = privateLand + govtLand + forestLand;
+    const sectionEDone = donePrivate + doneGovt + doneForest;
+    const percentDone = totalLand > 0 ? (sectionEDone / totalLand) * 100 : 0;
+    s20eEntries.push(
+      { label: 'Private Land (ha)', value: privateLand.toFixed(4) },
+      { label: 'Section 20E Done (Private)', value: donePrivate.toFixed(4) },
+      { label: 'Govt Land (ha)', value: govtLand.toFixed(4) },
+      { label: 'Permission Taken by Railway (Govt. Land)', value: doneGovt.toFixed(4) },
+      { label: 'Forest Land (ha)', value: forestLand.toFixed(4) },
+      { label: 'Working Permission Obtained', value: doneForest.toFixed(4) },
+      { label: 'Total Land (ha)', value: totalLand.toFixed(4) },
+      { label: 'Section E Done (ha)', value: sectionEDone.toFixed(4) },
+      { label: '% Section E Done', value: `${percentDone.toFixed(1)}%` },
+    );
+  }
   const s20fgEntries = flattenSection(
     (dataJson.section_20f_g as Record<string, unknown> | undefined) ?? {},
     ['competent_authority','compensation_determined_on','compensation_amount','market_value_basis'],
@@ -466,6 +549,10 @@ function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
       arbitration_notes:'Arbitration Notes' },
   );
 
+  const arbitrationHearings = Array.isArray(dataJson.arbitration_hearings)
+    ? (dataJson.arbitration_hearings as ArbitrationHearing[])
+    : [];
+
   const dl = (id: string) => downloadMutation.mutate(id);
 
   return (
@@ -481,6 +568,14 @@ function LaDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
       <LaSectionBlock title="Section 20H-I" entries={s20hiEntries} attachFiles={attachFor('section_20h_i')} downloadFn={dl} />
       {/* #16 — the LA document checklist (KMZ/Drone/SRP/CALA) moved to the Activity Scope. */}
       <LaSectionBlock title="Mutation" entries={mutationEntries} attachFiles={attachFor('mutation')} downloadFn={dl} />
+      <div style={{ marginTop: 8 }}>
+        <ArbitrationHearingsPanel
+          recordId={recordId}
+          recordData={dataJson}
+          hearings={arbitrationHearings}
+          canEdit={false}
+        />
+      </div>
     </>
   );
 }
@@ -610,7 +705,7 @@ function FcDetailPanel({ recordId, dataJson }: { recordId: string; dataJson: Rec
       <FcSectionBlock title="Stage I" entries={stageIEntries} attachFiles={attachFor('stage_i')} downloadFn={dl} />
       <FcSectionBlock title="Stage II" entries={stageIIEntries} attachFiles={attachFor('stage_ii')} downloadFn={dl} />
       <FcCALandPanel recordId={recordId} />
-      <FcAttachmentSectionPanel recordId={recordId} fields={CHECKLIST_FIELDS} title="Checklist" />
+      <AttachmentSectionPanel recordId={recordId} fields={CHECKLIST_FIELDS} title="Checklist" />
       <FcSectionBlock title="Post Approval" entries={postApprovalEntries} downloadFn={dl} />
     </>
   );
@@ -1002,25 +1097,39 @@ export function RecordDetailPanel({
                     const orderedEntries = US_ORDER
                       .filter((k) => data[k] !== null && data[k] !== undefined && data[k] !== '')
                       .map((k) => [k, data[k]] as [string, unknown]);
-                    return hasData ? (
-                      <Descriptions size="small" column={2} bordered={false} colon>
-                        {orderedEntries.map(([k, v]) => {
-                            const display =
-                              k === 'utility_type'     ? (UTILITY_TYPE_LABELS[String(v)] ?? String(v)) :
-                              k === 'executing_agency' ? (EXECUTING_AGENCY_LABELS[String(v)] ?? String(v)) :
-                              typeof v === 'boolean'   ? (v ? 'Yes' : 'No') :
-                              String(v);
-                            return (
-                              <Descriptions.Item key={k} label={US_LABELS[k] ?? k}>
-                                {display}
-                              </Descriptions.Item>
-                            );
-                          })}
-                      </Descriptions>
-                    ) : (
-                      <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
-                        No details recorded yet. Click "Edit" to add them.
-                      </Text>
+                    return (
+                      <>
+                        {hasData ? (
+                          <Descriptions size="small" column={2} bordered={false} colon>
+                            {orderedEntries.map(([k, v]) => {
+                                const display =
+                                  k === 'utility_type'     ? (UTILITY_TYPE_LABELS[String(v)] ?? String(v)) :
+                                  k === 'executing_agency' ? (EXECUTING_AGENCY_LABELS[String(v)] ?? String(v)) :
+                                  typeof v === 'boolean'   ? (v ? 'Yes' : 'No') :
+                                  String(v);
+                                return (
+                                  <Descriptions.Item key={k} label={US_LABELS[k] ?? k}>
+                                    {display}
+                                  </Descriptions.Item>
+                                );
+                              })}
+                          </Descriptions>
+                        ) : (
+                          <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                            No details recorded yet. Click "Edit" to add them.
+                          </Text>
+                        )}
+                        <PhotoGallery
+                          recordId={record.id}
+                          fieldKey="infringement_media"
+                          title="Photos and Video of Infringement"
+                        />
+                        <AttachmentSectionPanel
+                          recordId={record.id}
+                          fields={[{ key: 'drawing_attachment', label: 'Attach Drawing' }]}
+                          title="Drawing"
+                        />
+                      </>
                     );
                   })()
                 ) : activity.activityTypeCode === 'TEMPORARY_OFFICE_SPACE' ? (
@@ -1178,7 +1287,7 @@ export function RecordDetailPanel({
                       TUNNEL_DESIGN:          'Tunnel Design',
                     };
                     const DA_DETAILS_ORDER = [
-                      'record_name', 'drawing_type', 'section', 'station',
+                      'record_name', 'drawing_id', 'name_of_work', 'drawing_type', 'section', 'station',
                       'drawing_number', 'chainage_from', 'chainage_to',
                       'description', 'revision',
                       'concept_esp_difference', 'curve_details',
@@ -1186,6 +1295,8 @@ export function RecordDetailPanel({
                     ];
                     const DA_LABELS: Record<string, string> = {
                       record_name:              'Record Name',
+                      drawing_id:               'Drawing ID',
+                      name_of_work:             'Name of Work',
                       drawing_type:             'Drawing Type',
                       section:                  'Section',
                       station:                  'Station',
@@ -1215,7 +1326,17 @@ export function RecordDetailPanel({
                         ? (data.observations as DrawingObservation[])
                         : [];
 
-                    const sanctionDate    = sa.sanction_received_date as string | undefined;
+                    const SANCTION_ORDER = ['date_joint_survey', 'sanction_received_date'];
+                    const SANCTION_LABELS: Record<string, string> = {
+                      date_joint_survey:      'Joint Survey',
+                      sanction_received_date: 'Sanction Received',
+                    };
+                    const sanctionEntries = SANCTION_ORDER
+                      .filter((k) => sa[k] !== null && sa[k] !== undefined && sa[k] !== '')
+                      .map((k) => {
+                        const v = sa[k];
+                        return [k, dayjs(String(v)).format('D MMM YYYY')] as [string, string];
+                      });
 
                     return (
                       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -1258,6 +1379,7 @@ export function RecordDetailPanel({
                           {/* Observations — panel renders its own heading + Add button */}
                           <DrawingObservationsPanel
                             recordId={recordId}
+                            recordData={data}
                             observations={observations}
                             canEdit={canEdit}
                           />
@@ -1267,11 +1389,15 @@ export function RecordDetailPanel({
                             <Divider orientation="left" orientationMargin={0} style={{ ...DIVIDER_STYLE, margin: '0 0 8px' }}>
                               Sanction
                             </Divider>
-                            {sanctionDate ? (
-                              <div style={{ fontSize: 12 }}>
-                                <Text type="secondary" style={{ fontSize: 12 }}>Received: </Text>
-                                <Text strong style={{ fontSize: 12 }}>{dayjs(sanctionDate).format('D MMM YYYY')}</Text>
-                              </div>
+                            {sanctionEntries.length > 0 ? (
+                              <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                                {sanctionEntries.map(([k, display]) => (
+                                  <div key={k} style={{ fontSize: 12 }}>
+                                    <Text type="secondary" style={{ fontSize: 12 }}>{SANCTION_LABELS[k]}: </Text>
+                                    <Text strong style={{ fontSize: 12 }}>{display}</Text>
+                                  </div>
+                                ))}
+                              </Space>
                             ) : (
                               <Text type="secondary" style={{ fontSize: 12, fontStyle: 'italic' }}>
                                 Sanction not yet received.
