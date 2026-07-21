@@ -48,6 +48,10 @@ export interface DrawingObservation {
 
 interface Props {
   recordId: string;
+  /** Full current record.dataJson — merged with the updated observations array
+   * before saving so other sections' data isn't clobbered (patchRecord replaces
+   * the whole dataJson, it does not merge server-side). */
+  recordData: Record<string, unknown>;
   observations: DrawingObservation[];
   canEdit: boolean;
 }
@@ -65,7 +69,7 @@ function pendingDays(submittedDate: string | null): number | null {
   return dayjs().diff(dayjs(submittedDate), 'day');
 }
 
-export function DrawingObservationsPanel({ recordId, observations, canEdit }: Props) {
+export function DrawingObservationsPanel({ recordId, recordData, observations, canEdit }: Props) {
   const queryClient = useQueryClient();
 
   const approversQuery = useQuery({
@@ -83,7 +87,7 @@ export function DrawingObservationsPanel({ recordId, observations, canEdit }: Pr
 
   const saveMutation = useMutation({
     mutationFn: (newObs: DrawingObservation[]) =>
-      patchRecord(recordId, { observations: newObs }),
+      patchRecord(recordId, { ...recordData, observations: newObs }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['record', recordId] });
       setModalOpen(false);
