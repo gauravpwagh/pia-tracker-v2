@@ -1,5 +1,5 @@
 /**
- * TEMPORARY WAF workaround — see HANDOVER.md / docs/deployment.md.
+ * TEMPORARY WAF workaround — see docs/deployment.md § 4a.
  *
  * The network path in front of the beta VM has a WAF that blocks PATCH/PUT/DELETE
  * (confirmed: it returns HTTP 200 with a rejection page instead of reaching the app).

@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Same as build.ps1, but with the TEMPORARY WAF-override frontend build flags on
-  (VITE_WAF_METHOD_OVERRIDE=true, VITE_WAF_PROXY_UPLOAD=true). See HANDOVER.md.
+  (VITE_WAF_METHOD_OVERRIDE=true, VITE_WAF_PROXY_UPLOAD=true). See docs/deployment.md § 4a.
 .DESCRIPTION
   Thin wrapper — all real build logic lives in build.ps1. This just forwards whatever
   args you pass, plus -WafOverride. Delete this file (and the -WafOverride param in

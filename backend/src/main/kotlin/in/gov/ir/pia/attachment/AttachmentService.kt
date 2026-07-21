@@ -104,7 +104,7 @@ data class CompletedPart(
  *   - REQUIRED (< 2 GB, non-video): 8 MB streamed chunks through ClamAV → CLEAN / INFECTED.
  *   - EXEMPT   (≥ 2 GB or video):   SHA-256 stored for integrity, status set to EXEMPT.
  *
- *  TEMPORARY WAF workaround — [uploadProxy] / [uploadProxyPart] (see HANDOVER.md):
+ *  TEMPORARY WAF workaround — [uploadProxy] / [uploadProxyPart] (see docs/deployment.md § 4a):
  *  the VM's WAF blocks PUT, so the browser can't reach MinIO's presigned PUT URL
  *  directly there. These two methods let the browser instead POST the bytes to us
  *  (POST passes the WAF); we relay them to MinIO ourselves over the internal network,
