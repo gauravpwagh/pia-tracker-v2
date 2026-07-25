@@ -441,7 +441,7 @@ function ActivityPane({ activity, activityType, projectId, canEdit, initialRecor
             size="small"
             style={{ background: '#d9f7be', borderColor: '#b7eb8f', color: 'rgba(0,0,0,0.85)' }}
             onClick={() => setMode(mode.kind === 'taluka' ? { kind: 'empty' } : { kind: 'taluka' })}>
-            Sub division/taluka
+            {mode.kind === 'taluka' ? 'Records' : 'Sub division/taluka'}
           </Button>
         )}
         <div style={{ display: 'flex', gap: 8, flex: 1, justifyContent: 'center' }}>

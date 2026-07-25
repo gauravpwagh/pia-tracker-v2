@@ -33,6 +33,7 @@ import {
   Typography,
 } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { v4 as uuidv4 } from 'uuid';
 import { AttachmentPanel } from '@components/attachments/AttachmentPanel';
 import { patchRecord } from '@api/activityRecords';
 
@@ -100,7 +101,7 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
   const queryClient = useQueryClient();
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<FormState>(() => emptyForm(crypto.randomUUID()));
+  const [form, setForm] = useState<FormState>(() => emptyForm(uuidv4()));
   const autoOpenedRef = useRef(false);
 
   const saveMutation = useMutation({
@@ -115,7 +116,7 @@ export function ArbitrationHearingsPanel({ recordId, recordData, hearings, canEd
 
   function openAdd() {
     setEditingId(null);
-    setForm(emptyForm(crypto.randomUUID()));
+    setForm(emptyForm(uuidv4()));
     setFormOpen(true);
   }
 

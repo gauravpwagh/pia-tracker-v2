@@ -32,6 +32,7 @@ import {
   EditOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
+import { v4 as uuidv4 } from 'uuid';
 import { fetchDrawingApprovers, patchRecord } from '@api/activityRecords';
 
 const { Text } = Typography;
@@ -133,7 +134,7 @@ export function DrawingObservationsPanel({ recordId, recordData, observations, c
       );
     } else {
       const newObs: DrawingObservation = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         approver: form.approver ?? '',
         observation: form.observation,
         observation_date: form.observation_date?.format('YYYY-MM-DD') ?? null,

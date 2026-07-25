@@ -3,9 +3,12 @@
 # A Windows checkout without this rule silently breaks container init scripts.
 *.sh text eol=lf
 
-# Gradle wrapper is invoked as ./gradlew inside Linux build containers; CRLF
-# breaks its shebang and Docker build fails with "gradlew: not found".
+# The Gradle wrapper is extensionless, so *.sh doesn't cover it. It runs inside
+# the Linux backend build image (COPY gradlew; RUN ./gradlew), where a CRLF
+# shebang (#!/usr/bin/env sh\r) makes the interpreter "not found" → exit 127.
 gradlew text eol=lf
+# The Windows-side wrapper must stay CRLF.
+gradlew.bat text eol=crlf
 
 # Scripts with a #! shebang, invoked directly rather than via `python`/etc.
 *.py text eol=lf
