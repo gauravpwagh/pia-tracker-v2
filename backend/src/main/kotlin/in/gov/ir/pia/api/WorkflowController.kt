@@ -24,16 +24,24 @@ import java.util.UUID
 /**
  * A single item in the workflow inbox — one workflow instance that requires
  * action from the current user (or is in progress / SLA-breached).
+ *
+ * [entityType] is `"ACTIVITY_RECORD"` for record/section-level items (the
+ * original shape — [recordId], [activityName], [activityTypeCode] populated)
+ * or `"PROJECT"` for project-lifecycle approval gates (CAO/C allocation,
+ * CE/C Dy CE/C assignment, EDGS/C-I submission) — those three fields are
+ * null since there's no record/activity involved yet.
  */
 data class InboxItem(
     val instanceId: UUID,
-    val recordId: UUID,
+    val entityType: String,
+    val recordId: UUID?,
     val sectionCode: String?,
-    /** Nullable — project_code is populated lazily and may be null for older rows. */
+    val projectId: UUID,
+    /** Nullable — project_code is populated lazily and may be null for older rows. Fall back to [projectId] to navigate. */
     val projectCode: String?,
     val projectName: String,
-    val activityName: String,
-    val activityTypeCode: String,
+    val activityName: String?,
+    val activityTypeCode: String?,
     val stateCode: String,
     val stateLabel: String,
     /** Whole days since the instance entered its current state. */
@@ -66,7 +74,15 @@ data class InboxResponse(
  * ## Inbox semantics
  *
  * **Awaiting your action:** instances whose current [workflow_states.role_required_code]
- * matches one of the caller's role codes, scoped to the caller's accessible zones.
+ * matches one of the caller's role codes, scoped to the SAME project visibility
+ * rules as the Projects list (see [projectScopeClause]) — ALL/ZONE/OWN, matching
+ * [in.gov.ir.pia.service.project.ProjectService.listForPrincipal] exactly, so the
+ * Inbox never shows a project a user couldn't otherwise see or open. Covers both
+ * record/section-level instances (`entity_type = 'ACTIVITY_RECORD'`) and
+ * project-lifecycle instances (`entity_type = 'PROJECT'`) — the latter is how
+ * CAO/C project-allocation and CE/C Dy-CE/C-assignment gates surface here.
+ * Record/section-level items are one row per **record**, not per section —
+ * see [buildAwaitingItems].
  *
  * **In progress:** instances for records created by the caller that are no
  * longer in `DRAFT` but not yet `AUTHENTICATED` — i.e. the user submitted
@@ -128,11 +144,10 @@ class WorkflowController(
     fun inbox(
         @AuthenticationPrincipal principal: PiaPrincipal,
     ): InboxResponse {
-        val skipZoneFilter =
-            principal.isSuperAdmin ||
-                principal.permissions.contains("PROJECT.READ.ALL")
-        val awaiting = buildAwaitingItems(principal, skipZoneFilter)
-        val inProgress = buildInProgressItems(principal, skipZoneFilter)
+        val awaiting =
+            (buildAwaitingItems(principal) + buildProjectAwaitingItems(principal))
+                .sortedByDescending { it.daysPending }
+        val inProgress = buildInProgressItems(principal)
         return InboxResponse(
             awaiting = awaiting,
             inProgress = inProgress,
@@ -143,62 +158,115 @@ class WorkflowController(
     // ── Private query helpers ─────────────────────────────────────────────────
 
     /**
-     * Instances whose current state requires a role the caller holds.
-     * Scoped to the caller's accessible zones unless [skipZoneFilter] is true.
+     * Project visibility scope, mirroring
+     * [in.gov.ir.pia.service.project.ProjectService.listForPrincipal] exactly —
+     * the Inbox must never show more than the Projects list would for the same
+     * user, so the two stay in lockstep:
+     *
+     *   - **ALL** (super admin or `PROJECT.READ.ALL`) → no filter, every project.
+     *   - **ZONE** (`PROJECT.READ.ZONE`) → `p.zone_id` in the caller's accessible zones.
+     *   - **OWN** (neither — e.g. CE/C, Dy CE/C, Nodal Dy CE/C) → `p` has an active
+     *     row in `project_assignments` for this user. Notably narrower than "zone" —
+     *     these roles see only projects they're actually assigned to, not every
+     *     project their zone happens to contain.
+     *
+     * Adds any needed bind variables to [params] and returns the SQL fragment
+     * (empty, or an `AND ...` clause) to splice into a query filtering `projects p`.
      */
-    private fun buildAwaitingItems(
+    private fun projectScopeClause(
         principal: PiaPrincipal,
-        skipZoneFilter: Boolean,
-    ): List<InboxItem> {
+        params: MutableMap<String, Any>,
+    ): String =
+        when {
+            principal.isSuperAdmin || principal.permissions.contains("PROJECT.READ.ALL") -> ""
+
+            principal.permissions.contains("PROJECT.READ.ZONE") -> {
+                params["zoneIds"] = principal.accessibleZoneIds.map { it.toString() }.toList()
+                "AND p.zone_id = ANY(ARRAY[ :zoneIds ]::uuid[])"
+            }
+
+            else -> {
+                params["assignedUserId"] = principal.userId
+                """
+                AND EXISTS (
+                    SELECT 1 FROM project_assignments pa_scope
+                     WHERE pa_scope.project_id = p.id
+                       AND pa_scope.user_id = :assignedUserId
+                       AND pa_scope.is_active = true
+                )
+                """.trimIndent()
+            }
+        }
+
+    /**
+     * Instances whose current state requires a role the caller holds — one
+     * row per **record**, not per section.
+     *
+     * Section-level activities (e.g. Land Acquisition) run one
+     * `workflow_instance` per section, so a single record can have several
+     * instances simultaneously requiring the same role (e.g. 9+ sections all
+     * in DRAFT). Without collapsing, a Dy CE/C would see one inbox row per
+     * *section* rather than per record. `DISTINCT ON (wi.entity_id)` picks
+     * the earliest-entered instance per record — the longest-waiting section
+     * — so daysPending/SLA reflect the oldest outstanding item and the
+     * displayed section is the one that's been pending longest. Record-level
+     * activities (a single, section_code-less instance per record) pass
+     * through unchanged since there's only one row per entity_id anyway.
+     *
+     * Scoped per [projectScopeClause] — the same ALL/ZONE/OWN rules as the
+     * Projects list.
+     */
+    private fun buildAwaitingItems(principal: PiaPrincipal): List<InboxItem> {
         val params =
             mutableMapOf<String, Any>(
                 "roleCodes" to principal.roleCodes.toList(),
             )
-        val zoneClause =
-            if (skipZoneFilter) {
-                ""
-            } else {
-                params["zoneIds"] = principal.accessibleZoneIds.map { it.toString() }.toList()
-                "AND p.zone_id = ANY(ARRAY[ :zoneIds ]::uuid[])"
-            }
+        val scopeClause = projectScopeClause(principal, params)
         val sql =
             """
-            SELECT
-                wi.id                                                       AS instance_id,
-                wi.entity_id                                                AS record_id,
-                wi.section_code,
-                p.project_code,
-                p.name                                                      AS project_name,
-                pa.name                                                     AS activity_name,
-                pa.activity_type_code,
-                ws.code                                                     AS state_code,
-                ws.label                                                    AS state_label,
-                GREATEST(0,
-                    FLOOR(EXTRACT(EPOCH FROM (now() - wi.entered_state_at))
-                    / 86400)::int)                                          AS days_pending,
-                CASE
-                    WHEN ws.sla_days IS NOT NULL
-                         AND EXTRACT(EPOCH FROM (now() - wi.entered_state_at))
-                             > ws.sla_days * 86400
-                    THEN true ELSE false
-                END                                                         AS is_sla_breached
-            FROM workflow_instances wi
-            JOIN workflow_states ws ON ws.id = wi.current_state_id
-            JOIN activity_records ar ON ar.id = wi.entity_id AND ar.is_deleted = false
-            JOIN project_activities pa ON pa.id = ar.project_activity_id
-            JOIN projects p ON p.id = pa.project_id AND p.is_deleted = false
-            WHERE wi.entity_type = 'ACTIVITY_RECORD'
-              AND ws.is_terminal = false
-              AND ws.role_required_code = ANY(ARRAY[ :roleCodes ])
-              $zoneClause
-            ORDER BY wi.entered_state_at ASC
+            SELECT * FROM (
+                SELECT DISTINCT ON (wi.entity_id)
+                    wi.id                                                       AS instance_id,
+                    wi.entity_id                                                AS record_id,
+                    wi.section_code,
+                    p.id                                                        AS project_id,
+                    p.project_code,
+                    p.name                                                      AS project_name,
+                    pa.name                                                     AS activity_name,
+                    pa.activity_type_code,
+                    ws.code                                                     AS state_code,
+                    ws.label                                                    AS state_label,
+                    wi.entered_state_at,
+                    GREATEST(0,
+                        FLOOR(EXTRACT(EPOCH FROM (now() - wi.entered_state_at))
+                        / 86400)::int)                                          AS days_pending,
+                    CASE
+                        WHEN ws.sla_days IS NOT NULL
+                             AND EXTRACT(EPOCH FROM (now() - wi.entered_state_at))
+                                 > ws.sla_days * 86400
+                        THEN true ELSE false
+                    END                                                         AS is_sla_breached
+                FROM workflow_instances wi
+                JOIN workflow_states ws ON ws.id = wi.current_state_id
+                JOIN activity_records ar ON ar.id = wi.entity_id AND ar.is_deleted = false
+                JOIN project_activities pa ON pa.id = ar.project_activity_id
+                JOIN projects p ON p.id = pa.project_id AND p.is_deleted = false
+                WHERE wi.entity_type = 'ACTIVITY_RECORD'
+                  AND ws.is_terminal = false
+                  AND ws.role_required_code = ANY(ARRAY[ :roleCodes ])
+                  $scopeClause
+                ORDER BY wi.entity_id, wi.entered_state_at ASC
+            ) per_record
+            ORDER BY entered_state_at ASC
             LIMIT 200
             """.trimIndent()
         return namedJdbc.query(sql, params) { rs, _ ->
             InboxItem(
                 instanceId = UUID.fromString(rs.getString("instance_id")),
+                entityType = "ACTIVITY_RECORD",
                 recordId = UUID.fromString(rs.getString("record_id")),
                 sectionCode = rs.getString("section_code"),
+                projectId = UUID.fromString(rs.getString("project_id")),
                 projectCode = rs.getString("project_code"),
                 projectName = rs.getString("project_name"),
                 activityName = rs.getString("activity_name"),
@@ -212,31 +280,88 @@ class WorkflowController(
     }
 
     /**
+     * Project-lifecycle instances whose current state requires a role the
+     * caller holds — CAO/C's "awaiting allocation", CE/C's "awaiting Dy CE/C
+     * assignment", EDGS/C-I's "draft awaiting submission", etc. These live on
+     * `entity_type = 'PROJECT'` workflow instances, joined straight to
+     * `projects` since there's no activity/record underneath yet. Scoped per
+     * [projectScopeClause] — note that by the time a project reaches
+     * `AWAITING_CEC_ASSIGNMENT`, `allocate()` has already created the CE/C's
+     * `project_assignments` row, so OWN-scope CE/Cs correctly see their gate.
+     */
+    private fun buildProjectAwaitingItems(principal: PiaPrincipal): List<InboxItem> {
+        val params =
+            mutableMapOf<String, Any>(
+                "roleCodes" to principal.roleCodes.toList(),
+            )
+        val scopeClause = projectScopeClause(principal, params)
+        val sql =
+            """
+            SELECT
+                wi.id                                                       AS instance_id,
+                p.id                                                        AS project_id,
+                p.project_code,
+                p.name                                                      AS project_name,
+                ws.code                                                     AS state_code,
+                ws.label                                                    AS state_label,
+                GREATEST(0,
+                    FLOOR(EXTRACT(EPOCH FROM (now() - wi.entered_state_at))
+                    / 86400)::int)                                          AS days_pending,
+                CASE
+                    WHEN ws.sla_days IS NOT NULL
+                         AND EXTRACT(EPOCH FROM (now() - wi.entered_state_at))
+                             > ws.sla_days * 86400
+                    THEN true ELSE false
+                END                                                         AS is_sla_breached
+            FROM workflow_instances wi
+            JOIN workflow_states ws ON ws.id = wi.current_state_id
+            JOIN projects p ON p.id = wi.entity_id AND p.is_deleted = false
+            WHERE wi.entity_type = 'PROJECT'
+              AND ws.is_terminal = false
+              AND ws.role_required_code = ANY(ARRAY[ :roleCodes ])
+              $scopeClause
+            ORDER BY wi.entered_state_at ASC
+            LIMIT 200
+            """.trimIndent()
+        return namedJdbc.query(sql, params) { rs, _ ->
+            InboxItem(
+                instanceId = UUID.fromString(rs.getString("instance_id")),
+                entityType = "PROJECT",
+                recordId = null,
+                sectionCode = null,
+                projectId = UUID.fromString(rs.getString("project_id")),
+                projectCode = rs.getString("project_code"),
+                projectName = rs.getString("project_name"),
+                activityName = null,
+                activityTypeCode = null,
+                stateCode = rs.getString("state_code"),
+                stateLabel = rs.getString("state_label"),
+                daysPending = rs.getInt("days_pending"),
+                isSlaBreached = rs.getBoolean("is_sla_breached"),
+            )
+        }
+    }
+
+    /**
      * Instances for records the caller created that are beyond DRAFT but not
      * yet AUTHENTICATED — i.e. the caller submitted something being reviewed
-     * upstream. Scoped to the caller's accessible zones unless [skipZoneFilter].
+     * upstream. Scoped per [projectScopeClause] — the same ALL/ZONE/OWN rules
+     * as the Projects list (on top of the `created_by_user_id` filter already
+     * limiting this to the caller's own records).
      */
-    private fun buildInProgressItems(
-        principal: PiaPrincipal,
-        skipZoneFilter: Boolean,
-    ): List<InboxItem> {
+    private fun buildInProgressItems(principal: PiaPrincipal): List<InboxItem> {
         val params =
             mutableMapOf<String, Any>(
                 "userId" to principal.userId,
             )
-        val zoneClause =
-            if (skipZoneFilter) {
-                ""
-            } else {
-                params["zoneIds"] = principal.accessibleZoneIds.map { it.toString() }.toList()
-                "AND p.zone_id = ANY(ARRAY[ :zoneIds ]::uuid[])"
-            }
+        val scopeClause = projectScopeClause(principal, params)
         val sql =
             """
             SELECT
                 wi.id                                                       AS instance_id,
                 wi.entity_id                                                AS record_id,
                 wi.section_code,
+                p.id                                                        AS project_id,
                 p.project_code,
                 p.name                                                      AS project_name,
                 pa.name                                                     AS activity_name,
@@ -257,15 +382,17 @@ class WorkflowController(
             WHERE wi.entity_type = 'ACTIVITY_RECORD'
               AND ws.code NOT IN ('DRAFT', 'AUTHENTICATED')
               AND ws.is_terminal = false
-              $zoneClause
+              $scopeClause
             ORDER BY wi.entered_state_at ASC
             LIMIT 200
             """.trimIndent()
         return namedJdbc.query(sql, params) { rs, _ ->
             InboxItem(
                 instanceId = UUID.fromString(rs.getString("instance_id")),
+                entityType = "ACTIVITY_RECORD",
                 recordId = UUID.fromString(rs.getString("record_id")),
                 sectionCode = rs.getString("section_code"),
+                projectId = UUID.fromString(rs.getString("project_id")),
                 projectCode = rs.getString("project_code"),
                 projectName = rs.getString("project_name"),
                 activityName = rs.getString("activity_name"),

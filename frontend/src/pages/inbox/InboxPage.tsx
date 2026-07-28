@@ -2,11 +2,15 @@
  * InboxPage — items pending the current user's action.
  *
  * Three tabs:
- *   Awaiting action  — sections whose current state requires the caller's role.
+ *   Awaiting action  — sections whose current state requires the caller's role,
+ *                      plus project-lifecycle approval gates (CAO/C allocation,
+ *                      CE/C Dy CE/C assignment, EDGS/C-I draft submission).
  *   In progress      — sections the caller created that are being reviewed upstream.
  *   SLA breached     — subset of "awaiting" where the SLA has been exceeded.
  *
- * Clicking any row navigates to the record edit page at the section's tab.
+ * Clicking a record/section row navigates to the record edit page at the
+ * section's tab; clicking a project-approval row navigates to the project
+ * workspace, where the allocate/assign action lives.
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -37,6 +41,8 @@ const STATE_COLORS: Record<string, string> = {
   AUTHENTICATED: 'purple',
   SENT_BACK_TO_DYCE: 'warning',
   SENT_BACK_TO_NODAL: 'warning',
+  AWAITING_CAO_ALLOCATION: 'processing',
+  AWAITING_CEC_ASSIGNMENT: 'processing',
 };
 
 // ── Table columns ─────────────────────────────────────────────────────────────
@@ -52,9 +58,14 @@ function useColumns(t: ReturnType<typeof useTranslation>['t']): ColumnsType<Inbo
       render: (name: string, row: InboxItem) => (
         <a
           onClick={() =>
-            navigate(`/workspace/${row.projectCode}`, {
-              state: { openRecord: { activityTypeCode: row.activityTypeCode, recordId: row.recordId } },
-            })
+            navigate(
+              // project_code is assigned at a later administrative step and is often null —
+              // ProjectWorkspace resolves the :projectCode param by code OR id, so id always works.
+              `/workspace/${row.projectCode || row.projectId}`,
+              row.entityType === 'PROJECT'
+                ? undefined
+                : { state: { openRecord: { activityTypeCode: row.activityTypeCode, recordId: row.recordId } } },
+            )
           }
         >
           {name}
@@ -65,6 +76,8 @@ function useColumns(t: ReturnType<typeof useTranslation>['t']): ColumnsType<Inbo
       title: t('inbox.table.activity'),
       dataIndex: 'activityName',
       key: 'activityName',
+      render: (name: string | null, row: InboxItem) =>
+        row.entityType === 'PROJECT' ? t('inbox.table.projectApproval') : name,
     },
     {
       title: t('inbox.table.section'),

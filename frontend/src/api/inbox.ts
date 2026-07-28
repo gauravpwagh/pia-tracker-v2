@@ -12,12 +12,19 @@ const BASE = API_BASE;
 
 export interface InboxItem {
   instanceId: string;
-  recordId: string;
+  /** "ACTIVITY_RECORD" for record/section items, "PROJECT" for project-lifecycle approval gates. */
+  entityType: 'ACTIVITY_RECORD' | 'PROJECT';
+  /** Null for PROJECT items — there's no record yet. */
+  recordId: string | null;
   sectionCode: string | null;
+  projectId: string;
+  /** Often null — project_code is assigned at a later administrative step, not at creation. Navigate by projectId instead. */
   projectCode: string | null;
   projectName: string;
-  activityName: string;
-  activityTypeCode: string;
+  /** Null for PROJECT items. */
+  activityName: string | null;
+  /** Null for PROJECT items. */
+  activityTypeCode: string | null;
   stateCode: string;
   stateLabel: string;
   /** Whole days since the instance entered its current state. */

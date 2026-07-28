@@ -21,6 +21,7 @@
     "table": {
       "project": "Project",
       "activity": "Activity",
+      "projectApproval": "Project Approval",
       "section": "Section",
       "state": "State",
       "daysPending": "Days Pending",
