@@ -40,12 +40,14 @@ import java.util.UUID
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("dev")
 @Testcontainers
-@TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data"])
+@TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data,classpath:db/test-data"])
 class ZoneQueryFilterIntegrationTest {
     companion object {
         @JvmField
         @Container
-        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
+        val postgres: PostgreSQLContainer<*> =
+            PostgreSQLContainer("postgres:16-alpine")
+                .withInitScript("testcontainers/init-roles.sql")
 
         @JvmStatic
         @DynamicPropertySource
@@ -59,7 +61,7 @@ class ZoneQueryFilterIntegrationTest {
         }
 
         // Fixed UUIDs from V001_004__seed_demo_users.sql
-        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101") // Rajesh Kumar Singh
+        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111113") // Rajesh Kumar Singh
         val CE_C_NR_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103") // Amit Verma (NR)
 
         // Fixed UUID from V001_009__seed_demo_user_scr.sql

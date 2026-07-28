@@ -98,7 +98,7 @@ import java.util.UUID
 @Testcontainers
 @TestPropertySource(
     properties = [
-        "spring.flyway.locations=classpath:db/migration,classpath:db/data",
+        "spring.flyway.locations=classpath:db/migration,classpath:db/data,classpath:db/test-data",
         // ClamAV unreachable → upload must be blocked (scan-mandatory gate)
         "pia.clamav.host=127.0.0.1",
         "pia.clamav.port=19999",
@@ -109,7 +109,9 @@ class Phase1GoldenPathIntegrationTest {
     companion object {
         @JvmField
         @Container
-        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
+        val postgres: PostgreSQLContainer<*> =
+            PostgreSQLContainer("postgres:16-alpine")
+                .withInitScript("testcontainers/init-roles.sql")
 
         @JvmStatic
         @DynamicPropertySource
@@ -122,8 +124,8 @@ class Phase1GoldenPathIntegrationTest {
             registry.add("spring.flyway.password", postgres::getPassword)
         }
 
-        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
+        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111113")
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111114")
         val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
         val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
         val DYCE_2_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111105")

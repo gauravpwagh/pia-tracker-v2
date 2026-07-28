@@ -19,12 +19,14 @@ import org.testcontainers.junit.jupiter.Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ImportAutoConfiguration(FlywayAutoConfiguration::class)
 @Testcontainers
-@TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data"])
+@TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data,classpath:db/test-data"])
 class ZoneRepositoryIntegrationTest {
     companion object {
         @JvmField
         @Container
-        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
+        val postgres: PostgreSQLContainer<*> =
+            PostgreSQLContainer("postgres:16-alpine")
+                .withInitScript("testcontainers/init-roles.sql")
 
         @JvmStatic
         @DynamicPropertySource

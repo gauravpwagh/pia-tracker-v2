@@ -25,12 +25,14 @@ import org.testcontainers.junit.jupiter.Testcontainers
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("prod")
 @Testcontainers
-@TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data"])
+@TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data,classpath:db/test-data"])
 class DummyAuthProdProfileIntegrationTest {
     companion object {
         @JvmField
         @Container
-        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
+        val postgres: PostgreSQLContainer<*> =
+            PostgreSQLContainer("postgres:16-alpine")
+                .withInitScript("testcontainers/init-roles.sql")
 
         @JvmStatic
         @DynamicPropertySource

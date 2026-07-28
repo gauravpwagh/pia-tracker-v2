@@ -26,12 +26,14 @@ import java.util.UUID
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("dev")
 @Testcontainers
-@TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data"])
+@TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data,classpath:db/test-data"])
 class DummyAuthIntegrationTest {
     companion object {
         @JvmField
         @Container
-        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
+        val postgres: PostgreSQLContainer<*> =
+            PostgreSQLContainer("postgres:16-alpine")
+                .withInitScript("testcontainers/init-roles.sql")
 
         @JvmStatic
         @DynamicPropertySource
@@ -45,7 +47,7 @@ class DummyAuthIntegrationTest {
         }
 
         /** Fixed UUID seeded by V001_004 — Rajesh Kumar Singh. */
-        val SEEDED_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
+        val SEEDED_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111113")
     }
 
     @Autowired

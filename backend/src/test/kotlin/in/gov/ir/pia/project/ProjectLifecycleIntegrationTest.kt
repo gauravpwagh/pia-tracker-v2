@@ -48,12 +48,14 @@ import java.util.UUID
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("dev")
 @Testcontainers
-@TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data"])
+@TestPropertySource(properties = ["spring.flyway.locations=classpath:db/migration,classpath:db/data,classpath:db/test-data"])
 class ProjectLifecycleIntegrationTest {
     companion object {
         @JvmField
         @Container
-        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
+        val postgres: PostgreSQLContainer<*> =
+            PostgreSQLContainer("postgres:16-alpine")
+                .withInitScript("testcontainers/init-roles.sql")
 
         @JvmStatic
         @DynamicPropertySource
@@ -67,8 +69,8 @@ class ProjectLifecycleIntegrationTest {
         }
 
         // Fixed UUIDs from V001_004__seed_demo_users.sql
-        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101") // EMP001 Rajesh
-        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102") // EMP002 Priya
+        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111113") // EMP001 Rajesh
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111114") // EMP002 Priya
         val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103") // EMP003 Amit
         val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104") // EMP004 Sunita
         val DYCE_2_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111105") // EMP005 Mohammed
