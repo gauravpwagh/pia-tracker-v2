@@ -12,6 +12,8 @@ import `in`.gov.ir.pia.service.project.CreateProjectRequest
 import `in`.gov.ir.pia.service.project.DesignateNodalRequest
 import `in`.gov.ir.pia.service.project.ProjectDetailResponse
 import `in`.gov.ir.pia.workflow.DrawingApproverListResponse
+import `in`.gov.ir.pia.workflow.DrawingApproverResponse
+import `in`.gov.ir.pia.workflow.UpdateApprovalRequest
 import io.minio.MinioClient
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -31,35 +33,35 @@ import org.springframework.test.context.TestPropertySource
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
+import java.time.LocalDate
 import java.util.UUID
 
 /**
  * Phase 2.5 Gate — Drawing checklist model (phasing.md § 2.5).
  *
- * Gate: "A drawing is created with default approvers (computed from the form
- *        definition). Each approver can approve independently. A send-back
- *        from one approver flips only that row to SENT_BACK; others unchanged
- *        (decision CCCC). Re-submit after addressing the issue sends back to
- *        PENDING."
+ * Rewritten against the record-keeping model shipped by V029 (`docs/workflow.md`
+ * § 5, `DrawingService.kt`): approvers are designation-only slots (no user_id, no
+ * PENDING/APPROVED/SENT_BACK status) — Dy CE/C records the date a physical
+ * sign-off was received. There is no approve/send-back/reapprove action; the
+ * derived `record_state` is DRAFT while any slot's `approvedOn` is null, and
+ * AUTHENTICATED once every slot has one.
  *
- * Test flow:
- *   1. Create an ESP_DRAWING_V1 activity record.
- *   2. Assert exactly 2 drawing_approvers rows created: SR_DEN (user 109)
- *      and DY_CEE (user 110), both in NR zone — single-match, user_id populated.
- *   3. Submit drawing (DRAFT → IN_APPROVAL).
- *   4. SR_DEN (109) approves → their slot APPROVED; DY_CEE slot still PENDING.
- *   5. DY_CEE (110) sends back → their slot SENT_BACK; SR_DEN slot still APPROVED.
- *      ↳ Decision CCCC verified.
- *   6. Dy CE/C reapproves → DY_CEE slot SENT_BACK → PENDING; SR_DEN stays APPROVED.
- *      ↳ Decision BBBB verified.
- *   7. Final state: IN_APPROVAL (DY_CEE PENDING, SR_DEN APPROVED).
+ * Gate assertions:
+ *   1. Creating an ESP drawing record seeds one approver slot per designation
+ *      in ESP_DRAWING_V1's `default_approver_designations`.
+ *   2. Recording an approval date on one slot leaves the others — and the
+ *      overall record_state — untouched (each slot acts independently).
+ *   3. Once every slot has an approvedOn date, allApproved flips true and
+ *      record_state becomes AUTHENTICATED.
+ *   4. Clearing a slot's approvedOn (re-open for correction) drops allApproved
+ *      and reverts record_state to DRAFT without disturbing other slots.
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("dev")
 @Testcontainers
 @TestPropertySource(
     properties = [
-        "spring.flyway.locations=classpath:db/migration,classpath:db/data",
+        "spring.flyway.locations=classpath:db/migration,classpath:db/data,classpath:db/test-data",
         "pia.clamav.host=127.0.0.1",
         "pia.clamav.port=19999",
         "pia.clamav.timeout-ms=200",
@@ -69,7 +71,9 @@ class DrawingGateIntegrationTest {
     companion object {
         @JvmField
         @Container
-        val postgres: PostgreSQLContainer<*> = PostgreSQLContainer("postgres:16-alpine")
+        val postgres: PostgreSQLContainer<*> =
+            PostgreSQLContainer("postgres:16-alpine")
+                .withInitScript("testcontainers/init-roles.sql")
 
         @JvmStatic
         @DynamicPropertySource
@@ -82,13 +86,11 @@ class DrawingGateIntegrationTest {
             registry.add("spring.flyway.password", postgres::getPassword)
         }
 
-        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111101")
-        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111102")
+        val EDGS_CI_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111113")
+        val CAO_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111114")
         val CE_C_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111103")
         val DYCE_1_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111104")
         val DYCE_2_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111105")
-        val SR_DEN_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111109")
-        val DY_CEE_USER_ID: UUID = UUID.fromString("11111111-1111-1111-1111-111111111110")
     }
 
     @Autowired lateinit var restTemplate: TestRestTemplate
@@ -124,22 +126,30 @@ class DrawingGateIntegrationTest {
         type: Class<T>,
     ) = restTemplate.postForEntity(url, HttpEntity(body, headersFor(cookies)), type)
 
-    private fun <T> postEmpty(
-        url: String,
-        cookies: List<String>,
-        type: Class<T>,
-    ) = restTemplate.postForEntity(url, HttpEntity<Void>(headersFor(cookies)), type)
-
     private fun <T> get(
         url: String,
         cookies: List<String>,
         type: Class<T>,
     ) = restTemplate.exchange(url, HttpMethod.GET, HttpEntity<Void>(headersFor(cookies)), type)
 
+    private fun <T> patch(
+        url: String,
+        body: Any,
+        cookies: List<String>,
+        type: Class<T>,
+    ) = restTemplate.exchange(url, HttpMethod.PATCH, HttpEntity(body, headersFor(cookies)), type)
+
+    private fun recordState(recordId: UUID): String =
+        jdbc.queryForObject(
+            "SELECT record_state FROM activity_records WHERE id = ?",
+            String::class.java,
+            recordId,
+        )!!
+
     // ── Gate test ─────────────────────────────────────────────────────────────
 
     @Test
-    fun `Phase 2-5 Drawing gate — checklist model with independent approve and send-back`() {
+    fun `Phase 2-5 Drawing gate — checklist model records independent approval dates per designation`() {
         val nrZoneId = jdbc.queryForObject("SELECT id FROM zones WHERE code = 'NR'", UUID::class.java)!!
 
         // ── Project scaffold (same pattern as other gate tests) ────────────────
@@ -175,8 +185,6 @@ class DrawingGateIntegrationTest {
         )
 
         val dyce1 = loginAs(DYCE_1_USER_ID)
-        val srDen = loginAs(SR_DEN_USER_ID)
-        val dyCee = loginAs(DY_CEE_USER_ID)
 
         // ── Step 1: Create Drawing Approval activity + ESP drawing record ──────
         val activity =
@@ -199,144 +207,110 @@ class DrawingGateIntegrationTest {
         assertThat(createResp.statusCode).isEqualTo(HttpStatus.CREATED)
         val record = createResp.body!!
 
-        // ── Step 2: Verify exactly 2 drawing_approvers rows created ───────────
-        // Both SR_DEN (109) and DY_CEE (110) are in NR zone → single match → user_id populated.
-        val approverCount =
-            jdbc.queryForObject(
-                "SELECT count(*) FROM drawing_approvers WHERE activity_record_id = ? AND NOT is_deleted",
-                Long::class.java,
-                record.id,
-            )!!
-        assertThat(approverCount)
-            .`as`("ESP drawing must create exactly 2 approver rows (SR_DEN + DY_CEE)")
-            .isEqualTo(2L)
-
-        val srDenRowCount =
-            jdbc.queryForObject(
-                """SELECT count(*) FROM drawing_approvers
-                   WHERE activity_record_id = ? AND approval_designation_code = 'SR_DEN'
-                     AND user_id = ? AND NOT is_deleted""",
-                Long::class.java,
-                record.id,
-                SR_DEN_USER_ID,
-            )!!
-        assertThat(srDenRowCount)
-            .`as`("SR_DEN approver slot must have user_id = SR_DEN_USER_ID (single match)")
-            .isEqualTo(1L)
-
-        val dyCeeRowCount =
-            jdbc.queryForObject(
-                """SELECT count(*) FROM drawing_approvers
-                   WHERE activity_record_id = ? AND approval_designation_code = 'DY_CEE'
-                     AND user_id = ? AND NOT is_deleted""",
-                Long::class.java,
-                record.id,
-                DY_CEE_USER_ID,
-            )!!
-        assertThat(dyCeeRowCount)
-            .`as`("DY_CEE approver slot must have user_id = DY_CEE_USER_ID (single match)")
-            .isEqualTo(1L)
-
-        // ── Step 3: Submit drawing (DRAFT → IN_APPROVAL) ──────────────────────
-        val submitResp = postEmpty("/api/v1/activity-records/${record.id}/submit-drawing", dyce1, Void::class.java)
-        assertThat(submitResp.statusCode).isIn(HttpStatus.OK, HttpStatus.NO_CONTENT, HttpStatus.CREATED)
-
-        // Verify record_state is IN_APPROVAL after submit
-        val stateAfterSubmit =
-            jdbc.queryForObject(
-                "SELECT record_state FROM activity_records WHERE id = ?",
+        // ── Step 2: default approver slots mirror ESP_DRAWING_V1's designations ─
+        val expectedDesignations =
+            jdbc.queryForList(
+                "SELECT unnest(default_approver_designations) FROM form_definitions WHERE code = 'ESP_DRAWING_V1'",
                 String::class.java,
-                record.id,
-            )!!
-        assertThat(stateAfterSubmit)
-            .`as`("record_state after submit must be IN_APPROVAL")
-            .isEqualTo("IN_APPROVAL")
+            ).toSet()
+        assertThat(expectedDesignations).`as`("ESP_DRAWING_V1 must declare at least one default approver").isNotEmpty()
 
-        // ── Step 4: SR_DEN approves their slot ─────────────────────────────────
-        // Fetch approver IDs
-        val approvers =
+        val initial =
             get(
                 "/api/v1/activity-records/${record.id}/drawing-approvers",
-                srDen,
+                dyce1,
                 DrawingApproverListResponse::class.java,
             ).body!!
 
-        val srDenSlot = approvers.approvers.find { it.approvalDesignationCode == "SR_DEN" }!!
-        val dyCeeSlot = approvers.approvers.find { it.approvalDesignationCode == "DY_CEE" }!!
+        assertThat(initial.approvers.map { it.approvalDesignationCode }.toSet())
+            .`as`("Seeded approver slots must exactly match the form's default_approver_designations")
+            .isEqualTo(expectedDesignations)
+        assertThat(initial.allApproved)
+            .`as`("A freshly created drawing has no approvals recorded yet")
+            .isFalse()
+        assertThat(recordState(record.id))
+            .`as`("record_state must be DRAFT while any approver slot is pending")
+            .isEqualTo("DRAFT")
 
-        postEmpty(
-            "/api/v1/activity-records/${record.id}/drawing-approvers/${srDenSlot.id}/approve",
-            srDen,
-            Void::class.java,
-        ).also { assertThat(it.statusCode).isIn(HttpStatus.OK, HttpStatus.NO_CONTENT, HttpStatus.CREATED) }
+        // ── Step 3: recording one slot's approval date leaves the rest pending ──
+        val firstSlot = initial.approvers.first()
+        val remainingSlots = initial.approvers.drop(1)
 
-        // After SR_DEN approves: SR_DEN = APPROVED, DY_CEE = PENDING → state still IN_APPROVAL
-        val afterSrDenApprove =
+        val patchResp =
+            patch(
+                "/api/v1/activity-records/${record.id}/drawing-approvers/${firstSlot.id}",
+                UpdateApprovalRequest(
+                    sentForReviewOn = LocalDate.now().minusDays(3),
+                    reviewedOn = LocalDate.now().minusDays(1),
+                    approvedOn = LocalDate.now(),
+                ),
+                dyce1,
+                DrawingApproverResponse::class.java,
+            )
+        assertThat(patchResp.statusCode).isEqualTo(HttpStatus.OK)
+        assertThat(patchResp.body!!.approvedOn).isEqualTo(LocalDate.now())
+        assertThat(patchResp.body!!.daysTakenForApproval)
+            .`as`("daysTakenForApproval is derived from (approvedOn - sentForReviewOn)")
+            .isEqualTo(3)
+
+        val afterFirst =
             get(
                 "/api/v1/activity-records/${record.id}/drawing-approvers",
-                srDen,
+                dyce1,
                 DrawingApproverListResponse::class.java,
             ).body!!
+        assertThat(afterFirst.allApproved)
+            .`as`("Other slots are still pending — allApproved must stay false")
+            .isFalse()
+        assertThat(afterFirst.approvers.filter { it.id != firstSlot.id }.all { it.approvedOn == null })
+            .`as`("Recording one slot's approval must not affect the others — independent slots")
+            .isTrue()
+        assertThat(recordState(record.id)).isEqualTo("DRAFT")
 
-        assertThat(afterSrDenApprove.approvers.find { it.id == srDenSlot.id }!!.status)
-            .`as`("SR_DEN slot must be APPROVED after SR_DEN approves")
-            .isEqualTo("APPROVED")
-        assertThat(afterSrDenApprove.approvers.find { it.id == dyCeeSlot.id }!!.status)
-            .`as`("DY_CEE slot must remain PENDING — each approver acts independently")
-            .isEqualTo("PENDING")
-        assertThat(afterSrDenApprove.derivedState)
-            .`as`("Drawing state must be IN_APPROVAL (one PENDING remains)")
-            .isEqualTo("IN_APPROVAL")
+        // ── Step 4: once every slot is approved, state flips to AUTHENTICATED ───
+        remainingSlots.forEach { slot ->
+            patch(
+                "/api/v1/activity-records/${record.id}/drawing-approvers/${slot.id}",
+                UpdateApprovalRequest(approvedOn = LocalDate.now()),
+                dyce1,
+                DrawingApproverResponse::class.java,
+            )
+        }
 
-        // ── Step 5: DY_CEE sends back (decision CCCC) ─────────────────────────
-        post(
-            "/api/v1/activity-records/${record.id}/drawing-approvers/${dyCeeSlot.id}/send-back",
-            mapOf("comment" to "Cross-section details need revision"),
-            dyCee,
-            Void::class.java,
-        ).also { assertThat(it.statusCode).isIn(HttpStatus.OK, HttpStatus.NO_CONTENT, HttpStatus.CREATED) }
-
-        val afterSendBack =
+        val afterAll =
             get(
                 "/api/v1/activity-records/${record.id}/drawing-approvers",
-                dyCee,
+                dyce1,
                 DrawingApproverListResponse::class.java,
             ).body!!
+        assertThat(afterAll.allApproved).isTrue()
+        assertThat(recordState(record.id))
+            .`as`("record_state must be AUTHENTICATED once every approver slot has an approvedOn date")
+            .isEqualTo("AUTHENTICATED")
 
-        // DY_CEE slot = SENT_BACK; SR_DEN slot still APPROVED (decision CCCC)
-        assertThat(afterSendBack.approvers.find { it.id == dyCeeSlot.id }!!.status)
-            .`as`("DY_CEE slot must be SENT_BACK")
-            .isEqualTo("SENT_BACK")
-        assertThat(afterSendBack.approvers.find { it.id == srDenSlot.id }!!.status)
-            .`as`("SR_DEN slot must remain APPROVED after DY_CEE send-back (decision CCCC)")
-            .isEqualTo("APPROVED")
-        assertThat(afterSendBack.derivedState)
-            .`as`("Drawing derived state must be SENT_BACK (any SENT_BACK row → SENT_BACK)")
-            .isEqualTo("SENT_BACK")
+        // ── Step 5: clearing one slot re-opens it without disturbing the rest ──
+        val clearResp =
+            patch(
+                "/api/v1/activity-records/${record.id}/drawing-approvers/${firstSlot.id}",
+                UpdateApprovalRequest(approvedOn = null),
+                dyce1,
+                DrawingApproverResponse::class.java,
+            )
+        assertThat(clearResp.statusCode).isEqualTo(HttpStatus.OK)
+        assertThat(clearResp.body!!.approvedOn).isNull()
 
-        // ── Step 6: Dy CE/C reapproves (decision BBBB) ───────────────────────
-        postEmpty(
-            "/api/v1/activity-records/${record.id}/reapprove-drawing",
-            dyce1,
-            Void::class.java,
-        ).also { assertThat(it.statusCode).isIn(HttpStatus.OK, HttpStatus.NO_CONTENT, HttpStatus.CREATED) }
-
-        val afterReapprove =
+        val afterClear =
             get(
                 "/api/v1/activity-records/${record.id}/drawing-approvers",
-                dyCee,
+                dyce1,
                 DrawingApproverListResponse::class.java,
             ).body!!
-
-        // DY_CEE slot: SENT_BACK → PENDING; SR_DEN slot: stays APPROVED (decision BBBB)
-        assertThat(afterReapprove.approvers.find { it.id == dyCeeSlot.id }!!.status)
-            .`as`("DY_CEE slot must return to PENDING after reapprove")
-            .isEqualTo("PENDING")
-        assertThat(afterReapprove.approvers.find { it.id == srDenSlot.id }!!.status)
-            .`as`("SR_DEN slot must remain APPROVED after reapprove (decision BBBB: no re-approval needed)")
-            .isEqualTo("APPROVED")
-        assertThat(afterReapprove.derivedState)
-            .`as`("Drawing derived state must be IN_APPROVAL after reapprove")
-            .isEqualTo("IN_APPROVAL")
+        assertThat(afterClear.allApproved).isFalse()
+        assertThat(afterClear.approvers.filter { it.id != firstSlot.id }.all { it.approvedOn != null })
+            .`as`("Clearing one slot must not clear the others")
+            .isTrue()
+        assertThat(recordState(record.id))
+            .`as`("record_state must revert to DRAFT once any slot's approval is cleared")
+            .isEqualTo("DRAFT")
     }
 }
