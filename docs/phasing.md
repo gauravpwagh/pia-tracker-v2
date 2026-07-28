@@ -127,9 +127,11 @@ Same as 2.1, with conditional fields based on structure type.
 
 ### 2.5 Drawings checklist model (1 week)
 
-`drawing_approvers` table. `DrawingService` with state derivation. Drawing-specific endpoints (approve, send-back, edit approvers). The drawing-record edit page with approver list as the central UI element.
+`drawing_approvers` table. `DrawingService` with state derivation. Drawing-specific endpoints (record/clear an approval date, edit approvers). The drawing-record edit page with approver list as the central UI element.
 
-**Gate:** A drawing is created with default approvers (computed from the form definition). Each approver can approve independently. A send-back from one approver flips only that row to SENT_BACK; others unchanged (decision CCCC). Re-submit after addressing the issue sends back to PENDING.
+Originally scoped as a per-user approve/send-back workflow (decision CCCC below refers to that design). `V029__simplify_drawing_approvers.sql` replaced it early in the phase with a simpler record-keeping model — approving authorities don't log in; Dy CE/C records the date each authority's physical sign-off was received. See `docs/workflow.md` § 5 for the model actually shipped.
+
+**Gate (as shipped):** A drawing is created with default approver slots (one per designation in the form definition's `default_approver_designations`). Each slot's approval date can be recorded or cleared independently — recording one slot's date does not affect the others (the surviving spirit of decision CCCC: approvers act independently). `record_state` is DRAFT while any slot is pending, AUTHENTICATED once every slot has a date.
 
 ### 2.6 Drawing form definitions (1 week)
 
@@ -139,9 +141,11 @@ All ~22 drawing form definitions (ESP, SIP, ST/LT, SWR, SWRD, FAT, SAT, RSP, cab
 
 ### 2.7 Drawing approver edit flow (3 days)
 
-Add / remove / reassign approvers. Permission gated to Admin / CE/C / Nodal Dy CE/C (decision AAAA). Removal soft-deletes; addition inserts.
+Add / remove approvers. Permission gated to CE/C / Nodal Dy CE/C / Super Admin (decision AAAA). Removal soft-deletes; addition inserts.
 
-**Gate:** A CE/C adds an unlisted Sr DEN to a drawing. The Sr DEN sees it in their inbox. A Nodal removes an approver who hasn't acted yet; the row goes to is_deleted=true. APPROVED rows preserved on approver-list edits (decision BBBB).
+Originally scoped to include reassigning an existing slot to a different user; post-V029 (see § 2.5) slots are designation-only, so "reassign" no longer applies — replacing a slot is add-a-new-slot + remove-the-old-one. There's also no per-approver inbox notification ("the Sr DEN sees it in their inbox") since slots aren't tied to a `user_id` — see `docs/workflow.md` § 5.
+
+**Gate (as shipped):** A CE/C adds an unlisted designation (not in the form's default approver list) as a new slot. A Nodal removes a slot that hasn't had its approval date recorded yet; the row goes to `is_deleted = true`. A Nodal's attempt to remove an already-approved slot (one with `approved_on` set) is rejected with 409 CONFLICT — the slot and its approval date are preserved (decision BBBB).
 
 ### 2.8 Dashboard expansion: zone scope (1 week)
 

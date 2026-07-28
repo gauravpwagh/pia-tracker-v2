@@ -117,72 +117,47 @@ When all section instances under a record reach `AUTHENTICATED`, a derived `reco
 
 ## 5. Drawings: checklist model (separate from engine)
 
-Drawings live outside the workflow engine entirely. The model is in `database.md` § 7 (`drawing_approvers` table). Engine details:
+Drawings live outside the workflow engine entirely. The model is in `database.md` § 7 (`drawing_approvers` table). Implementation: `DrawingService.kt` / `DrawingController.kt`.
 
-**Lifecycle states (derived).** A drawing's overall state is computed from its `drawing_approvers` rows:
+**This section originally described a per-user approve/send-back workflow (status column, `sendBack()`/`reapprove()`, per-approver notifications and inbox). `V029__simplify_drawing_approvers.sql` deliberately replaced that with a much simpler record-keeping model early in Phase 2 — approving authorities never log in to the system, so the workflow machinery around them was dropped. What follows describes the model actually shipped.**
 
-| If... | Then state is |
+**Lifecycle states (derived).** A drawing's overall state is computed from its `drawing_approvers` rows and cached onto `activity_records.record_state`:
+
+| If... | Then `record_state` is |
 |---|---|
-| No `drawing_approvers` rows exist OR the drawing is editable by Dy CE/C (pre-submission) | `DRAFT` |
-| Any row has `status = SENT_BACK` | `SENT_BACK` |
-| All rows have `status = APPROVED` | `APPROVED` |
-| Otherwise | `IN_APPROVAL` |
+| Any non-deleted row has `approved_on IS NULL` | `DRAFT` |
+| Every non-deleted row has `approved_on` set | `AUTHENTICATED` |
 
-The computation lives in `DrawingService.deriveState(recordId)`. The result caches into `activity_records.record_state` so list queries don't recompute.
+The computation lives in `DrawingService.deriveAndCacheState(recordId)`, called after every write to a record's approver slots (recording/clearing an approval date, or removing a slot).
 
-**Operations.**
+**Schema (post-V029, plus V110).** Each `drawing_approvers` row is a designation-only slot — no `user_id`, no `status` enum:
+
+```
+id, activity_record_id, approval_designation_code, position,
+sent_for_review_on DATE, reviewed_on DATE, approved_on DATE, remarks TEXT, is_deleted
+```
+
+`daysTakenForApproval` (API-only, not stored) is computed on read as `approved_on - sent_for_review_on` when both are set.
+
+**Operations** (`DrawingController.kt`, all under `/api/v1/activity-records/{id}/drawing-approvers`):
 
 ```kotlin
-interface DrawingService {
-    fun create(activityId: UUID, subtype: String, data: JsonNode, creator: Principal): UUID
-    fun submit(recordId: UUID, actor: Principal)               // DRAFT -> IN_APPROVAL
-    fun approve(recordId: UUID, approverId: UUID, actor: Principal, comment: String?)
-    fun sendBack(recordId: UUID, approverId: UUID, actor: Principal, comment: String)
-    fun addApprover(recordId: UUID, designationCode: String, userId: UUID, actor: Principal)
-    fun removeApprover(recordId: UUID, approverId: UUID, actor: Principal)
-    fun reapprove(recordId: UUID, actor: Principal)            // post-send-back, re-submit
+class DrawingService {
+    fun listApprovers(recordId: UUID, principal: PiaPrincipal): DrawingApproverListResponse
+    fun updateApproval(recordId: UUID, approverId: UUID, request: UpdateApprovalRequest, actor: PiaPrincipal): DrawingApproverResponse
+    fun seedDefaultApprovers(recordId: UUID, formDef: FormDefinition, projectZoneId: UUID?)   // called from record creation
+    fun addApprover(recordId: UUID, request: AddApproverRequest, actor: PiaPrincipal): DrawingApproverResponse
+    fun removeApprover(recordId: UUID, approverId: UUID, actor: PiaPrincipal)
 }
 ```
 
-**Creation flow.** On `create()`:
+There is no `submit`, `approve`, `sendBack`, or `reapprove` — recording (or clearing, by passing `approvedOn = null`) a sign-off date via `updateApproval` is the only state-changing action besides adding/removing slots.
 
-1. Read `form_definitions.default_approver_designations` for the drawing subtype's form definition.
-2. For each designation code, query users matching `designation_code = X AND active in (project.zone OR cross-zone grant)`.
-3. If exactly one match → insert `drawing_approvers` row with `user_id` populated.
-4. If multiple match → insert row with `user_id = null`; UI prompts creator to pick at creation time.
-5. If no match → insert row with `user_id = null`; admin/Nodal must fill in later.
-6. Set `position` in order of designation declaration (for display only).
+**Creation flow.** On record creation, `seedDefaultApprovers()` reads `form_definitions.default_approver_designations` for the drawing subtype's form definition and inserts one `drawing_approvers` row per designation code, in declared order (`position` = index). No user matching, no zone lookup — slots are designation-only.
 
-After creation, the list is concrete. Subsequent transfers of users between zones do not affect existing rows (decision HHHH).
+**Approver list edits.** Permission gate: `DRAWING.EDIT_APPROVERS` — currently CE/C, Nodal Dy CE/C, and Super Admin (decision AAAA still holds for who, even though the mechanics changed). `addApprover` inserts a new row with `approved_on = null`. `removeApprover` soft-deletes (`is_deleted = true`) — but is rejected with `409 CONFLICT` if the slot already has `approved_on` set, so an approved sign-off can't be edited away (the surviving half of decision BBBB; there is no longer an "APPROVED rows preserved on edit" nuance to preserve beyond that, since there's no status to preserve).
 
-**Approver list edits.** Permission gate: Admin, project CE/C, or Nodal Dy CE/C (decision AAAA). Soft delete on removal — the row stays in `drawing_approvers` with `is_deleted = true`, visible in history. Adding a new approver inserts a new PENDING row.
-
-**Send-back behavior.** When any approver calls `sendBack()`:
-
-1. That approver's row flips to `SENT_BACK`.
-2. Other approvers' rows remain unchanged (decision CCCC) — APPROVED stays APPROVED, PENDING stays PENDING.
-3. Drawing record state becomes `SENT_BACK`.
-4. Owning Dy CE/C gets a notification.
-
-When the Dy CE/C addresses the comment and calls `reapprove()`:
-
-1. The `SENT_BACK` rows flip back to `PENDING`.
-2. APPROVED rows stay APPROVED (no re-approval needed by default).
-3. Drawing record state becomes `IN_APPROVAL`.
-4. If the Dy CE/C indicates the change is substantive (a checkbox at re-submit), all rows including APPROVED flip to PENDING — a "request re-approval" toggle.
-
-**Inbox query for approvers.** A user's drawing inbox returns:
-
-```sql
-select ar.* from activity_records ar
-join drawing_approvers da on da.activity_record_id = ar.id
-where da.user_id = :user_id
-  and da.status = 'PENDING'
-  and not da.is_deleted
-  and not ar.is_deleted;
-```
-
-A single drawing can appear in multiple users' inboxes simultaneously. The tree-node "Pending: 3 approvers" badge counts `PENDING` rows.
+**No per-approver inbox or notifications.** Because slots are designation-only (no `user_id`), there is no way to compute "drawings pending my action" — `DrawingService` never writes to the `notifications` table. Progress is visible only via the record's `allApproved` flag and the approver list itself (each slot's `approved_on`/`remarks`).
 
 ---
 
