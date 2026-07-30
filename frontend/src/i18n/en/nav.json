@@ -22,11 +22,13 @@
       "project": "Project",
       "activity": "Activity",
       "projectApproval": "Project Approval",
+      "record": "Record",
       "section": "Section",
       "state": "State",
       "daysPending": "Days Pending",
       "slaBreach": "SLA breached",
-      "today": "Today"
+      "today": "Today",
+      "action": "Action"
     },
     "loadFailed": "Failed to load inbox",
     "empty": "Nothing here — you're all caught up!"

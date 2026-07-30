@@ -25,6 +25,10 @@ export interface InboxItem {
   activityName: string | null;
   /** Null for PROJECT items. */
   activityTypeCode: string | null;
+  /** User-supplied record display name; null for record types that don't use one (e.g. Land Acquisition), and for PROJECT items. */
+  recordName: string | null;
+  /** e.g. a drawing's subtype (ESP, SIP, ...); null when the record type has none, or for PROJECT items. */
+  recordSubtype: string | null;
   stateCode: string;
   stateLabel: string;
   /** Whole days since the instance entered its current state. */

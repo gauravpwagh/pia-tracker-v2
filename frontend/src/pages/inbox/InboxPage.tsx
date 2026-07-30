@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Badge,
+  Button,
   Space,
   Spin,
   Table,
@@ -29,6 +30,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { WarningOutlined } from '@ant-design/icons';
 import { fetchInbox, type InboxItem } from '@api/inbox';
+import { useAuthStore } from '@stores/authStore';
 
 const { Title } = Typography;
 
@@ -45,10 +47,46 @@ const STATE_COLORS: Record<string, string> = {
   AWAITING_CEC_ASSIGNMENT: 'processing',
 };
 
+// ── Action-column config ────────────────────────────────────────────────────
+//
+// Buttons navigate to where the action actually lives (the record's edit page,
+// or the project workspace's assign modal) rather than firing the workflow
+// transition inline from the row — mirrors ProjectsPage's row "Action" button
+// (#19), and means an officer can't authenticate/verify a record blind
+// without opening it first.
+
+/** stateCode -> label for the record/section-level next action. */
+const RECORD_ACTION_LABEL: Record<string, string> = {
+  DRAFT: 'Submit',
+  SENT_BACK_TO_DYCE: 'Resubmit',
+  SUBMITTED_FOR_VERIFICATION: 'Verify',
+  SENT_BACK_TO_NODAL: 'Re-verify',
+  VERIFIED: 'Authenticate',
+};
+
+/** stateCode -> label + which ProjectWorkspace assign modal to open for project-lifecycle gates. */
+const PROJECT_ACTION: Record<string, { label: string; assign: 'ce' | 'dy' }> = {
+  AWAITING_CAO_ALLOCATION: { label: 'Allocate CE/C', assign: 'ce' },
+  AWAITING_CEC_ASSIGNMENT: { label: 'Assign Dy CE/C', assign: 'dy' },
+};
+
 // ── Table columns ─────────────────────────────────────────────────────────────
 
 function useColumns(t: ReturnType<typeof useTranslation>['t']): ColumnsType<InboxItem> {
   const navigate = useNavigate();
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const canAllocate = currentUser?.permissions.includes('PROJECT.ALLOCATE') ?? false;
+  const canAssignDyce = currentUser?.permissions.includes('PROJECT.ASSIGN_DYCE') ?? false;
+
+  const openRecord = (row: InboxItem) =>
+    navigate(
+      // project_code is assigned at a later administrative step and is often null —
+      // ProjectWorkspace resolves the :projectCode param by code OR id, so id always works.
+      `/workspace/${row.projectCode || row.projectId}`,
+      row.entityType === 'PROJECT'
+        ? undefined
+        : { state: { openRecord: { activityTypeCode: row.activityTypeCode, recordId: row.recordId } } },
+    );
 
   return [
     {
@@ -56,20 +94,7 @@ function useColumns(t: ReturnType<typeof useTranslation>['t']): ColumnsType<Inbo
       dataIndex: 'projectName',
       key: 'projectName',
       render: (name: string, row: InboxItem) => (
-        <a
-          onClick={() =>
-            navigate(
-              // project_code is assigned at a later administrative step and is often null —
-              // ProjectWorkspace resolves the :projectCode param by code OR id, so id always works.
-              `/workspace/${row.projectCode || row.projectId}`,
-              row.entityType === 'PROJECT'
-                ? undefined
-                : { state: { openRecord: { activityTypeCode: row.activityTypeCode, recordId: row.recordId } } },
-            )
-          }
-        >
-          {name}
-        </a>
+        <a onClick={() => openRecord(row)}>{name}</a>
       ),
     },
     {
@@ -78,6 +103,12 @@ function useColumns(t: ReturnType<typeof useTranslation>['t']): ColumnsType<Inbo
       key: 'activityName',
       render: (name: string | null, row: InboxItem) =>
         row.entityType === 'PROJECT' ? t('inbox.table.projectApproval') : name,
+    },
+    {
+      title: t('inbox.table.record'),
+      key: 'recordName',
+      render: (_: unknown, row: InboxItem) =>
+        row.entityType === 'PROJECT' ? '—' : (row.recordName ?? row.recordSubtype ?? '—'),
     },
     {
       title: t('inbox.table.section'),
@@ -105,6 +136,45 @@ function useColumns(t: ReturnType<typeof useTranslation>['t']): ColumnsType<Inbo
       align: 'right',
       sorter: (a: InboxItem, b: InboxItem) => a.daysPending - b.daysPending,
       render: (days: number) => days === 0 ? t('inbox.table.today') : `${days}d`,
+    },
+    {
+      title: t('inbox.table.action'),
+      key: 'action',
+      width: 130,
+      fixed: 'right' as const,
+      render: (_: unknown, row: InboxItem) => {
+        if (row.entityType === 'PROJECT') {
+          const cfg = PROJECT_ACTION[row.stateCode];
+          const allowed = cfg && (cfg.assign === 'ce' ? canAllocate : canAssignDyce);
+          if (!allowed) return null;
+          return (
+            <Button
+              size="small"
+              type="primary"
+              style={{ background: '#1565c0', borderColor: '#1565c0' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/workspace/${row.projectCode || row.projectId}?view=overview&assign=${cfg.assign}`);
+              }}
+            >
+              {cfg.label}
+            </Button>
+          );
+        }
+        const label = RECORD_ACTION_LABEL[row.stateCode];
+        if (!label) return null;
+        return (
+          <Button
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              openRecord(row);
+            }}
+          >
+            {label}
+          </Button>
+        );
+      },
     },
   ];
 }
@@ -153,6 +223,7 @@ export default function InboxPage() {
           dataSource={awaiting}
           size="small"
           pagination={{ pageSize: 20 }}
+          scroll={{ x: 'max-content' }}
         />
       ),
     },
@@ -170,6 +241,7 @@ export default function InboxPage() {
           dataSource={inProgress}
           size="small"
           pagination={{ pageSize: 20 }}
+          scroll={{ x: 'max-content' }}
         />
       ),
     },
@@ -187,6 +259,7 @@ export default function InboxPage() {
           dataSource={slaBreached}
           size="small"
           pagination={{ pageSize: 20 }}
+          scroll={{ x: 'max-content' }}
         />
       ),
     },
