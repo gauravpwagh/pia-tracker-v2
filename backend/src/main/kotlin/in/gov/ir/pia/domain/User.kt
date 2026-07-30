@@ -2,8 +2,6 @@ package `in`.gov.ir.pia.domain
 
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
-import jakarta.persistence.GeneratedValue
-import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.Version
@@ -13,8 +11,14 @@ import java.util.UUID
 @Entity
 @Table(name = "users")
 class User(
+    // Assigned identifier (Kotlin-side default), matching every other domain entity
+    // in this codebase (Project, ActivityRecord, ...) — NOT @GeneratedValue. Every
+    // prior User row has only ever been created via raw SQL (seed migrations, CSV
+    // import), so this was never exercised until SsoProvisioningService's save()
+    // call: with @GeneratedValue + @Version together, Hibernate's "is this new?"
+    // check misreads an already-non-null client-assigned id as an existing row and
+    // issues an UPDATE instead of an INSERT — 0 rows affected -> StaleObjectStateException.
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
     val id: UUID = UUID.randomUUID(),
     @Column(name = "employee_id", unique = true)
     val employeeId: String? = null,
