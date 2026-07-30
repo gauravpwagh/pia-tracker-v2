@@ -10,6 +10,13 @@ interface UserRepository : JpaRepository<User, UUID> {
     /** Used by the cross-site SSO handoff: JWT `sub` == HRMS id == users.employee_id. */
     fun findByEmployeeIdAndIsActiveTrueAndIsDeletedFalse(employeeId: String): User?
 
+    /**
+     * Unfiltered lookup — used before SSO JIT-provisioning to distinguish "no such
+     * employee_id at all" (safe to auto-create) from "exists but inactive/deleted"
+     * (an admin deliberately deactivated them; must not silently reactivate).
+     */
+    fun findByEmployeeId(employeeId: String): User?
+
     /** Fallback password login: users may sign in with their email as username. */
     fun findByEmailIgnoreCaseAndIsActiveTrueAndIsDeletedFalse(email: String): User?
 

@@ -4,17 +4,16 @@ import `in`.gov.ir.pia.repository.UserRepository
 import `in`.gov.ir.pia.security.DummyAuthFilter.Companion.SESSION_USER_ID_KEY
 import `in`.gov.ir.pia.security.SsoProperties
 import `in`.gov.ir.pia.security.SsoTokenVerifier
+import `in`.gov.ir.pia.service.auth.SsoProvisioningService
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Profile
-import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.server.ResponseStatusException
 
 /**
  * Cross-site SSO handoff landing endpoint. See `sso-poc/INTEGRATION_SPEC.md` for the
@@ -27,8 +26,10 @@ import org.springframework.web.server.ResponseStatusException
  * into the SPA — where the user is already authenticated. Roles/zones/permissions then
  * resolve exactly as they do for normal login.
  *
- * Deny-by-default: users must already be provisioned in PIA (via CSV import — see
- * `scripts/import_users_abcde.py`) to bridge in. No auto-provisioning from the token.
+ * A user not yet provisioned in PIA is created on the spot from the token's claims
+ * (see [SsoProvisioningService]) rather than rejected — this reverses the SSO spec's
+ * original "deny-by-default, no auto-provisioning" policy; see that class's doc
+ * comment for what changed and the security tradeoff accepted in doing so.
  *
  * Gated to dev/beta for now (mirrors [AuthController]); production swaps this to a
  * prod-safe profile once the real partner endpoint and shared secret are live.
@@ -40,6 +41,7 @@ import org.springframework.web.server.ResponseStatusException
 class SsoCallbackController(
     private val userRepository: UserRepository,
     private val ssoTokenVerifier: SsoTokenVerifier,
+    private val ssoProvisioningService: SsoProvisioningService,
 ) {
     private val log = LoggerFactory.getLogger(SsoCallbackController::class.java)
 
@@ -54,26 +56,24 @@ class SsoCallbackController(
         val claims = ssoTokenVerifier.verify(token)
         val sub = claims.subject
 
-        // DEBUG-only, temporary: ABCDE's real tokens carry more claims than this
-        // controller currently uses (designation_code, primary_zone_id, division_code,
-        // phone_number, hrmsid, role, ...) — only sub/iat/exp are read below. This just
-        // prints what ABCDE is actually sending so it can be checked before deciding
-        // whether to start consuming any of it. log.debug is a no-op unless the
-        // in.gov.ir.pia.api.SsoCallbackController logger is explicitly set to DEBUG —
-        // remove once no longer needed.
+        // DEBUG-only: ABCDE's real tokens have been observed carrying more claims than
+        // the original spec documents (designation_code, primary_zone_id, division_code,
+        // phone_number, hrmsid, role, ...) — SsoProvisioningService now reads
+        // designation_code/primary_zone_id for JIT provisioning below. This still prints
+        // the full claim set so a mismatch against the exact key names it expects is
+        // easy to catch. log.debug is a no-op unless the
+        // in.gov.ir.pia.api.SsoCallbackController logger is explicitly set to DEBUG.
         if (log.isDebugEnabled) {
             log.debug("SSO token claims received: {}", claims.claims)
         }
 
-        // Deny-by-default: only officers already provisioned in PIA can bridge in.
-        // Name is intentionally NOT synced from the token — the CSV import is the
-        // source of truth for users.name.
+        // Existing officer bridging in as normal. A user not found here is handed to
+        // SsoProvisioningService, which creates a fully active account from the token's
+        // claims (designation_code/primary_zone_id) rather than rejecting — see that
+        // class's doc comment for the security tradeoff this accepts.
         val user =
             userRepository.findByEmployeeIdAndIsActiveTrueAndIsDeletedFalse(sub)
-                ?: run {
-                    log.warn("SSO callback rejected: reason=USER_NOT_FOUND sub={}", sub)
-                    throw ResponseStatusException(HttpStatus.FORBIDDEN, "No PIA account for this user")
-                }
+                ?: ssoProvisioningService.provisionFromSsoClaims(claims)
 
         // Start PIA's own session; DummyAuthFilter rebuilds the principal on the next request.
         request.getSession(true).setAttribute(SESSION_USER_ID_KEY, user.id.toString())

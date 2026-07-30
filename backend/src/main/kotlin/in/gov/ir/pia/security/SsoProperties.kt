@@ -7,8 +7,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties
  *
  * The partner mints a short-lived HS256 JWT (shared secret) and redirects the user to
  * `/api/v1/sso/callback`; PIA trusts only the signature, never the partner's cookies.
- * Claims are `sub` (Login ID / employee_id), `name`, `iat`, `exp` — nothing else today;
- * the partner may add claims (e.g. designation, zone) later without breaking this.
+ * Claims: `sub` (Login ID / employee_id), `name`, `iat`, `exp`, plus `designation_code`
+ * / `primary_zone_id` — the latter two are read by
+ * [in.gov.ir.pia.service.auth.SsoProvisioningService] to auto-provision a user for an
+ * unrecognized `sub`. See `sso-poc/INTEGRATION_SPEC.md` § 2.
  */
 @ConfigurationProperties(prefix = "pia.sso")
 data class SsoProperties(
